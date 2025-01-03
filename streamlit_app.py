@@ -1,6 +1,7 @@
 import streamlit as st
 from pymongo import MongoClient
 import pandas as pd
+from pandas import json_normalize
 
 # Initialize connection.
 @st.cache_resource
@@ -15,19 +16,18 @@ def init_connection():
 client = init_connection()
 
 # Pull data from the collection.
-# Uses st.cache_data to only rerun when the query changes or after 10 min.
 @st.cache_data(ttl=600)
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(10)  # Limit to the first 10 entries
+    items = collection.find().limit(200)  # Limit to the first 10 entries
     items = list(items)  # Make hashable for st.cache_data
     return items
 
 items = get_data()
 
-# Convert to DataFrame
-df = pd.DataFrame(items)
+# Normalize the JSON data to flatten nested structures
+df = json_normalize(items)
 
 # Display the data in a table format with sortable columns
 st.title('MongoDB Data Viewer')
