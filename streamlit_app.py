@@ -1,16 +1,31 @@
 import streamlit as st
-import json
+from pymongo import MongoClient
 
-# Show title and description.
-st.title("📄 Document question answering")
+# Initialize connection.
+# Uses st.cache_resource to only run once.
+@st.cache_resource
+def init_connection():
+    mongo_connection_string = (
+        f"mongodb+srv://{st.secrets['mongo']['username']}:"
+        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/"
+        f"{st.secrets['mongo']['database']}?retryWrites=true&w=majority"
+    )
+    return MongoClient(mongo_connection_string)
 
-# Load data from data.json.
-try:
-    with open('data.json', 'r') as f:
-        data = json.load(f)
-    # Display the first 10 entries in the JSON file.
-    st.write(data[:10])
-except FileNotFoundError:
-    st.error("The file 'data.json' was not found.")
-except json.JSONDecodeError:
-    st.error("Error decoding JSON from the file 'data.json'.")
+client = init_connection()
+
+# Pull data from the collection.
+# Uses st.cache_data to only rerun when the query changes or after 10 min.
+@st.cache_data(ttl=600)
+def get_data():
+    db = client[st.secrets["mongo"]["database"]]
+    collection = db[st.secrets["mongo"]["collection"]]
+    items = collection.find().limit(10)  # Limit to the first 10 entries
+    items = list(items)  # Make hashable for st.cache_data
+    return items
+
+items = get_data()
+
+# Print results.
+for item in items:
+    st.write(item)
