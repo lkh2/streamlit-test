@@ -1,8 +1,8 @@
 import streamlit as st
 from pymongo import MongoClient
+import pandas as pd
 
 # Initialize connection.
-# Uses st.cache_resource to only run once.
 @st.cache_resource
 def init_connection():
     mongo_connection_string = (
@@ -26,6 +26,9 @@ def get_data():
 
 items = get_data()
 
-# Print results.
-for item in items:
-    st.write(item)
+# Convert to DataFrame
+df = pd.DataFrame(items)
+
+# Display the data in a table format with sortable columns
+st.title('MongoDB Data Viewer')
+st.dataframe(df)
