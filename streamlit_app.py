@@ -20,7 +20,7 @@ client = init_connection()
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(200)  # Limit to the first 10 entries
+    items = collection.find().limit(200)  # Limit to the first 200 entries
     items = list(items)  # Make hashable for st.cache_data
     return items
 
@@ -30,5 +30,5 @@ items = get_data()
 df = json_normalize(items)
 
 # Display the data in a table format with sortable columns
-st.title('MongoDB Data Viewer')
+st.title('Kickstarter Data Viewer')
 st.dataframe(df)
