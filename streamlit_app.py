@@ -6,11 +6,7 @@ from pandas import json_normalize
 # Initialize connection.
 @st.cache_resource
 def init_connection():
-    mongo_connection_string = (
-        f"mongodb+srv://{st.secrets['mongo']['username']}:"
-        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/"
-        f"{st.secrets['mongo']['database']}?retryWrites=true&w=majority"
-    )
+    mongo_connection_string = f"mongodb+srv://{st.secrets['mongo']['username']}:{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/{st.secrets['mongo']['database']}?retryWrites=true&w=majority"
     return MongoClient(mongo_connection_string)
 
 client = init_connection()
