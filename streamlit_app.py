@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit_shadcn_ui as ui
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
@@ -71,4 +72,5 @@ def highlight_state(df):
 # Display the data with styling
 st.title('Kickstarter Data Viewer')
 styled_df = df.style.apply(lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1)
-st.dataframe(styled_df, use_container_width=True)
+
+ui.table(data=styled_df, maxHeight=500)
