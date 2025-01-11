@@ -166,212 +166,106 @@ def generate_table_html(df):
 # Generate table HTML
 header_html, rows_html = generate_table_html(df)
 
-# Create table component template
+# After loading data and before generating table, prepare filter options
+def get_filter_options(df):
+    return {
+        'categories': sorted(['All Categories'] + df['Category'].unique().tolist()),
+        'subcategories': sorted(['All Subcategories'] + df['Subcategory'].unique().tolist()),
+        'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
+        'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
+        'pledged_ranges': ['All Amounts'] + [
+            f"${i}-${j}" for i, j in [(1,99), (100,999), (1000,9999), 
+            (10000,99999), (100000,999999), (1000000,float('inf'))]
+        ],
+        'goal_ranges': ['All Goals'] + [
+            f"${i}-${j}" for i, j in [(1,99), (100,999), (1000,9999), 
+            (10000,99999), (100000,999999), (1000000,float('inf'))]
+        ],
+        'raised_ranges': ['All Percentages'] + [
+            f"{i}%-{j}%" for i, j in [(0,20), (21,40), (41,60), (61,80), (81,100)]
+        ],
+        'date_ranges': [
+            'All Time',
+            'Last Month',
+            'Last 6 Months',
+            'Last Year',
+            'Last 5 Years',
+            'Last 10 Years',
+            'Last 20 Years'
+        ]
+    }
+
+filter_options = get_filter_options(df)
+
+# Update template to include filter controls
 template = f"""
-<div class="table-wrapper">
-    <div class="table-controls">
-        <input type="text" id="table-search" class="search-input" placeholder="Search table...">
+<div class="filter-wrapper">
+    <button class="reset-button" id="resetFilters">
+        <span>Back to Default</span>
+    </button>
+    <div class="filter-controls">
+        <div class="filter-row">
+            <span class="filter-label">Explore</span>
+            <select id="categoryFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['categories'])}
+            </select>
+            <span>&</span>
+            <select id="subcategoryFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['subcategories'])}
+            </select>
+            <span>Projects On</span>
+            <select id="countryFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['countries'])}
+            </select>
+            <span>Sorted By</span>
+            <select id="sortFilter" class="filter-select">
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+            </select>
+        </div>
+        <div class="filter-row">
+            <span class="filter-label">More Flexible, Dynamic Search</span>
+            <select id="stateFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['states'])}
+            </select>
+            <select id="pledgedFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['pledged_ranges'])}
+            </select>
+            <select id="goalFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['goal_ranges'])}
+            </select>
+            <select id="raisedFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['raised_ranges'])}
+            </select>
+            <select id="dateFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['date_ranges'])}
+            </select>
+        </div>
     </div>
-    <div class="table-container">
-        <table id="data-table">
-            <thead>
-                <tr>{header_html}</tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-    </div>
-    <div class="pagination-controls">
-        <button id="prev-page" class="page-btn" aria-label="Previous page">&lt;</button>
-        <div id="page-numbers" class="page-numbers"></div>
-        <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
+    <div class="table-wrapper">
+        <div class="table-controls">
+            <input type="text" id="table-search" class="search-input" placeholder="Search table...">
+        </div>
+        <div class="table-container">
+            <table id="data-table">
+                <thead>
+                    <tr>{header_html}</tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+        </div>
+        <div class="pagination-controls">
+            <button id="prev-page" class="page-btn" aria-label="Previous page">&lt;</button>
+            <div id="page-numbers" class="page-numbers"></div>
+            <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
+        </div>
     </div>
 </div>
 """
 
-# Create table component script with improved search and pagination
-script = """
-    // Helper functions
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
-        };
-    }
-
-    function createRegexPattern(searchTerm) {
-        if (!searchTerm) return null;
-        const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
-        const escapedWords = words.map(word => 
-            word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
-        );
-        return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
-    }
-
-    function updateTableRows(rows, currentPage, pageSize) {
-        const start = (currentPage - 1) * pageSize;
-        const end = start + pageSize;
-        
-        rows.forEach((row, index) => {
-            row.style.display = (index >= start && index < end) ? '' : 'none';
-        });
-    }
-
-    class TableManager {
-        constructor() {
-            this.searchInput = document.getElementById('table-search');
-            this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
-            this.visibleRows = this.allRows;
-            this.currentPage = 1;
-            this.pageSize = 10;
-            this.initialize();
-        }
-
-        initialize() {
-            this.setupSearch();
-            this.setupPagination();
-            this.updateTable();
-        }
-
-        setupSearch() {
-            const debouncedSearch = debounce((searchTerm) => {
-                if (!searchTerm) {
-                    this.visibleRows = this.allRows;
-                } else {
-                    const pattern = createRegexPattern(searchTerm);
-                    this.visibleRows = this.allRows.filter(row => {
-                        const text = row.textContent || row.innerText;
-                        return pattern.test(text);
-                    });
-                }
-                this.currentPage = 1;
-                this.updateTable();
-            }, 300);
-
-            this.searchInput.addEventListener('input', (e) => {
-                debouncedSearch(e.target.value.trim().toLowerCase());
-            });
-        }
-
-        setupPagination() {
-            document.getElementById('prev-page').onclick = () => this.previousPage();
-            document.getElementById('next-page').onclick = () => this.nextPage();
-            window.handlePageClick = (page) => this.goToPage(page);
-        }
-
-        updateTable() {
-            // Hide all rows first
-            this.allRows.forEach(row => row.style.display = 'none');
-            
-            // Show only visible rows for current page
-            const start = (this.currentPage - 1) * this.pageSize;
-            const end = start + this.pageSize;
-            this.visibleRows.slice(start, end).forEach(row => {
-                row.style.display = '';
-            });
-
-            this.updatePagination();
-            this.adjustHeight();
-        }
-
-        updatePagination() {
-            const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
-            const pageNumbers = this.generatePageNumbers(totalPages);
-            const container = document.getElementById('page-numbers');
-            
-            container.innerHTML = pageNumbers.map(page => {
-                if (page === '...') {
-                    return '<span class="page-ellipsis">...</span>';
-                }
-                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
-                    ${page === this.currentPage ? 'disabled' : ''} 
-                    onclick="handlePageClick(${page})">${page}</button>`;
-            }).join('');
-
-            document.getElementById('prev-page').disabled = this.currentPage <= 1;
-            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
-            
-            console.log(`Showing page ${this.currentPage} of ${totalPages}, ${this.visibleRows.length} total rows`);
-        }
-
-        generatePageNumbers(totalPages) {
-            let pages = [];
-            if (totalPages <= 10) {
-                pages = Array.from({length: totalPages}, (_, i) => i + 1);
-            } else {
-                if (this.currentPage <= 7) {
-                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
-                } else if (this.currentPage >= totalPages - 6) {
-                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
-                } else {
-                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
-                }
-            }
-            return pages;
-        }
-
-        previousPage() {
-            if (this.currentPage > 1) {
-                this.currentPage--;
-                this.updateTable();
-            }
-        }
-
-        nextPage() {
-            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            if (this.currentPage < totalPages) {
-                this.currentPage++;
-                this.updateTable();
-            }
-        }
-
-        goToPage(page) {
-            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            if (page >= 1 && page <= totalPages) {
-                this.currentPage = page;
-                this.updateTable();
-            }
-        }
-
-        adjustHeight() {
-            requestAnimationFrame(() => {
-                const wrapper = document.querySelector('.table-wrapper');
-                const table = document.querySelector('.table-container');
-                const controls = document.querySelector('.table-controls');
-                const pagination = document.querySelector('.pagination-controls');
-                
-                if (wrapper && table && controls && pagination) {
-                    const totalHeight = wrapper.scrollHeight;
-                    const padding = 40; // Extra padding for visual comfort
-                    
-                    // Set a minimum height of 400px or content height, whichever is larger
-                    const minHeight = Math.max(totalHeight + padding, 400);
-                    Streamlit.setFrameHeight(minHeight);
-                }
-            });
-        }
-    }
-
-    function onRender(event) {
-        if (!window.rendered) {
-            window.tableManager = new TableManager();
-            window.rendered = true;
-            
-            // Add resize observer to handle dynamic content changes
-            const resizeObserver = new ResizeObserver(() => {
-                window.tableManager.adjustHeight();
-            });
-            resizeObserver.observe(document.querySelector('.table-wrapper'));
-        }
-    }
-
-    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
-    Streamlit.setComponentReady();
-"""
-
-# Add CSS styles
+# Add new CSS styles
 css = """
 <style>
     .table-controls { 
@@ -558,7 +452,364 @@ css = """
     .hidden-cell {
         display: none;
     }
+
+    .filter-wrapper {
+        position: relative;
+        width: 100%;
+        background: #ffffff;
+        border-radius: 20px;
+        margin-bottom: 20px;
+    }
+
+    .filter-controls {
+        padding: 15px;
+        border-bottom: 1px solid #eee;
+    }
+
+    .filter-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+
+    .filter-label {
+        font-family: 'Poppins';
+        font-size: 14px;
+        color: #333;
+        white-space: nowrap;
+    }
+
+    .filter-select {
+        padding: 6px 12px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        font-family: 'Poppins';
+        font-size: 12px;
+        min-width: 120px;
+        background: #fff;
+    }
+
+    .filter-select:focus {
+        outline: none;
+        border-color: #5932EA;
+        box-shadow: 0 0 0 2px rgba(89, 50, 234, 0.1);
+    }
+
+    .reset-button {
+        position: absolute;
+        left: -40px;
+        top: 0;
+        height: 100%;
+        width: 40px;
+        background: #5932EA;
+        color: white;
+        border: none;
+        border-radius: 8px 0 0 8px;
+        cursor: pointer;
+        padding: 0;
+    }
+
+    .reset-button span {
+        transform: rotate(-90deg);
+        white-space: nowrap;
+        display: block;
+        font-family: 'Poppins';
+        font-size: 12px;
+        letter-spacing: 1px;
+    }
+
+    .reset-button:hover {
+        background: #4a29bb;
+    }
 </style>
+"""
+
+# Create table component script with improved search and pagination
+script = """
+    // Helper functions
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    function createRegexPattern(searchTerm) {
+        if (!searchTerm) return null;
+        const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
+        const escapedWords = words.map(word => 
+            word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
+        );
+        return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
+    }
+
+    function updateTableRows(rows, currentPage, pageSize) {
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+        
+        rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
+        });
+    }
+
+    class TableManager {
+        constructor() {
+            this.searchInput = document.getElementById('table-search');
+            this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
+            this.visibleRows = this.allRows;
+            this.currentPage = 1;
+            this.pageSize = 10;
+            this.initialize();
+            this.setupFilters();
+        }
+
+        initialize() {
+            this.setupSearch();
+            this.setupPagination();
+            this.updateTable();
+        }
+
+        setupSearch() {
+            const debouncedSearch = debounce((searchTerm) => {
+                if (!searchTerm) {
+                    this.visibleRows = this.allRows;
+                } else {
+                    const pattern = createRegexPattern(searchTerm);
+                    this.visibleRows = this.allRows.filter(row => {
+                        const text = row.textContent || row.innerText;
+                        return pattern.test(text);
+                    });
+                }
+                this.currentPage = 1;
+                this.updateTable();
+            }, 300);
+
+            this.searchInput.addEventListener('input', (e) => {
+                debouncedSearch(e.target.value.trim().toLowerCase());
+            });
+        }
+
+        setupPagination() {
+            document.getElementById('prev-page').onclick = () => this.previousPage();
+            document.getElementById('next-page').onclick = () => this.nextPage();
+            window.handlePageClick = (page) => this.goToPage(page);
+        }
+
+        updateTable() {
+            // Hide all rows first
+            this.allRows.forEach(row => row.style.display = 'none');
+            
+            // Show only visible rows for current page
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = start + this.pageSize;
+            this.visibleRows.slice(start, end).forEach(row => {
+                row.style.display = '';
+            });
+
+            this.updatePagination();
+            this.adjustHeight();
+        }
+
+        updatePagination() {
+            const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
+            const pageNumbers = this.generatePageNumbers(totalPages);
+            const container = document.getElementById('page-numbers');
+            
+            container.innerHTML = pageNumbers.map(page => {
+                if (page === '...') {
+                    return '<span class="page-ellipsis">...</span>';
+                }
+                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
+                    ${page === this.currentPage ? 'disabled' : ''} 
+                    onclick="handlePageClick(${page})">${page}</button>`;
+            }).join('');
+
+            document.getElementById('prev-page').disabled = this.currentPage <= 1;
+            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
+            
+            console.log(`Showing page ${this.currentPage} of ${totalPages}, ${this.visibleRows.length} total rows`);
+        }
+
+        generatePageNumbers(totalPages) {
+            let pages = [];
+            if (totalPages <= 10) {
+                pages = Array.from({length: totalPages}, (_, i) => i + 1);
+            } else {
+                if (this.currentPage <= 7) {
+                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+                } else if (this.currentPage >= totalPages - 6) {
+                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+                } else {
+                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
+                }
+            }
+            return pages;
+        }
+
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
+            }
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
+            }
+        }
+
+        goToPage(page) {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (page >= 1 && page <= totalPages) {
+                this.currentPage = page;
+                this.updateTable();
+            }
+        }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const wrapper = document.querySelector('.table-wrapper');
+                const table = document.querySelector('.table-container');
+                const controls = document.querySelector('.table-controls');
+                const pagination = document.querySelector('.pagination-controls');
+                
+                if (wrapper && table && controls && pagination) {
+                    const totalHeight = wrapper.scrollHeight;
+                    const padding = 40; // Extra padding for visual comfort
+                    
+                    // Set a minimum height of 400px or content height, whichever is larger
+                    const minHeight = Math.max(totalHeight + padding, 400);
+                    Streamlit.setFrameHeight(minHeight);
+                }
+            });
+        }
+
+        setupFilters() {
+            const filterIds = [
+                'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
+                'pledgedFilter', 'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter'
+            ];
+            
+            filterIds.forEach(id => {
+                document.getElementById(id).addEventListener('change', () => this.applyFilters());
+            });
+
+            document.getElementById('resetFilters').addEventListener('click', () => this.resetFilters());
+        }
+
+        resetFilters() {
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => select.selectedIndex = 0);
+            this.applyFilters();
+        }
+
+        applyFilters() {
+            const filters = {
+                category: document.getElementById('categoryFilter').value,
+                subcategory: document.getElementById('subcategoryFilter').value,
+                country: document.getElementById('countryFilter').value,
+                state: document.getElementById('stateFilter').value,
+                pledged: document.getElementById('pledgedFilter').value,
+                goal: document.getElementById('goalFilter').value,
+                raised: document.getElementById('raisedFilter').value,
+                date: document.getElementById('dateFilter').value,
+                sort: document.getElementById('sortFilter').value
+            };
+
+            this.visibleRows = this.allRows.filter(row => {
+                const cells = Array.from(row.cells);
+                const rowData = {
+                    category: cells[6].textContent,
+                    subcategory: cells[7].textContent,
+                    country: cells[4].textContent,
+                    state: cells[5].textContent.toLowerCase(),
+                    pledged: parseFloat(cells[2].textContent.replace(/[^0-9.-]+/g,"")),
+                    goal: parseFloat(cells[9].textContent.replace(/[^0-9.-]+/g,"")),
+                    raised: parseFloat(cells[10].textContent),
+                    date: new Date(cells[8].textContent)
+                };
+
+                return this.matchesFilters(rowData, filters);
+            });
+
+            if (filters.sort !== 'none') {
+                this.sortRows(filters.sort);
+            }
+
+            this.currentPage = 1;
+            this.updateTable();
+        }
+
+        matchesFilters(rowData, filters) {
+            if (filters.category !== 'All Categories' && rowData.category !== filters.category) return false;
+            if (filters.subcategory !== 'All Subcategories' && rowData.subcategory !== filters.subcategory) return false;
+            if (filters.country !== 'All Countries' && rowData.country !== filters.country) return false;
+            if (filters.state !== 'All States' && !rowData.state.includes(filters.state.toLowerCase())) return false;
+
+            // Handle range filters
+            if (filters.pledged !== 'All Amounts') {
+                const [min, max] = filters.pledged.split('-').map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                if (rowData.pledged < min || (max && rowData.pledged > max)) return false;
+            }
+
+            if (filters.goal !== 'All Goals') {
+                const [min, max] = filters.goal.split('-').map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                if (rowData.goal < min || (max && rowData.goal > max)) return false;
+            }
+
+            if (filters.raised !== 'All Percentages') {
+                const [min, max] = filters.raised.split('-').map(v => parseFloat(v));
+                if (rowData.raised < min || rowData.raised > max) return false;
+            }
+
+            if (filters.date !== 'All Time') {
+                const now = new Date();
+                let compareDate = new Date();
+                
+                switch(filters.date) {
+                    case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
+                    case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
+                    case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
+                    case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
+                    case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
+                    case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
+                }
+                
+                if (rowData.date < compareDate) return false;
+            }
+
+            return true;
+        }
+
+        sortRows(sortType) {
+            this.visibleRows.sort((a, b) => {
+                const dateA = new Date(a.cells[8].textContent);
+                const dateB = new Date(b.cells[8].textContent);
+                return sortType === 'newest' ? dateB - dateA : dateA - dateB;
+            });
+        }
+    }
+
+    function onRender(event) {
+        if (!window.rendered) {
+            window.tableManager = new TableManager();
+            window.rendered = true;
+            
+            // Add resize observer to handle dynamic content changes
+            const resizeObserver = new ResizeObserver(() => {
+                window.tableManager.adjustHeight();
+            });
+            resizeObserver.observe(document.querySelector('.table-wrapper'));
+        }
+    }
+
+    Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+    Streamlit.setComponentReady();
 """
 
 # Create and use the component
