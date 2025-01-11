@@ -230,25 +230,32 @@ script = """
         updateTable() {
             updateTableRows(this.visibleRows, this.currentPage, this.pageSize);
             updatePaginationControls(this.visibleRows.length, this.currentPage, this.pageSize);
-            this.adjustHeight();
         }
 
-        adjustHeight() {
-            // Calculate total content height
-            const wrapper = document.querySelector('.table-wrapper');
-            const controls = document.querySelector('.table-controls');
-            const table = document.querySelector('.table-container');
-            const pagination = document.querySelector('.pagination-controls');
-            
-            if (wrapper && table) {
-                // Add extra padding and ensure all elements are visible
-                const totalHeight = controls.offsetHeight + 
-                                  table.offsetHeight + 
-                                  pagination.offsetHeight + 
-                                  50; // extra padding
-                
-                Streamlit.setFrameHeight(totalHeight);
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
             }
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
+            }
+        }
+
+        updateVisibleRows(searchTerm) {
+            if (!searchTerm) {
+                this.visibleRows = this.allRows;
+            } else {
+                const pattern = createRegexPattern(searchTerm);
+                this.visibleRows = this.allRows.filter(row => pattern.test(row.textContent));
+            }
+            this.currentPage = 1;
+            this.updateTable();
         }
     }
 
@@ -271,13 +278,12 @@ script = """
             debouncedSearch(e.target.value.trim().toLowerCase());
         });
 
-        // Initial setup
+        // Set initial table state
         pagination.updateTable();
         
-        // Add window resize handler
-        window.addEventListener('resize', () => {
-            pagination.adjustHeight();
-        });
+        // Adjust frame height after table is visible
+        const tableHeight = document.querySelector('.table-wrapper').offsetHeight;
+        Streamlit.setFrameHeight(tableHeight + 50);
     }
 
     function onRender(event) {
@@ -300,7 +306,6 @@ css = """
         padding: 20px;
         width: 100%;
         background: #ffffff;
-        min-height: 200px; /* Ensure minimum height */
     }
     table { 
         border-collapse: collapse; 
@@ -336,9 +341,7 @@ css = """
         width: 100%; 
         background: #ffffff;
         border-radius: 20px;
-        overflow: visible; /* Changed from auto to visible */
-        display: flex;
-        flex-direction: column;
+        overflow-x: auto;
     }
     .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
     .search-input { 
@@ -355,13 +358,11 @@ css = """
         border-radius: 4px; text-align: center; font-weight: 500;
     }
     .pagination-controls {
-        position: relative; /* Ensure pagination stays in flow */
         display: flex;
         justify-content: flex-end;
         align-items: center;
         padding: 1rem;
         gap: 0.5rem;
-        background: #ffffff;
     }
     
     .page-btn {
