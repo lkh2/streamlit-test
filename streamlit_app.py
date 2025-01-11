@@ -13,6 +13,9 @@ st.markdown(
         [data-testid="stAppViewContainer"] {
             background: linear-gradient(180deg, #2A5D4E 0%, #65897F 50%, #2A5D4E 100%);
         }  
+        [data-testid="stHeader"] {
+            background: #2A5D4E;
+        }  
     </style>
     """,
     unsafe_allow_html=True
@@ -227,24 +230,26 @@ filter_options = get_filter_options(df)
 # Update template to include filter controls with default subcategory
 template = f"""
 <div class="filter-wrapper">
-    <button class="reset-button" id="resetFilters">
-        <span>Back to Default</span>
-    </button>
+    <div class="reset-wrapper">
+        <button class="reset-button" id="resetFilters">
+            <span>Default</span>
+        </button>
+    </div>
     <div class="filter-controls">
         <div class="filter-row">
             <span class="filter-label">Explore</span>
             <select id="categoryFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['categories'])}
             </select>
-            <span>&</span>
+            <span class="filter-label">&</span>
             <select id="subcategoryFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}" {"selected" if opt == "All Subcategories" else ""}>{opt}</option>' for opt in filter_options['subcategories'])}
             </select>
-            <span>Projects On</span>
+            <span class="filter-label">Projects On</span>
             <select id="countryFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['countries'])}
             </select>
-            <span>Sorted By</span>
+            <span class="filter-label">Sorted By</span>
             <select id="sortFilter" class="filter-select">
                 <option value="newest">Newest First</option>
                 <option value="oldest">Oldest First</option>
@@ -489,13 +494,18 @@ css = """
     }
 
     .filter-wrapper {
-        position: relative;
         width: 100%;
-        background: #ffffff;
+        background: transparent;
         border-radius: 20px;
         margin-bottom: 20px;
         min-height: 120px;
-        z-index: 3;
+        display: flex;
+        flex-direction: row;
+    }
+    
+    .reset-wrapper {
+        width: auto;
+        height: auto;
     }
 
     .filter-controls {
@@ -534,12 +544,9 @@ css = """
     }
 
     .reset-button {
-        position: absolute;
-        left: -40px;
-        top: 0;
         height: 100%;
         width: 40px;
-        background: #5932EA;
+        background: transparent;
         color: white;
         border: none;
         border-radius: 8px 0 0 8px;
