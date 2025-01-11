@@ -98,21 +98,41 @@ items = get_data()
 
 # Create DataFrame and restructure columns
 df = json_normalize(items)
+
+# Calculate additional columns first
+df['Goal'] = df['data.goal'].astype(float) * df['data.usd_exchange_rate'].astype(float)
+df['%Raised'] = (df['data.converted_pledged_amount'].astype(float) / df['Goal']) * 100
+
 df = df[[ 
     'data.name', 
     'data.creator.name', 
     'data.converted_pledged_amount', 
     'data.urls.web.project', 
     'data.location.expanded_country', 
-    'data.state' 
+    'data.state',
+    # Hidden columns
+    'data.category.parent_name',
+    'data.category.name',
+    'data.created_at',
+    'Goal',
+    '%Raised'
 ]].rename(columns={ 
     'data.name': 'Project Name', 
     'data.creator.name': 'Creator', 
     'data.converted_pledged_amount': 'Pledged Amount', 
     'data.urls.web.project': 'Link', 
     'data.location.expanded_country': 'Country', 
-    'data.state': 'State' 
+    'data.state': 'State',
+    # Hidden columns
+    'data.category.parent_name': 'Category',
+    'data.category.name': 'Subcategory',
+    'data.created_at': 'Date',
 })
+
+# Add formatting for numeric columns
+df['Goal'] = df['Goal'].apply(lambda x: f"${x:,.2f}")
+df['Pledged Amount'] = df['Pledged Amount'].apply(lambda x: f"${float(x):,.2f}")
+df['%Raised'] = df['%Raised'].apply(lambda x: f"{x:.1f}%")
 
 # Convert object columns to string
 object_columns = df.select_dtypes(include=['object']).columns
@@ -127,14 +147,19 @@ def style_state(state):
 df['State'] = df['State'].apply(style_state)
 
 def generate_table_html(df):
-    # Generate table header with scope attribute and width
-    header_html = ''.join(f'<th scope="col">{column}</th>' for column in df.columns)
+    # Define visible columns
+    visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
     
-    # Generate table rows
+    # Generate header for visible columns only
+    header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
+    
+    # Generate table rows with all columns but hide some
     rows_html = ''
     for _, row in df.iterrows():
-        cells = ''.join(f'<td>{value}</td>' for value in row)
-        rows_html += f'<tr class="table-row">{cells}</tr>'
+        visible_cells = ''.join(f'<td>{row[col]}</td>' for col in visible_columns)
+        hidden_cells = ''.join(f'<td class="hidden-cell">{row[col]}</td>' 
+                             for col in df.columns if col not in visible_columns)
+        rows_html += f'<tr class="table-row">{visible_cells}{hidden_cells}</tr>'
     
     return header_html, rows_html
 
@@ -467,7 +492,7 @@ css = """
         border: 1px solid #ddd; 
         border-radius: 20px; 
         width: 200px; 
-        font-size: 12px; 
+        font-size: 10px; 
         font-family: 'Poppins'; 
     }
 
@@ -528,6 +553,10 @@ css = """
     .page-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+    }
+
+    .hidden-cell {
+        display: none;
     }
 </style>
 """
