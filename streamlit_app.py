@@ -1,4 +1,6 @@
 import streamlit as st
+import streamlit.components.v1 as components
+import random as rd
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
@@ -73,44 +75,52 @@ def generate_table_html(df):
 # Generate table HTML
 header_html, rows_html = generate_table_html(df)
 
-# Create the complete HTML string
-html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-<style>
-    .table-container {{ display: flex; justify-content: center; padding: 20px; }}
-    table {{ border-collapse: collapse; width: 80%; max-width: 1200px; }}
-    th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
-    td:has(.state_cell) {{ justify-items: center; }}
-    .state_cell {{ width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }}
-    .state-canceled, .state-failed, .state-suspended {{ 
-        background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
-    }}
-    .state-successful {{ 
-        background: #16C09861; color: #00B087; border-color: #00B087; 
-    }}
-    .state-live, .state-submitted {{ 
-        background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
-    }}
-    .table-wrapper {{ width: 100%; max-width: 1200px; margin: 0 auto; }}
-    .table-controls {{ display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }}
-    .search-input {{ 
-        padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
-        width: 200px; font-size: 14px; 
-    }}
-    .search-input:focus {{ 
-        outline: none; border-color: #0066CC; 
-        box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1); 
-    }}
-    .noscript-warning {{
-        background-color: #fff3cd; color: #856404; padding: 12px;
-        margin-bottom: 20px; border: 1px solid #ffeeba;
-        border-radius: 4px; text-align: center; font-weight: 500;
-    }}
-</style>
-</head>
-<body>
+css = """
+.table-container { display: flex; justify-content: center; padding: 20px; }
+table { border-collapse: collapse; width: 80%; max-width: 1200px; }
+th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+td:has(.state_cell) { justify-items: center; }
+.state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
+.state-canceled, .state-failed, .state-suspended { 
+    background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
+}
+.state-successful { 
+    background: #16C09861; color: #00B087; border-color: #00B087; 
+}
+.state-live, .state-submitted { 
+    background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
+}
+.table-wrapper { width: 100%; max-width: 1200px; margin: 0 auto; }
+.table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
+.search-input { 
+    padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
+    width: 200px; font-size: 14px; 
+}
+.search-input:focus { 
+    outline: none; border-color: #0066CC; 
+    box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1); 
+}
+.noscript-warning {
+    background-color: #fff3cd; color: #856404; padding: 12px;
+    margin-bottom: 20px; border: 1px solid #ffeeba;
+    border-radius: 4px; text-align: center; font-weight: 500;
+}
+"""
+
+def InjectJs(js: str, atEveryRerun: bool = False) -> None:
+    components.html(
+        "<script type='text/javascript'>\n" +
+        (f"// random number: {rd.random()}\n" if atEveryRerun else "") +
+        "element = Array.from(parent.document.getElementsByTagName('iframe'))" +
+        ".find(x => x.contentDocument == document).parentElement;\n" +
+        "element.style.display = 'none';\n" +
+        js + "\n</script>",
+        height=0,
+    )
+
+# Generate table HTML as a basic component
+components.html(
+    f"""
     <div class="table-wrapper">
         <div class="table-controls">
             <input type="text" id="table-search" class="search-input" placeholder="Search table...">
@@ -126,33 +136,34 @@ html_content = f"""
             </table>
         </div>
     </div>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js" defer></script>
-    <script defer>
-        document.addEventListener('DOMContentLoaded', () => {{
-            const searchInput = document.getElementById('table-search');
-            const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
+    <style>
+        {css}
+    </style>
+    """,
+    height=600
+)
+
+# Inject search functionality
+search_js = """
+document.addEventListener('DOMContentLoaded', () => {
+    const searchInput = document.getElementById('table-search');
+    const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
+    
+    let searchTimeout;
+    
+    searchInput.addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        
+        searchTimeout = setTimeout(() => {
+            const searchTerm = e.target.value.toLowerCase();
             
-            let searchTimeout;
-            
-            searchInput.addEventListener('input', (e) => {{
-                clearTimeout(searchTimeout);
-                
-                searchTimeout = setTimeout(() => {{
-                    const searchTerm = e.target.value.toLowerCase();
-                    
-                    tableRows.forEach(row => {{
-                        const text = row.textContent.toLowerCase();
-                        row.style.display = text.includes(searchTerm) ? '' : 'none';
-                    }});
-                }}, 300);
-            }});
-            
-            console.log('Search functionality initialized');
-        }});
-    </script>
-</body>
-</html>
+            tableRows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                row.style.display = text.includes(searchTerm) ? '' : 'none';
+            });
+        }, 300);
+    });
+});
 """
 
-# Display the data
-st.markdown(html_content, unsafe_allow_html=True)
+InjectJs(search_js, atEveryRerun=True)
