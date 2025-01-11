@@ -3,13 +3,14 @@ import streamlit_shadcn_ui as ui
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
+from streamlit_shadcn_ui import table
 
 # Initialize connection.
 @st.cache_resource
 def init_connection():
     mongo_connection_string = (
-        f"mongodb+srv://{st.secrets['mongo']['username']}:"
-        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/"
+        f"mongodb+srv://{st.secrets['mongo']['username']}:" 
+        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/" 
         f"{st.secrets['mongo']['database']}?retryWrites=true&w=majority"
     )
     return MongoClient(mongo_connection_string)
@@ -51,25 +52,37 @@ df = df[[
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
-# Create styling function
-def style_state(val):
-    styles = {
-        'canceled': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'failed': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'suspended': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'successful': 'background-color: #16C09861; border: 1px solid #00B087; border-radius: 1px;',
-        'live': 'background-color: #E6F3FF; border: 1px solid #0066CC; border-radius: 1px;',
-        'submitted': 'background-color: #F0F0F0; border: 1px solid #808080; border-radius: 1px;'
-    }
-    return styles.get(val.lower(), '')
+# Add custom CSS for state styling
+st.markdown("""
+<style>
+.state-cell {
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-align: center;
+}
+.state-canceled, .state-failed, .state-suspended {
+    background-color: #FFC5C5;
+    color: #DF0404;
+}
+.state-successful {
+    background-color: #16C09861;
+    color: #00B087;
+}
+.state-live {
+    background-color: #E6F3FF;
+    color: #0066CC;
+}
+.state-submitted {
+    background-color: #F0F0F0;
+    color: #808080;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# Apply styling
-def highlight_state(df):
-    return pd.DataFrame('', index=df.index, columns=df.columns).style.apply(
-        lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1
-    )
+# Modify the State column to include HTML styling
+df['State'] = df['State'].apply(lambda x: f'<div class="state-cell state-{x.lower()}">{x}</div>')
 
-# Display the data with styling
+# Display the data with Shadcn UI table
 st.title('Kickstarter Data Viewer')
 styled_df = df.style.apply(lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1)
 
