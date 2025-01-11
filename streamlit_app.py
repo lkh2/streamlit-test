@@ -63,40 +63,9 @@ columns = [
     {"key": "State", "title": "State"}
 ]
 
-# Add CSS for state styling
-st.markdown("""
-<style>
-.state-cell {
-    padding: 4px 8px;
-    border-radius: 4px;
-    text-align: center;
-    display: inline-block;
-}
-.canceled, .failed, .suspended { 
-    background-color: #FFC5C5;
-    color: #DF0404;
-}
-.successful {
-    background-color: #16C09861;
-    color: #00B087;
-}
-.live {
-    background-color: #E6F3FF;
-    color: #0066CC;
-}
-.submitted {
-    background-color: #F0F0F0;
-    color: #808080;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# Format state column with HTML
-df['State'] = df['State'].apply(lambda x: f'<div class="state-cell {x.lower()}">{x}</div>')
-
 # Display table
 ui.table(
     data=df,
     columns=columns,
-    maxHeight=500
+    maxHeight=200
 )
