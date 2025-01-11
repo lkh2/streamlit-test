@@ -497,13 +497,14 @@ css = """
         padding: 0 6px;
         border: 1px solid #ddd;
         background: #fff;
-        border-radius: 4px;
+        border-radius: 8px;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 14px;
+        font-size: 12px;
         color: #333;
+        font-family: 'Poppins';
     }
 
     .page-number:hover:not(:disabled),
@@ -513,9 +514,9 @@ css = """
     }
 
     .page-number.active {
-        background: #0066CC;
+        background: #5932EA;
         color: white;
-        border-color: #0066CC;
+        border-color: #5932EA;
     }
 
     .page-ellipsis {
