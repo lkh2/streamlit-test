@@ -138,7 +138,7 @@ def generate_table_html(df):
 # Generate table HTML
 header_html, rows_html = generate_table_html(df)
 
-# Create table component template (without CSS)
+# Create table component template
 template = f"""
 <div class="table-wrapper">
     <div class="table-controls">
@@ -157,54 +157,21 @@ template = f"""
 </div>
 """
 
-# Create table component script with CSS injection
+# Create table component script
 script = """
-    function injectStyles(css) {
-        const style = document.createElement('style');
-        style.textContent = css;
-        document.head.appendChild(style);
-    }
-
     function onRender(event) {
         if (!window.rendered) {
-            // Inject CSS
-            const styles = `
-                .table-container { display: flex; justify-content: center; padding: 20px; }
-                table { border-collapse: collapse; width: 80%; max-width: 1200px; }
-                th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-                td:has(.state_cell) { justify-items: center; }
-                .state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
-                .state-canceled, .state-failed, .state-suspended { 
-                    background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
-                }
-                .state-successful { 
-                    background: #16C09861; color: #00B087; border-color: #00B087; 
-                }
-                .state-live, .state-submitted { 
-                    background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
-                }
-                .table-wrapper { width: 100%; max-width: 1200px; margin: 0 auto; }
-                .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
-                .search-input { 
-                    padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
-                    width: 200px; font-size: 14px; 
-                }
-                .search-input:focus { 
-                    outline: none; border-color: #0066CC; 
-                    box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1); 
-                }
-            `;
-            injectStyles(styles);
-
-            // Initialize search functionality
             const searchInput = document.getElementById('table-search');
             const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
             
             let searchTimeout;
+            
             searchInput.addEventListener('input', (e) => {
                 clearTimeout(searchTimeout);
+                
                 searchTimeout = setTimeout(() => {
                     const searchTerm = e.target.value.toLowerCase();
+                    
                     tableRows.forEach(row => {
                         const text = row.textContent.toLowerCase();
                         row.style.display = text.includes(searchTerm) ? '' : 'none';
@@ -221,6 +188,41 @@ script = """
     Streamlit.setComponentReady();
 """
 
-# Create and use the component (without CSS in template)
-table_component = gensimplecomponent('searchable_table', template=template, script=script)
+# Add CSS styles
+css = """
+<style>
+    .table-container { display: flex; justify-content: center; padding: 20px; }
+    table { border-collapse: collapse; width: 80%; max-width: 1200px; }
+    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+    td:has(.state_cell) { justify-items: center; }
+    .state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
+    .state-canceled, .state-failed, .state-suspended { 
+        background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
+    }
+    .state-successful { 
+        background: #16C09861; color: #00B087; border-color: #00B087; 
+    }
+    .state-live, .state-submitted { 
+        background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
+    }
+    .table-wrapper { width: 100%; max-width: 1200px; margin: 0 auto; }
+    .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
+    .search-input { 
+        padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
+        width: 200px; font-size: 14px; 
+    }
+    .search-input:focus { 
+        outline: none; border-color: #0066CC; 
+        box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1); 
+    }
+    .noscript-warning {
+        background-color: #fff3cd; color: #856404; padding: 12px;
+        margin-bottom: 20px; border: 1px solid #ffeeba;
+        border-radius: 4px; text-align: center; font-weight: 500;
+    }
+</style>
+"""
+
+# Create and use the component
+table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
