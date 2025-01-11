@@ -127,8 +127,8 @@ def style_state(state):
 df['State'] = df['State'].apply(style_state)
 
 def generate_table_html(df):
-    # Generate table header
-    header_html = ''.join(f'<th>{column}</th>' for column in df.columns)
+    # Generate table header with scope attribute and width
+    header_html = ''.join(f'<th scope="col">{column}</th>' for column in df.columns)
     
     # Generate table rows
     rows_html = ''
@@ -248,6 +248,7 @@ script = """
             });
 
             this.updatePagination();
+            this.adjustHeight();
         }
 
         updatePagination() {
@@ -308,13 +309,36 @@ script = """
                 this.updateTable();
             }
         }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const wrapper = document.querySelector('.table-wrapper');
+                const table = document.querySelector('.table-container');
+                const controls = document.querySelector('.table-controls');
+                const pagination = document.querySelector('.pagination-controls');
+                
+                if (wrapper && table && controls && pagination) {
+                    const totalHeight = wrapper.scrollHeight;
+                    const padding = 40; // Extra padding for visual comfort
+                    
+                    // Set a minimum height of 400px or content height, whichever is larger
+                    const minHeight = Math.max(totalHeight + padding, 400);
+                    Streamlit.setFrameHeight(minHeight);
+                }
+            });
+        }
     }
 
     function onRender(event) {
         if (!window.rendered) {
             window.tableManager = new TableManager();
-            Streamlit.setFrameHeight(600);
             window.rendered = true;
+            
+            // Add resize observer to handle dynamic content changes
+            const resizeObserver = new ResizeObserver(() => {
+                window.tableManager.adjustHeight();
+            });
+            resizeObserver.observe(document.querySelector('.table-wrapper'));
         }
     }
 
@@ -347,8 +371,8 @@ css = """
         width: calc(100% - 40px); 
         background: #ffffff; 
         min-height: 200px; 
-        max-height: calc(100vh - 200px); 
-        overflow-y: auto; 
+        max-height: none; /* Remove max-height restriction */
+        overflow-y: visible; /* Change from auto to visible */
     }
     
     table { 
