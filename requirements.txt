@@ -1,4 +1,4 @@
 pandas
 pymongo[tls,srv]==3.11.1
 streamlit
-streamlit-shadcn-ui
+# streamlit-shadcn-ui

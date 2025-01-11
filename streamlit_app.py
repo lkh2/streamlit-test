@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit_shadcn_ui as ui
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
@@ -21,7 +20,7 @@ client = init_connection()
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(500)
+    items = collection.find()  # Removed the limit(200)
     
     # Convert MongoDB cursor to list and handle ObjectId
     items = [{**item, '_id': str(item['_id'])} for item in items]
@@ -51,49 +50,34 @@ df = df[[
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
-# Create a custom component for state display
-def create_state_element(state):
+# Function to style state with colored span
+def style_state(state):
     state = state.lower()
     style_map = {
-        'canceled': 'bg-red-100 text-red-800',
-        'failed': 'bg-red-100 text-red-800',
-        'suspended': 'bg-red-100 text-red-800',
-        'successful': 'bg-green-100 text-green-800',
-        'live': 'bg-blue-100 text-blue-800',
-        'submitted': 'bg-gray-100 text-gray-800'
+        'canceled': 'background: #FFC5C5; color: #DF0404;',
+        'failed': 'background: #FFC5C5; color: #DF0404;',
+        'suspended': 'background: #FFC5C5; color: #DF0404;',
+        'successful': 'background: #16C09861; color: #00B087;',
+        'live': 'background: #E6F3FF; color: #0066CC;',
+        'submitted': 'background: #F0F0F0; color: #808080;'
     }
-    
-    class_name = style_map.get(state, 'bg-gray-100 text-gray-800')
-    class_name += ' px-2 py-1 rounded inline-block'
-    return class_name
+    style = style_map.get(state, '')
+    return f'<span style="padding: 4px 8px; border-radius: 4px; {style}">{state}</span>'
 
-# Modify the State column with the styled class names
-df['_styled_state'] = df['State'].apply(lambda x: create_state_element(x))
+# Apply styling to State column
+df['State'] = df['State'].apply(style_state)
 
-# Display the data with Shadcn UI
+# Convert DataFrame to HTML with styling
+html_table = f"""
+<style>
+    table {{ border-collapse: collapse; width: 100%; }}
+    th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+    th {{ background-color: #f8f9fa; }}
+    tr:hover {{ background-color: #f5f5f5; }}
+</style>
+{df.to_html(escape=False, index=False)}
+"""
+
+# Display the data
 st.title('Kickstarter Data Viewer')
-
-with ui.card():
-    ui.table(
-        data=df[[
-            'Project Name',
-            'Creator',
-            'Pledged Amount',
-            'Country',
-            'State'
-        ]],
-        maxHeight=500
-    )
-
-    # Add styled state elements below the table
-    st.markdown("### Project States")
-    cols = st.columns(4)
-    for idx, row in df.iterrows():
-        col_idx = idx % 4
-        with cols[col_idx]:
-            ui.element(
-                "span",
-                key=f"state_{idx}",
-                text=row['State'],
-                className=row['_styled_state']
-            )
+st.markdown(html_table, unsafe_allow_html=True)
