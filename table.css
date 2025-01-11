@@ -81,3 +81,14 @@ td:has(.state_cell) {
 .table-row.hidden {
     display: none;
 }
+
+.noscript-warning {
+    background-color: #fff3cd;
+    color: #856404;
+    padding: 12px;
+    margin-bottom: 20px;
+    border: 1px solid #ffeeba;
+    border-radius: 4px;
+    text-align: center;
+    font-weight: 500;
+}
