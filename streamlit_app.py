@@ -186,8 +186,14 @@ def generate_table_html(df):
             data-date="{row['Raw Date'].strftime('%Y-%m-%d')}"
         '''
         
-        # Create visible cells
-        visible_cells = ''.join(f'<td>{row[col]}</td>' for col in visible_columns)
+        # Create visible cells with special handling for Link column
+        visible_cells = ''
+        for col in visible_columns:
+            if (col == 'Link'):
+                url = row[col]
+                visible_cells += f'<td><a href="{url}" target="_blank">{url}</a></td>'
+            else:
+                visible_cells += f'<td>{row[col]}</td>'
         
         # Add the row with data attributes
         rows_html += f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>'
@@ -592,6 +598,20 @@ css = """
         font-size: 22px;
         font-weight: 600;
         color: black;
+    }
+
+    td a {
+        text-decoration: underline;
+        overflow: hidden; 
+        text-overflow: ellipsis; 
+        white-space: nowrap; 
+        font-family: 'Poppins'; 
+        font-size: 14px; 
+        color: black;
+    }
+    
+    td a:hover {
+        color: grey
     }
 </style>
 """
