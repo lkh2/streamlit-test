@@ -100,8 +100,16 @@ items = get_data()
 df = json_normalize(items)
 
 # Calculate additional columns first
-df['Goal'] = df['data.goal'].astype(float) * df['data.usd_exchange_rate'].astype(float)
-df['%Raised'] = (df['data.converted_pledged_amount'].astype(float) / df['Goal']) * 100
+df['Raw Goal'] = df['data.goal'].astype(float) * df['data.usd_exchange_rate'].astype(float)
+df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
+df['Raw Raised'] = (df['Raw Pledged'] / df['Raw Goal']) * 100
+df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s').dt.strftime('%Y-%m-%d')
+
+# Assign formatted values after calculating raw values
+df['Goal'] = df['Raw Goal'].apply(lambda x: f"${x:,.2f}")
+df['Pledged Amount'] = df['Raw Pledged'].apply(lambda x: f"${x:,.2f}")
+df['%Raised'] = df['Raw Raised'].apply(lambda x: f"{x:.1f}%")
+df['Date'] = df['Raw Date']
 
 df = df[[ 
     'data.name', 
@@ -115,7 +123,11 @@ df = df[[
     'data.category.name',
     'data.created_at',
     'Goal',
-    '%Raised'
+    '%Raised',
+    'Raw Goal',
+    'Raw Pledged',
+    'Raw Raised',
+    'Raw Date'
 ]].rename(columns={ 
     'data.name': 'Project Name', 
     'data.creator.name': 'Creator', 
@@ -128,12 +140,6 @@ df = df[[
     'data.category.name': 'Subcategory',
     'data.created_at': 'Date',
 })
-
-# Store raw values before formatting
-df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
-df['Raw Goal'] = df['Goal']
-df['Raw Raised'] = df['%Raised']
-df['Raw Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
 
 # Add formatting for numeric columns
 df['Goal'] = df['Goal'].apply(lambda x: f"${x:,.2f}")
@@ -153,28 +159,25 @@ def style_state(state):
 df['State'] = df['State'].apply(style_state)
 
 def generate_table_html(df):
-    # Define visible columns
+    # Define visible and hidden columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
+    raw_columns = ['Raw Pledged', 'Raw Goal', 'Raw Raised', 'Raw Date']
     
     # Generate header for visible columns only
     header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
     
-    # Generate table rows with all columns but hide some
+    # Generate table rows with raw values in data attributes
     rows_html = ''
     for _, row in df.iterrows():
-        # Visible cells
         visible_cells = ''.join(f'<td>{row[col]}</td>' for col in visible_columns)
-        
-        # Hidden cells with raw values
-        hidden_cells = f"""
-            <td class="hidden-cell">{row['Category']}</td>
-            <td class="hidden-cell">{row['Subcategory']}</td>
-            <td class="hidden-cell">{row['Raw Date']}</td>
-            <td class="hidden-cell">{row['Raw Goal']}</td>
-            <td class="hidden-cell">{row['Raw Raised']}</td>
-            <td class="hidden-cell">{row['Raw Pledged']}</td>
-        """
-        
+        hidden_cells = (
+            f'<td class="hidden-cell" data-raw-value="{row["Raw Pledged"]}">{row["Category"]}</td>'
+            f'<td class="hidden-cell" data-raw-value="{row["Raw Goal"]}">{row["Subcategory"]}</td>'
+            f'<td class="hidden-cell" data-raw-value="{row["Raw Raised"]}">{row["Raw Date"]}</td>'
+            f'<td class="hidden-cell">{row["Raw Goal"]}</td>'
+            f'<td class="hidden-cell">{row["Raw Raised"]}</td>'
+            f'<td class="hidden-cell">{row["Raw Pledged"]}</td>'
+        )
         rows_html += f'<tr class="table-row">{visible_cells}{hidden_cells}</tr>'
     
     return header_html, rows_html
@@ -780,10 +783,10 @@ script = """
                     subcategory: cells[7].textContent,
                     country: cells[4].textContent,
                     state: cells[5].textContent.toLowerCase(),
-                    pledged: Number(cells[11].textContent), // Raw Pledged
-                    goal: Number(cells[9].textContent),     // Raw Goal
-                    raised: Number(cells[10].textContent),  // Raw Raised
-                    date: new Date(cells[8].textContent)   // Raw Date
+                    pledged: Number(cells[11].getAttribute('data-raw-value')),
+                    goal: Number(cells[9].getAttribute('data-raw-value')),
+                    raised: Number(cells[10].getAttribute('data-raw-value')),
+                    date: new Date(cells[8].textContent)
                 };
 
                 return this.matchesFilters(rowData, filters);
@@ -803,7 +806,7 @@ script = """
             if (filters.country !== 'All Countries' && rowData.country !== filters.country) return false;
             if (filters.state !== 'All States' && !rowData.state.includes(filters.state.toLowerCase())) return false;
 
-            // Handle range filters using raw numerical values
+            // Handle range filters with raw values
             if (filters.pledged !== 'All Amounts') {
                 const [min, max] = filters.pledged.split('-')
                     .map(v => Number(v.replace(/[^0-9.-]+/g,"")));
@@ -822,29 +825,27 @@ script = """
                 if (rowData.raised < min || rowData.raised > max) return false;
             }
 
-            if (filters.date !== 'All Time') {
-                const now = new Date();
-                let compareDate = new Date();
-                
-                switch(filters.date) {
-                    case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
-                    case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
-                    case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
-                    case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
-                    case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
-                    case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
-                }
-                
-                if (rowData.date < compareDate) return false;
+            const now = new Date();
+            let compareDate = new Date();
+            
+            switch(filters.date) {
+                case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
+                case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
+                case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
+                case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
+                case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
+                case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
             }
+            
+            if (rowData.date < compareDate) return false;
 
             return true;
         }
 
         sortRows(sortType) {
             this.visibleRows.sort((a, b) => {
-                const dateA = new Date(a.cells[8].textContent); // Raw Date
-                const dateB = new Date(b.cells[8].textContent); // Raw Date
+                const dateA = new Date(a.cells[8].getAttribute('data-raw-value'));
+                const dateB = new Date(b.cells[8].getAttribute('data-raw-value'));
                 return sortType === 'newest' ? dateB - dateA : dateA - dateB;
             });
         }
