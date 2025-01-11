@@ -159,28 +159,74 @@ template = f"""
 </div>
 """
 
-# Create table component script
+# Create table component script with improved search
 script = """
-    function onRender(event) {
-        if (!window.rendered) {
-            const searchInput = document.getElementById('table-search');
-            const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
-            
-            let searchTimeout;
-            
-            searchInput.addEventListener('input', (e) => {
-                clearTimeout(searchTimeout);
-                
-                searchTimeout = setTimeout(() => {
-                    const searchTerm = e.target.value.toLowerCase();
-                    
-                    tableRows.forEach(row => {
-                        const text = row.textContent.toLowerCase();
-                        row.style.display = text.includes(searchTerm) ? '' : 'none';
-                    });
-                }, 300);
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    }
+
+    function createRegexPattern(searchTerm) {
+        // Split search term into individual words and escape special characters
+        const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
+        const escapedWords = words.map(word => 
+            word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
+        );
+        
+        // Create a regex pattern that matches all words in any order
+        return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
+    }
+
+    function performSearch(searchTerm, tableRows) {
+        console.log('Performing search for:', searchTerm);
+        
+        try {
+            const pattern = createRegexPattern(searchTerm);
+            let matchCount = 0;
+
+            tableRows.forEach(row => {
+                const text = row.textContent;
+                const isMatch = pattern.test(text);
+                row.style.display = isMatch ? '' : 'none';
+                if (isMatch) matchCount++;
             });
 
+            console.log(`Found ${matchCount} matches`);
+        } catch (error) {
+            console.error('Search error:', error);
+        }
+    }
+
+    function initializeSearch() {
+        console.log('Initializing search functionality...');
+        const searchInput = document.getElementById('table-search');
+        const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
+
+        if (!searchInput || !tableRows.length) {
+            console.log('Elements not found, retrying...');
+            setTimeout(initializeSearch, 100);
+            return;
+        }
+
+        const debouncedSearch = debounce(
+            (value) => performSearch(value, tableRows),
+            300
+        );
+
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.trim().toLowerCase();
+            debouncedSearch(searchTerm);
+        });
+
+        console.log('Search initialized with', tableRows.length, 'rows');
+    }
+
+    function onRender(event) {
+        if (!window.rendered) {
+            initializeSearch();
             Streamlit.setFrameHeight(600);
             window.rendered = true;
         }
