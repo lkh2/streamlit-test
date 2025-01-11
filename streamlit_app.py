@@ -189,7 +189,7 @@ def get_filter_options(df):
         'subcategories': sorted(['All Subcategories'] + df['Subcategory'].unique().tolist()),  # Keep all subcategories
         'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
         'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
-        'pledged_ranges': ['All Amounts'] + [
+        'pledged_ranges': ['All Pledged Amount'] + [  # Changed from 'All Amounts'
             f"${i}-${j}" for i, j in [(1,99), (100,999), (1000,9999), 
             (10000,99999), (100000,999999)]
         ] + ['>$1000000'],
@@ -261,6 +261,7 @@ template = f"""
 </div>
 <div class="table-wrapper">
     <div class="table-controls">
+        <span class="filtered-text">Filtered Projects</span>
         <input type="text" id="table-search" class="search-input" placeholder="Search table...">
     </div>
     <div class="table-container">
@@ -284,17 +285,21 @@ template = f"""
 # Add new CSS styles
 css = """
 <style>
+    [data-testid="stAppViewContainer"] {
+        background: linear-gradient(180deg, #2A5D4E 0%, #65897F 50%, #2A5D4E 100%);
+    }
+    
     .table-controls { 
         position: sticky; 
         top: 0; 
         background: #ffffff; 
         z-index: 2; 
-        padding: 0 10px; 
+        padding: 0 20px; 
         border-bottom: 1px solid #eee; 
         height: 60px; 
         display: flex; 
         align-items: center; 
-        justify-content: flex-end; 
+        justify-content: space-between;
         margin-bottom: 1rem; 
         border-radius: 20px; 
     }
@@ -546,6 +551,13 @@ css = """
 
     .reset-button:hover {
         background: #4a29bb;
+    }
+
+    .filtered-text {
+        font-family: 'Poppins';
+        font-size: 16px;
+        font-weight: 500;
+        color: #333;
     }
 </style>
 """
