@@ -156,10 +156,15 @@ template = f"""
             </tbody>
         </table>
     </div>
+    <div class="pagination-controls">
+        <button id="prev-page" class="page-btn" aria-label="Previous page">&lt;</button>
+        <div id="page-numbers" class="page-numbers"></div>
+        <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
+    </div>
 </div>
 """
 
-# Create table component script with improved search
+# Create table component script with improved search and pagination
 script = """
     function debounce(func, wait) {
         let timeout;
@@ -224,9 +229,93 @@ script = """
         console.log('Search initialized with', tableRows.length, 'rows');
     }
 
+    function generatePageNumbers(currentPage, totalPages) {
+        let pages = [];
+        
+        if (totalPages <= 10) {
+            // Show all pages if total pages are 10 or less
+            pages = Array.from({length: totalPages}, (_, i) => i + 1);
+        } else {
+            // Always show first and last page
+            if (currentPage <= 7) {
+                // Current page is in first group
+                pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+            } else if (currentPage >= totalPages - 6) {
+                // Current page is in last group
+                pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+            } else {
+                // Current page is in middle
+                pages = [1, 2, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages - 1, totalPages];
+            }
+        }
+        return pages;
+    }
+
+    class TablePagination {
+        constructor(tableRows) {
+            this.allRows = tableRows;
+            this.visibleRows = tableRows;
+            this.currentPage = 1;
+            this.pageSize = 10;
+            this.setupControls();
+            this.updateTable();
+        }
+
+        setupControls() {
+            document.getElementById('prev-page').onclick = () => this.previousPage();
+            document.getElementById('next-page').onclick = () => this.nextPage();
+            this.updatePageNumbers();
+        }
+
+        updatePageNumbers() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            const pageNumbers = generatePageNumbers(this.currentPage, totalPages);
+            const container = document.getElementById('page-numbers');
+            
+            container.innerHTML = pageNumbers.map(page => {
+                if (page === '...') {
+                    return '<span class="page-ellipsis">...</span>';
+                }
+                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}" 
+                    ${page === this.currentPage ? 'disabled' : ''} 
+                    onclick="handlePageClick(${page})">${page}</button>`;
+            }).join('');
+
+            // Update navigation buttons
+            document.getElementById('prev-page').disabled = this.currentPage === 1;
+            document.getElementById('next-page').disabled = this.currentPage === totalPages;
+        }
+
+        goToPage(page) {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (page >= 1 && page <= totalPages) {
+                this.currentPage = page;
+                this.updateTable();
+            }
+        }
+
+        updateTable() {
+            updateTableRows(this.visibleRows, this.currentPage, this.pageSize);
+            this.updatePageNumbers();
+        }
+
+        // ...rest of existing TablePagination methods...
+    }
+
+    // Add global handler for page number clicks
+    window.handlePageClick = function(page) {
+        window.currentPagination.goToPage(page);
+    };
+
+    function initializeTable() {
+        // ...existing initialization code...
+        window.currentPagination = pagination;  // Make pagination accessible globally
+    }
+
     function onRender(event) {
         if (!window.rendered) {
             initializeSearch();
+            initializeTable();
             Streamlit.setFrameHeight(600);
             window.rendered = true;
         }
@@ -295,6 +384,57 @@ css = """
         background-color: #fff3cd; color: #856404; padding: 12px;
         margin-bottom: 20px; border: 1px solid #ffeeba;
         border-radius: 4px; text-align: center; font-weight: 500;
+    }
+    .pagination-controls {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        padding: 1rem;
+        gap: 0.5rem;
+    }
+
+    .page-numbers {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+    }
+
+    .page-number, .page-btn {
+        min-width: 32px;
+        height: 32px;
+        padding: 0 6px;
+        border: 1px solid #ddd;
+        background: #fff;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: #333;
+    }
+
+    .page-number:hover:not(:disabled),
+    .page-btn:hover:not(:disabled) {
+        background: #f0f0f0;
+        border-color: #ccc;
+    }
+
+    .page-number.active {
+        background: #0066CC;
+        color: white;
+        border-color: #0066CC;
+    }
+
+    .page-ellipsis {
+        padding: 0 4px;
+        color: #666;
+    }
+
+    .page-number:disabled,
+    .page-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
     }
 </style>
 """
