@@ -20,15 +20,21 @@ client = init_connection()
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(200)  # Limit to the first 200 entries
-    items = list(items)  # Make hashable for st.cache_data
+    items = collection.find().limit(200)
+    
+    # Convert MongoDB cursor to list and handle ObjectId
+    items = [{**item, '_id': str(item['_id'])} for item in items]
     return items
 
 items = get_data()
 
-# Normalize the JSON data to flatten nested structures
+# Convert the data to DataFrame with proper type handling
 df = json_normalize(items)
 
-# Display the data in a table format with sortable columns
+# Convert object columns to string to avoid Arrow serialization issues
+object_columns = df.select_dtypes(include=['object']).columns
+df[object_columns] = df[object_columns].astype(str)
+
+# Display the data
 st.title('Kickstarter Data Viewer')
-st.dataframe(df)
+st.dataframe(df, use_container_width=True)
