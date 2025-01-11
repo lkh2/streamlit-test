@@ -99,29 +99,29 @@ items = get_data()
 # Create DataFrame and restructure columns
 df = json_normalize(items)
 
-# Calculate additional columns first
+# Calculate additional columns and store raw values
 df['Raw Goal'] = df['data.goal'].astype(float) * df['data.usd_exchange_rate'].astype(float)
 df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
 df['Raw Raised'] = (df['Raw Pledged'] / df['Raw Goal']) * 100
-df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s').dt.strftime('%Y-%m-%d')
+df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s')
 
-# Assign formatted values after calculating raw values
-df['Goal'] = df['Raw Goal'].apply(lambda x: f"${x:,.2f}")
-df['Pledged Amount'] = df['Raw Pledged'].apply(lambda x: f"${x:,.2f}")
-df['%Raised'] = df['Raw Raised'].apply(lambda x: f"{x:.1f}%")
-df['Date'] = df['Raw Date']
+# Format display columns
+df['Goal'] = df['Raw Goal'].map(lambda x: f"${x:,.2f}")
+df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${x:,.2f}")
+df['%Raised'] = df['Raw Raised'].map(lambda x: f"{x:.1f}%")
+df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 
 df = df[[ 
     'data.name', 
-    'data.creator.name', 
-    'data.converted_pledged_amount', 
+    'data.creator.name',
+    'Pledged Amount',  # Use formatted columns in visible part
     'data.urls.web.project', 
     'data.location.expanded_country', 
     'data.state',
     # Hidden columns
     'data.category.parent_name',
     'data.category.name',
-    'data.created_at',
+    'Date',
     'Goal',
     '%Raised',
     'Raw Goal',
@@ -131,22 +131,15 @@ df = df[[
 ]].rename(columns={ 
     'data.name': 'Project Name', 
     'data.creator.name': 'Creator', 
-    'data.converted_pledged_amount': 'Pledged Amount', 
     'data.urls.web.project': 'Link', 
     'data.location.expanded_country': 'Country', 
     'data.state': 'State',
     # Hidden columns
     'data.category.parent_name': 'Category',
     'data.category.name': 'Subcategory',
-    'data.created_at': 'Date',
 })
 
-# Add formatting for numeric columns
-df['Goal'] = df['Goal'].apply(lambda x: f"${x:,.2f}")
-df['Pledged Amount'] = df['Pledged Amount'].apply(lambda x: f"${float(x):,.2f}")
-df['%Raised'] = df['%Raised'].apply(lambda x: f"{x:.1f}%")
-
-# Convert object columns to string
+# Convert remaining object columns to string
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
