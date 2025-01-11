@@ -29,6 +29,7 @@ def gensimplecomponent(name, template="", script=""):
             <html lang="en">
                 <head>
                     <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
+                    <link href='https://fonts.googleapis.com/css?family=Playfair Display' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
                     <script>
@@ -256,7 +257,7 @@ template = f"""
             </select>
         </div>
         <div class="filter-row">
-            <span class="filter-label">More Flexible, Dynamic Search</span>
+            <span class="filter-label">More Flexible, Dynamic Search:</span>
             <select id="stateFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['states'])}
             </select>
@@ -521,9 +522,9 @@ css = """
     }
 
     .filter-label {
-        font-family: 'Poppins';
-        font-size: 14px;
-        color: #333;
+        font-family: 'Playfair Display';
+        font-size: 24px;
+        color: white;
         white-space: nowrap;
     }
 
@@ -558,8 +559,8 @@ css = """
         transform: rotate(-90deg);
         white-space: nowrap;
         display: block;
-        font-family: 'Poppins';
-        font-size: 12px;
+        font-family: 'Playfair Display';
+        font-size: 21px;
         letter-spacing: 1px;
     }
 
