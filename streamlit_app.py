@@ -156,16 +156,6 @@ template = f"""
             </tbody>
         </table>
     </div>
-    <div class="pagination-controls">
-        <button id="prev-page" class="page-btn">&lt;</button>
-        <span id="page-info">Page <span id="current-page">1</span> of <span id="total-pages">1</span></span>
-        <button id="next-page" class="page-btn">&gt;</button>
-        <select id="page-size" class="page-size-select">
-            <option value="10">10 per page</option>
-            <option value="20">20 per page</option>
-            <option value="50">50 per page</option>
-        </select>
-    </div>
 </div>
 """
 
@@ -180,115 +170,64 @@ script = """
     }
 
     function createRegexPattern(searchTerm) {
-        if (!searchTerm) return null;
+        // Split search term into individual words and escape special characters
         const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
         const escapedWords = words.map(word => 
             word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
         );
+        
+        // Create a regex pattern that matches all words in any order
         return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
     }
 
-    function updateTableRows(rows, currentPage, pageSize) {
-        rows.forEach(row => row.style.display = 'none');
-        const start = (currentPage - 1) * pageSize;
-        const end = Math.min(start + pageSize, rows.length);
+    function performSearch(searchTerm, tableRows) {
+        console.log('Performing search for:', searchTerm);
         
-        for (let i = start; i < end; i++) {
-            if (rows[i]) rows[i].style.display = '';
+        try {
+            const pattern = createRegexPattern(searchTerm);
+            let matchCount = 0;
+
+            tableRows.forEach(row => {
+                const text = row.textContent;
+                const isMatch = pattern.test(text);
+                row.style.display = isMatch ? '' : 'none';
+                if (isMatch) matchCount++;
+            });
+
+            console.log(`Found ${matchCount} matches`);
+        } catch (error) {
+            console.error('Search error:', error);
         }
     }
 
-    function updatePaginationControls(totalRows, currentPage, pageSize) {
-        const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-        document.getElementById('total-pages').textContent = totalPages;
-        document.getElementById('current-page').textContent = currentPage;
-        document.getElementById('prev-page').disabled = currentPage <= 1;
-        document.getElementById('next-page').disabled = currentPage >= totalPages;
-    }
-
-    class TablePagination {
-        constructor(tableRows) {
-            this.allRows = tableRows;
-            this.visibleRows = tableRows;
-            this.currentPage = 1;
-            this.pageSize = 10;
-            this.setupControls();
-            this.updateTable();
-        }
-
-        setupControls() {
-            const pageSizeSelect = document.getElementById('page-size');
-            document.getElementById('prev-page').onclick = () => this.previousPage();
-            document.getElementById('next-page').onclick = () => this.nextPage();
-            pageSizeSelect.onchange = (e) => {
-                this.pageSize = parseInt(e.target.value);
-                this.currentPage = 1;
-                this.updateTable();
-            };
-        }
-
-        updateTable() {
-            updateTableRows(this.visibleRows, this.currentPage, this.pageSize);
-            updatePaginationControls(this.visibleRows.length, this.currentPage, this.pageSize);
-        }
-
-        previousPage() {
-            if (this.currentPage > 1) {
-                this.currentPage--;
-                this.updateTable();
-            }
-        }
-
-        nextPage() {
-            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            if (this.currentPage < totalPages) {
-                this.currentPage++;
-                this.updateTable();
-            }
-        }
-
-        updateVisibleRows(searchTerm) {
-            if (!searchTerm) {
-                this.visibleRows = this.allRows;
-            } else {
-                const pattern = createRegexPattern(searchTerm);
-                this.visibleRows = this.allRows.filter(row => pattern.test(row.textContent));
-            }
-            this.currentPage = 1;
-            this.updateTable();
-        }
-    }
-
-    function initializeTable() {
+    function initializeSearch() {
+        console.log('Initializing search functionality...');
         const searchInput = document.getElementById('table-search');
         const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
-        
+
         if (!searchInput || !tableRows.length) {
-            setTimeout(initializeTable, 100);
+            console.log('Elements not found, retrying...');
+            setTimeout(initializeSearch, 100);
             return;
         }
 
-        const pagination = new TablePagination(tableRows);
         const debouncedSearch = debounce(
-            (term) => pagination.updateVisibleRows(term),
+            (value) => performSearch(value, tableRows),
             300
         );
 
         searchInput.addEventListener('input', (e) => {
-            debouncedSearch(e.target.value.trim().toLowerCase());
+            const searchTerm = e.target.value.trim().toLowerCase();
+            debouncedSearch(searchTerm);
         });
 
-        // Set initial table state
-        pagination.updateTable();
-        
-        // Adjust frame height after table is visible
-        const tableHeight = document.querySelector('.table-wrapper').offsetHeight;
-        Streamlit.setFrameHeight(tableHeight + 50);
+        console.log('Search initialized with', tableRows.length, 'rows');
     }
 
     function onRender(event) {
         if (!window.rendered) {
-            initializeTable();
+            initializeSearch();
+            Streamlit.setFrameHeight(600);
             window.rendered = true;
         }
     }
@@ -356,37 +295,6 @@ css = """
         background-color: #fff3cd; color: #856404; padding: 12px;
         margin-bottom: 20px; border: 1px solid #ffeeba;
         border-radius: 4px; text-align: center; font-weight: 500;
-    }
-    .pagination-controls {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        padding: 1rem;
-        gap: 0.5rem;
-    }
-    
-    .page-btn {
-        padding: 4px 8px;
-        border: 1px solid #ddd;
-        background: #fff;
-        border-radius: 4px;
-        cursor: pointer;
-    }
-    
-    .page-btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-    }
-    
-    .page-size-select {
-        padding: 4px 8px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        margin-left: 1rem;
-    }
-    
-    #page-info {
-        margin: 0 0.5rem;
     }
 </style>
 """
