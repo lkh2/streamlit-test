@@ -180,139 +180,115 @@ script = """
     }
 
     function createRegexPattern(searchTerm) {
-        // Split search term into individual words and escape special characters
+        if (!searchTerm) return null;
         const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
         const escapedWords = words.map(word => 
             word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
         );
-        
-        // Create a regex pattern that matches all words in any order
         return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
     }
 
-    function performSearch(searchTerm, tableRows) {
-        console.log('Performing search for:', searchTerm);
-        
-        try {
-            const pattern = createRegexPattern(searchTerm);
-            let matchCount = 0;
-
-            tableRows.forEach(row => {
-                const text = row.textContent;
-                const isMatch = pattern.test(text);
-                row.style.display = isMatch ? '' : 'none';
-                if (isMatch) matchCount++;
-            });
-
-            console.log(`Found ${matchCount} matches`);
-        } catch (error) {
-            console.error('Search error:', error);
-        }
-    }
-
     function updateTableRows(rows, currentPage, pageSize) {
+        rows.forEach(row => row.style.display = 'none');
         const start = (currentPage - 1) * pageSize;
-        const end = start + pageSize;
+        const end = Math.min(start + pageSize, rows.length);
         
-        rows.forEach((row, index) => {
-            row.style.display = (index >= start && index < end) ? '' : 'none';
-        });
+        for (let i = start; i < end; i++) {
+            if (rows[i]) rows[i].style.display = '';
+        }
     }
 
-    function updatePaginationControls(visibleRows, pageSize) {
-        const totalPages = Math.ceil(visibleRows.length / pageSize);
-        const currentPage = parseInt(document.getElementById('current-page').textContent);
-        
+    function updatePaginationControls(totalRows, currentPage, pageSize) {
+        const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
         document.getElementById('total-pages').textContent = totalPages;
-        document.getElementById('prev-page').disabled = currentPage === 1;
-        document.getElementById('next-page').disabled = currentPage === totalPages;
+        document.getElementById('current-page').textContent = currentPage;
+        document.getElementById('prev-page').disabled = currentPage <= 1;
+        document.getElementById('next-page').disabled = currentPage >= totalPages;
     }
 
-    function initializePagination(tableRows) {
-        const pageInfo = document.getElementById('current-page');
-        const prevBtn = document.getElementById('prev-page');
-        const nextBtn = document.getElementById('next-page');
-        const pageSizeSelect = document.getElementById('page-size');
-        let currentPage = 1;
-        let pageSize = parseInt(pageSizeSelect.value);
-        let visibleRows = tableRows;
-
-        function updateTable() {
-            updateTableRows(visibleRows, currentPage, pageSize);
-            updatePaginationControls(visibleRows, pageSize);
+    class TablePagination {
+        constructor(tableRows) {
+            this.allRows = tableRows;
+            this.visibleRows = tableRows;
+            this.currentPage = 1;
+            this.pageSize = 10;
+            this.setupControls();
+            this.updateTable();
         }
 
-        prevBtn.addEventListener('click', () => {
-            if (currentPage > 1) {
-                currentPage--;
-                pageInfo.textContent = currentPage;
-                updateTable();
-            }
-        });
+        setupControls() {
+            const pageSizeSelect = document.getElementById('page-size');
+            document.getElementById('prev-page').onclick = () => this.previousPage();
+            document.getElementById('next-page').onclick = () => this.nextPage();
+            pageSizeSelect.onchange = (e) => {
+                this.pageSize = parseInt(e.target.value);
+                this.currentPage = 1;
+                this.updateTable();
+            };
+        }
 
-        nextBtn.addEventListener('click', () => {
-            const totalPages = Math.ceil(visibleRows.length / pageSize);
-            if (currentPage < totalPages) {
-                currentPage++;
-                pageInfo.textContent = currentPage;
-                updateTable();
-            }
-        });
+        updateTable() {
+            updateTableRows(this.visibleRows, this.currentPage, this.pageSize);
+            updatePaginationControls(this.visibleRows.length, this.currentPage, this.pageSize);
+        }
 
-        pageSizeSelect.addEventListener('change', () => {
-            pageSize = parseInt(pageSizeSelect.value);
-            currentPage = 1;
-            pageInfo.textContent = currentPage;
-            updateTable();
-        });
-
-        return {
-            updateVisibleRows: (rows) => {
-                visibleRows = rows;
-                currentPage = 1;
-                pageInfo.textContent = currentPage;
-                updateTable();
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
             }
-        };
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
+            }
+        }
+
+        updateVisibleRows(searchTerm) {
+            if (!searchTerm) {
+                this.visibleRows = this.allRows;
+            } else {
+                const pattern = createRegexPattern(searchTerm);
+                this.visibleRows = this.allRows.filter(row => pattern.test(row.textContent));
+            }
+            this.currentPage = 1;
+            this.updateTable();
+        }
     }
 
-    function initializeSearch() {
-        console.log('Initializing search and pagination...');
+    function initializeTable() {
         const searchInput = document.getElementById('table-search');
         const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
-        const pagination = initializePagination(tableRows);
-
+        
         if (!searchInput || !tableRows.length) {
-            console.log('Elements not found, retrying...');
-            setTimeout(initializeSearch, 100);
+            setTimeout(initializeTable, 100);
             return;
         }
 
-        const debouncedSearch = debounce((searchTerm) => {
-            try {
-                const pattern = createRegexPattern(searchTerm);
-                const visibleRows = tableRows.filter(row => {
-                    const text = row.textContent;
-                    return pattern.test(text);
-                });
-                pagination.updateVisibleRows(visibleRows);
-            } catch (error) {
-                console.error('Search error:', error);
-            }
-        }, 300);
+        const pagination = new TablePagination(tableRows);
+        const debouncedSearch = debounce(
+            (term) => pagination.updateVisibleRows(term),
+            300
+        );
 
         searchInput.addEventListener('input', (e) => {
-            const searchTerm = e.target.value.trim().toLowerCase();
-            debouncedSearch(searchTerm);
+            debouncedSearch(e.target.value.trim().toLowerCase());
         });
 
-        // Initial pagination setup
-        pagination.updateVisibleRows(tableRows);
+        // Set initial table state
+        pagination.updateTable();
+        
+        // Adjust frame height after table is visible
+        const tableHeight = document.querySelector('.table-wrapper').offsetHeight;
+        Streamlit.setFrameHeight(tableHeight + 50);
     }
 
     function onRender(event) {
         if (!window.rendered) {
-            initializeSearch();
+            initializeTable();
             window.rendered = true;
         }
     }
