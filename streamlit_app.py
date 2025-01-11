@@ -191,10 +191,33 @@ script = """
 # Add CSS styles
 css = """
 <style>
-    .table-container { display: flex; justify-content: center; padding: 20px; }
-    table { border-collapse: collapse; width: 80%; max-width: 1200px; }
-    th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-    td:has(.state_cell) { justify-items: center; }
+    .table-container { 
+        display: flex; 
+        justify-content: center; 
+        padding: 20px;
+        width: 100%;
+        background: #ffffff;
+    }
+    table { 
+        border-collapse: collapse; 
+        width: 100%;
+        background: #ffffff;
+        table-layout: fixed;
+    }
+    th, td { 
+        padding: 8px; 
+        text-align: left; 
+        border-bottom: 1px solid #ddd;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    th {
+        background: #ffffff;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
     .state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
     .state-canceled, .state-failed, .state-suspended { 
         background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
@@ -205,7 +228,12 @@ css = """
     .state-live, .state-submitted { 
         background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
     }
-    .table-wrapper { width: 100%; max-width: 1200px; margin: 0 auto; }
+    .table-wrapper { 
+        width: 100%; 
+        background: #ffffff;
+        border-radius: 20px;
+        overflow-x: auto;
+    }
     .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
     .search-input { 
         padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
