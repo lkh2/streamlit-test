@@ -156,6 +156,16 @@ template = f"""
             </tbody>
         </table>
     </div>
+    <div class="pagination-controls">
+        <button id="prev-page" class="page-btn">&lt;</button>
+        <span id="page-info">Page <span id="current-page">1</span> of <span id="total-pages">1</span></span>
+        <button id="next-page" class="page-btn">&gt;</button>
+        <select id="page-size" class="page-size-select">
+            <option value="10">10 per page</option>
+            <option value="20">20 per page</option>
+            <option value="50">50 per page</option>
+        </select>
+    </div>
 </div>
 """
 
@@ -200,10 +210,77 @@ script = """
         }
     }
 
+    function updateTableRows(rows, currentPage, pageSize) {
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+        
+        rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
+        });
+    }
+
+    function updatePaginationControls(visibleRows, pageSize) {
+        const totalPages = Math.ceil(visibleRows.length / pageSize);
+        const currentPage = parseInt(document.getElementById('current-page').textContent);
+        
+        document.getElementById('total-pages').textContent = totalPages;
+        document.getElementById('prev-page').disabled = currentPage === 1;
+        document.getElementById('next-page').disabled = currentPage === totalPages;
+    }
+
+    function initializePagination(tableRows) {
+        const pageInfo = document.getElementById('current-page');
+        const prevBtn = document.getElementById('prev-page');
+        const nextBtn = document.getElementById('next-page');
+        const pageSizeSelect = document.getElementById('page-size');
+        let currentPage = 1;
+        let pageSize = parseInt(pageSizeSelect.value);
+        let visibleRows = tableRows;
+
+        function updateTable() {
+            updateTableRows(visibleRows, currentPage, pageSize);
+            updatePaginationControls(visibleRows, pageSize);
+        }
+
+        prevBtn.addEventListener('click', () => {
+            if (currentPage > 1) {
+                currentPage--;
+                pageInfo.textContent = currentPage;
+                updateTable();
+            }
+        });
+
+        nextBtn.addEventListener('click', () => {
+            const totalPages = Math.ceil(visibleRows.length / pageSize);
+            if (currentPage < totalPages) {
+                currentPage++;
+                pageInfo.textContent = currentPage;
+                updateTable();
+            }
+        });
+
+        pageSizeSelect.addEventListener('change', () => {
+            pageSize = parseInt(pageSizeSelect.value);
+            currentPage = 1;
+            pageInfo.textContent = currentPage;
+            updateTable();
+        });
+
+        return {
+            updateVisibleRows: (rows) => {
+                visibleRows = rows;
+                currentPage = 1;
+                pageInfo.textContent = currentPage;
+                updateTable();
+            }
+        };
+    }
+
     function initializeSearch() {
-        console.log('Initializing search functionality...');
+        console.log('Initializing search and pagination...');
         const searchInput = document.getElementById('table-search');
         const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
+        const pagination = initializePagination(tableRows);
 
         if (!searchInput || !tableRows.length) {
             console.log('Elements not found, retrying...');
@@ -211,23 +288,31 @@ script = """
             return;
         }
 
-        const debouncedSearch = debounce(
-            (value) => performSearch(value, tableRows),
-            300
-        );
+        const debouncedSearch = debounce((searchTerm) => {
+            try {
+                const pattern = createRegexPattern(searchTerm);
+                const visibleRows = tableRows.filter(row => {
+                    const text = row.textContent;
+                    return pattern.test(text);
+                });
+                pagination.updateVisibleRows(visibleRows);
+            } catch (error) {
+                console.error('Search error:', error);
+            }
+        }, 300);
 
         searchInput.addEventListener('input', (e) => {
             const searchTerm = e.target.value.trim().toLowerCase();
             debouncedSearch(searchTerm);
         });
 
-        console.log('Search initialized with', tableRows.length, 'rows');
+        // Initial pagination setup
+        pagination.updateVisibleRows(tableRows);
     }
 
     function onRender(event) {
         if (!window.rendered) {
             initializeSearch();
-            Streamlit.setFrameHeight(600);
             window.rendered = true;
         }
     }
@@ -295,6 +380,37 @@ css = """
         background-color: #fff3cd; color: #856404; padding: 12px;
         margin-bottom: 20px; border: 1px solid #ffeeba;
         border-radius: 4px; text-align: center; font-weight: 500;
+    }
+    .pagination-controls {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        padding: 1rem;
+        gap: 0.5rem;
+    }
+    
+    .page-btn {
+        padding: 4px 8px;
+        border: 1px solid #ddd;
+        background: #fff;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    
+    .page-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+    
+    .page-size-select {
+        padding: 4px 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-left: 1rem;
+    }
+    
+    #page-info {
+        margin: 0 0.5rem;
     }
 </style>
 """
