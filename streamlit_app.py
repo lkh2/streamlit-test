@@ -285,12 +285,11 @@ css = """
     
     .table-container { 
         position: relative;
-        display: block; 
+        flex: 1;
         padding: 20px; 
-        width: calc(100% - 40px); 
         background: #ffffff; 
-        min-height: 200px; 
-        overflow: visible;
+        min-height: 400px;
+        overflow-y: visible;
     }
     
     table { 
@@ -373,11 +372,13 @@ css = """
 
     .table-wrapper { 
         position: relative;
+        display: flex;
+        flex-direction: column;
         max-width: 100%; 
         background: #ffffff; 
         border-radius: 20px; 
         overflow: visible;
-        min-height: 400px;
+        min-height: 600px;
     }
 
     .search-input { 
@@ -396,11 +397,18 @@ css = """
     }
 
     .pagination-controls {
+        position: sticky;
+        bottom: 0;
+        width: 100%;
+        background: #ffffff;
+        z-index: 2;
         display: flex;
         justify-content: flex-end;
         align-items: center;
         padding: 1rem;
         gap: 0.5rem;
+        border-top: 1px solid #eee;
+        min-height: 60px;
     }
 
     .page-numbers {
@@ -459,6 +467,7 @@ css = """
         border-radius: 20px;
         margin-bottom: 20px;
         min-height: 120px;
+        z-index: 3;
     }
 
     .filter-controls {
@@ -677,25 +686,41 @@ script = """
                 const tableWrapper = document.querySelector('.table-wrapper');
                 const tableContainer = document.querySelector('.table-container');
                 const table = document.querySelector('#data-table');
+                const controls = document.querySelector('.table-controls');
+                const pagination = document.querySelector('.pagination-controls');
                 
                 if (filterWrapper && tableWrapper && tableContainer && table) {
                     const filterHeight = filterWrapper.offsetHeight;
                     const tableHeight = table.offsetHeight;
-                    const controlsHeight = 60; // Height of search controls
-                    const paginationHeight = 60; // Height of pagination
-                    const padding = 80; // Extra padding
+                    const controlsHeight = controls.offsetHeight;
+                    const paginationHeight = pagination.offsetHeight;
+                    const padding = 40;
                     
-                    const totalHeight = filterHeight + tableHeight + controlsHeight + paginationHeight + padding;
+                    // Calculate content height
+                    const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
                     
-                    // Ensure minimum height of 400px
-                    const finalHeight = Math.max(totalHeight, 400);
+                    // Calculate total component height
+                    const totalHeight = filterHeight + contentHeight + padding;
                     
-                    // Set component height
-                    Streamlit.setFrameHeight(finalHeight);
+                    // Set minimum heights
+                    const minContentHeight = 600; // Minimum height for table content
+                    const finalHeight = Math.max(totalHeight, minContentHeight);
                     
-                    // Adjust container heights
-                    tableContainer.style.minHeight = `${tableHeight + padding}px`;
-                    tableWrapper.style.minHeight = `${tableHeight + controlsHeight + paginationHeight + padding}px`;
+                    // Update container heights
+                    tableContainer.style.minHeight = `${Math.max(tableHeight, 400)}px`;
+                    tableWrapper.style.minHeight = `${Math.max(contentHeight, minContentHeight)}px`;
+                    
+                    // Set final component height with additional padding
+                    Streamlit.setFrameHeight(finalHeight + 40);
+                    
+                    console.log({
+                        filterHeight,
+                        tableHeight,
+                        controlsHeight,
+                        paginationHeight,
+                        contentHeight,
+                        finalHeight
+                    });
                 }
             });
         }
