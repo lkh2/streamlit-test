@@ -242,25 +242,25 @@ template = f"""
             </select>
         </div>
     </div>
-    <div class="table-wrapper">
-        <div class="table-controls">
-            <input type="text" id="table-search" class="search-input" placeholder="Search table...">
-        </div>
-        <div class="table-container">
-            <table id="data-table">
-                <thead>
-                    <tr>{header_html}</tr>
-                </thead>
-                <tbody>
-                    {rows_html}
-                </tbody>
-            </table>
-        </div>
-        <div class="pagination-controls">
-            <button id="prev-page" class="page-btn" aria-label="Previous page">&lt;</button>
-            <div id="page-numbers" class="page-numbers"></div>
-            <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
-        </div>
+</div>
+<div class="table-wrapper">
+    <div class="table-controls">
+        <input type="text" id="table-search" class="search-input" placeholder="Search table...">
+    </div>
+    <div class="table-container">
+        <table id="data-table">
+            <thead>
+                <tr>{header_html}</tr>
+            </thead>
+            <tbody>
+                {rows_html}
+            </tbody>
+        </table>
+    </div>
+    <div class="pagination-controls">
+        <button id="prev-page" class="page-btn" aria-label="Previous page">&lt;</button>
+        <div id="page-numbers" class="page-numbers"></div>
+        <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
     </div>
 </div>
 """
