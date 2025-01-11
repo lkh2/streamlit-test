@@ -14,6 +14,11 @@ def gensimplecomponent(name, template="", script=""):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
+                    <style>
+                        [data-testid="stAppViewContainer"] {{
+                            background: linear-gradient(180deg, #2A5D4E 0%, #65897F 50%, #2A5D4E 100%);
+                        }}  
+                    </style>
                     <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
@@ -284,11 +289,7 @@ template = f"""
 
 # Add new CSS styles
 css = """
-<style>
-    [data-testid="stAppViewContainer"] {
-        background: linear-gradient(180deg, #2A5D4E 0%, #65897F 50%, #2A5D4E 100%);
-    }
-    
+<style>  
     .table-controls { 
         position: sticky; 
         top: 0; 
