@@ -54,24 +54,15 @@ df[object_columns] = df[object_columns].astype(str)
 def style_state(state):
     state = state.lower()
     style_map = {
-        'canceled': {'bg': '#FFC5C5', 'color': '#DF0404'},
-        'failed': {'bg': '#FFC5C5', 'color': '#DF0404'},
-        'suspended': {'bg': '#FFC5C5', 'color': '#DF0404'},
-        'successful': {'bg': '#16C09861', 'color': '#00B087'},
-        'live': {'bg': '#E6F3FF', 'color': '#0066CC'},
-        'submitted': {'bg': '#E6F3FF', 'color': '#0066CC'}
+        'canceled': 'background: #FFC5C5; color: #DF0404; border-color: #DF0404',
+        'failed': 'background: #FFC5C5; color: #DF0404; border-color: #DF0404',
+        'suspended': 'background: #FFC5C5; color: #DF0404; border-color: #DF0404',
+        'successful': 'background: #16C09861; color: #00B087; border-color: #00B087',
+        'live': 'background: #E6F3FF; color: #0066CC; border-color: #0066CC',
+        'submitted': 'background: #E6F3FF; color: #0066CC; border-color: #0066CC',
     }
-    colors = style_map.get(state, {'bg': '#F0F0F0', 'color': '#808080'})
-    return f'''<span style="
-        display: inline-block;
-        width: 100px;
-        padding: 4px 8px;
-        border-radius: 4px;
-        background: {colors['bg']};
-        color: {colors['color']};
-        border: 1px solid {colors['color']};
-        text-align: center;
-        ">{state}</span>'''
+    style = style_map.get(state, '')
+    return f'<span style="width: 80%; text-align: center; padding: 4px 8px; border-radius: 4px; border: solid 1px; {style}">{state}</span>'
 
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
@@ -79,32 +70,10 @@ df['State'] = df['State'].apply(style_state)
 # Convert DataFrame to HTML with styling
 html_table = f"""
 <style>
-    .table-container {{
-        display: flex;
-        justify-content: center;
-        padding: 20px;
-    }}
-    table {{
-        border-collapse: collapse;
-        width: 80%;
-        max-width: 1200px;
-    }}
-    th, td {{
-        padding: 12px;
-        text-align: left;
-        border-bottom: 1px solid #ddd;
-    }}
-    th {{
-        background-color: #f8f9fa;
-        font-weight: 600;
-    }}
-    td {{
-        vertical-align: middle;
-    }}
+    table {{ border-collapse: collapse; width: 80%; }}
+    th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
 </style>
-<div class="table-container">
-    {df.to_html(escape=False, index=False)}
-</div>
+{df.to_html(escape=False, index=False)}
 """
 
 # Display the data
