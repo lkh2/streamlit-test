@@ -52,25 +52,17 @@ df[object_columns] = df[object_columns].astype(str)
 
 # Create styling function
 def style_state(val):
-    common_style = "padding: 4px 8px; text-align: center; border-radius: 1px; display: inline-block; width: 80%;"
     styles = {
-        'canceled': f"background-color: #FFC5C5; color: #DF0404; border: 1px solid #DF0404;",
-        'failed': f"background-color: #FFC5C5; color: #DF0404; border: 1px solid #DF0404;",
-        'suspended': f"background-color: #FFC5C5; color: #DF0404; border: 1px solid #DF0404;",
-        'successful': f"background-color: #16C09861; color: #00B087; border: 1px solid #00B087;",
-        'live': f"background-color: #E6F3FF; color: #0066CC; border: 1px solid #0066CC;",
-        'submitted': f"background-color: #F0F0F0; color: #808080; border: 1px solid #808080;"
+        'canceled': 'background-color: #FFC5C5; color: #DF0404',
+        'failed': 'background-color: #FFC5C5; color: #DF0404',
+        'suspended': 'background-color: #FFC5C5; color: #DF0404',
+        'successful': 'background-color: #16C09861; color: #00B087',
+        'live': 'background-color: #E6F3FF; color: #0066CC',
+        'submitted': 'background-color: #F0F0F0; color: #808080'
     }
-    style = styles.get(val.lower(), '')
-    return f'<span style="{common_style} {style}">{val}</span>'
-
-# Apply styling
-def highlight_state(df):
-    return pd.DataFrame('', index=df.index, columns=df.columns).style.format(
-        {'State': lambda x: style_state(x)}
-    )
+    return styles.get(val.lower(), '')
 
 # Display the data with styling
 st.title('Kickstarter Data Viewer')
-styled_df = df.style.format({'State': lambda x: style_state(x)}).hide_index()
-st.dataframe(styled_df, use_container_width=True, unsafe_allow_html=True)
+styled_df = df.style.applymap(style_state, subset=['State']).hide_index()
+st.dataframe(styled_df, use_container_width=True)
