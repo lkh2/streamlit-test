@@ -284,14 +284,13 @@ css = """
     }
     
     .table-container { 
-        display: flex; 
-        justify-content: center; 
+        position: relative;
+        display: block; 
         padding: 20px; 
         width: calc(100% - 40px); 
         background: #ffffff; 
         min-height: 200px; 
-        max-height: none; /* Remove max-height restriction */
-        overflow-y: visible; /* Change from auto to visible */
+        overflow: visible;
     }
     
     table { 
@@ -373,12 +372,12 @@ css = """
     }
 
     .table-wrapper { 
+        position: relative;
         max-width: 100%; 
         background: #ffffff; 
         border-radius: 20px; 
-        overflow: visible; 
-        display: flex; 
-        flex-direction: column; 
+        overflow: visible;
+        min-height: 400px;
     }
 
     .search-input { 
@@ -459,6 +458,7 @@ css = """
         background: #ffffff;
         border-radius: 20px;
         margin-bottom: 20px;
+        min-height: 120px;
     }
 
     .filter-controls {
@@ -673,18 +673,29 @@ script = """
 
         adjustHeight() {
             requestAnimationFrame(() => {
-                const wrapper = document.querySelector('.table-wrapper');
-                const table = document.querySelector('.table-container');
-                const controls = document.querySelector('.table-controls');
-                const pagination = document.querySelector('.pagination-controls');
+                const filterWrapper = document.querySelector('.filter-wrapper');
+                const tableWrapper = document.querySelector('.table-wrapper');
+                const tableContainer = document.querySelector('.table-container');
+                const table = document.querySelector('#data-table');
                 
-                if (wrapper && table && controls && pagination) {
-                    const totalHeight = wrapper.scrollHeight;
-                    const padding = 40; // Extra padding for visual comfort
+                if (filterWrapper && tableWrapper && tableContainer && table) {
+                    const filterHeight = filterWrapper.offsetHeight;
+                    const tableHeight = table.offsetHeight;
+                    const controlsHeight = 60; // Height of search controls
+                    const paginationHeight = 60; // Height of pagination
+                    const padding = 80; // Extra padding
                     
-                    // Set a minimum height of 400px or content height, whichever is larger
-                    const minHeight = Math.max(totalHeight + padding, 400);
-                    Streamlit.setFrameHeight(minHeight);
+                    const totalHeight = filterHeight + tableHeight + controlsHeight + paginationHeight + padding;
+                    
+                    // Ensure minimum height of 400px
+                    const finalHeight = Math.max(totalHeight, 400);
+                    
+                    // Set component height
+                    Streamlit.setFrameHeight(finalHeight);
+                    
+                    // Adjust container heights
+                    tableContainer.style.minHeight = `${tableHeight + padding}px`;
+                    tableWrapper.style.minHeight = `${tableHeight + controlsHeight + paginationHeight + padding}px`;
                 }
             });
         }
