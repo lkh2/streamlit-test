@@ -7,6 +7,17 @@ from pandas import json_normalize
 
 st.set_page_config(layout="wide")
 
+st.markdown(
+    """
+    <style>
+        [data-testid="stAppViewContainer"] {
+            background: linear-gradient(180deg, #2A5D4E 0%, #65897F 50%, #2A5D4E 100%);
+        }  
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 def gensimplecomponent(name, template="", script=""):
     """Generate a simple Streamlit component."""
     def html():
@@ -14,11 +25,6 @@ def gensimplecomponent(name, template="", script=""):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
-                    <style>
-                        [data-testid="stAppViewContainer"] {{
-                            background: linear-gradient(180deg, #2A5D4E 0%, #65897F 50%, #2A5D4E 100%);
-                        }}  
-                    </style>
                     <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
