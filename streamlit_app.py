@@ -216,6 +216,30 @@ script = """
             this.updateTable();
         }
 
+        updateVisibleRows(searchTerm) {
+            if (!searchTerm) {
+                this.visibleRows = this.allRows;
+            } else {
+                const pattern = createRegexPattern(searchTerm);
+                this.visibleRows = Array.from(this.allRows).filter(row => pattern.test(row.textContent));
+            }
+            this.currentPage = 1;
+            this.updateTable();
+        }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const tableHeight = document.querySelector('.table-container').offsetHeight;
+                const controlsHeight = document.querySelector('.table-controls').offsetHeight;
+                const paginationHeight = document.querySelector('.pagination-controls').offsetHeight;
+                const totalHeight = tableHeight + controlsHeight + paginationHeight + 40;
+                
+                // Ensure minimum height for visibility
+                const minHeight = Math.max(totalHeight, 400);
+                Streamlit.setFrameHeight(minHeight);
+            });
+        }
+
         setupControls() {
             const pageSizeSelect = document.getElementById('page-size');
             document.getElementById('prev-page').onclick = () => this.previousPage();
@@ -233,21 +257,18 @@ script = """
             this.adjustHeight();
         }
 
-        adjustHeight() {
-            // Calculate total content height
-            const wrapper = document.querySelector('.table-wrapper');
-            const controls = document.querySelector('.table-controls');
-            const table = document.querySelector('.table-container');
-            const pagination = document.querySelector('.pagination-controls');
-            
-            if (wrapper && table) {
-                // Add extra padding and ensure all elements are visible
-                const totalHeight = controls.offsetHeight + 
-                                  table.offsetHeight + 
-                                  pagination.offsetHeight + 
-                                  50; // extra padding
-                
-                Streamlit.setFrameHeight(totalHeight);
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
+            }
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
             }
         }
     }
@@ -294,6 +315,43 @@ script = """
 # Add CSS styles
 css = """
 <style>
+    .table-container { 
+        display: flex; 
+        justify-content: center; 
+        padding: 20px;
+        width: 100%;
+        background: #ffffff;
+        min-height: 300px;
+        max-height: calc(100vh - 200px);
+        overflow-y: auto;
+    }
+    
+    .table-controls {
+        position: sticky;
+        top: 0;
+        background: #ffffff;
+        z-index: 2;
+        padding: 20px 10%;
+        border-bottom: 1px solid #eee;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+    }
+    
+    .pagination-controls {
+        position: sticky;
+        bottom: 0;
+        background: #ffffff;
+        z-index: 2;
+        padding: 15px;
+        border-top: 1px solid #eee;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+    }
+    
     .table-container { 
         display: flex; 
         justify-content: center; 
