@@ -213,7 +213,7 @@ def get_filter_options(df):
 
 filter_options = get_filter_options(df)
 
-# Update template to include filter controls
+# Update template to include filter controls with default subcategory
 template = f"""
 <div class="filter-wrapper">
     <button class="reset-button" id="resetFilters">
@@ -227,7 +227,7 @@ template = f"""
             </select>
             <span>&</span>
             <select id="subcategoryFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['subcategories'])}
+                {' '.join(f'<option value="{opt}" {"selected" if opt == "All Subcategories" else ""}>{opt}</option>' for opt in filter_options['subcategories'])}
             </select>
             <span>Projects On</span>
             <select id="countryFilter" class="filter-select">
