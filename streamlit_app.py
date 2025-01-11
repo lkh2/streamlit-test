@@ -59,27 +59,12 @@ def style_state(state):
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
 
-# Read external files
-with open('table.css', 'r') as f:
-    css = f.read()
-    
+# Read HTML template
 with open('table.html', 'r') as f:
     template = Template(f.read())
-    
-with open('table.js', 'r') as f:
-    js = f.read()
 
 # Render HTML
-html_table = f"""
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-<style>
-{css}
-</style>
-{template.render(columns=df.columns, data=df.values)}
-<script>
-{js}
-</script>
-"""
+html_table = template.render(columns=df.columns, data=df.values)
 
 # Display the data
 st.markdown(html_table, unsafe_allow_html=True)
