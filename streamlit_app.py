@@ -62,7 +62,7 @@ def style_state(state):
         'submitted': 'background: #E6F3FF; color: #0066CC; border-color: #0066CC',
     }
     style = style_map.get(state, '')
-    return f'<span style="width: 80%; text-align: center; padding: 4px 8px; border-radius: 4px; border: solid 1px; {style}">{state}</span>'
+    return f'<div style="width: 80%; text-align: center; padding: 4px 8px; border-radius: 4px; border: solid 1px; {style}">{state}</div>'
 
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
@@ -70,10 +70,26 @@ df['State'] = df['State'].apply(style_state)
 # Convert DataFrame to HTML with styling
 html_table = f"""
 <style>
-    table {{ border-collapse: collapse; width: 80%; }}
-    th, td {{ padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }}
+    .table-container {{
+        display: flex;
+        justify-content: center;
+        padding: 20px;
+    }}
+    table {{
+        border-collapse: collapse;
+        width: 80%;
+        max-width: 1200px;
+    }}
+    th, td {{ 
+        padding: 8px; 
+        text-align: left; 
+        border-bottom: 1px solid #ddd; 
+    }}
+
 </style>
-{df.to_html(escape=False, index=False)}
+<div class="table-container">
+    {df.to_html(escape=False, index=False)}
+</div>
 """
 
 # Display the data
