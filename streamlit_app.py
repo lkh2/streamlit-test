@@ -383,8 +383,10 @@ css = """
         top: 0;
         z-index: 1;
         padding: 12px 8px;
-        font-weight: 600;
+        font-weight: 500;
         font-family: 'Poppins';
+        font-size: 14px;
+        font-color: #B5B7C0;
     }
     
     th:last-child {
@@ -399,6 +401,7 @@ css = """
         text-overflow: ellipsis;
         white-space: nowrap;
         font-family: 'Poppins';
+        font-size: 14px;
     }
 
     /* Adjust state cell width */
@@ -440,7 +443,7 @@ css = """
         display: flex; 
         justify-content: flex-end; 
         margin-bottom: 1rem; 
-        padding: 0 10%; 
+        padding: 0 10px; 
         border-radius: 20px;
     }
     .search-input { 
@@ -448,7 +451,7 @@ css = """
         border: 1px solid #ddd; 
         border-radius: 20px;
         width: 200px; 
-        font-size: 10px; 
+        font-size: 12px; 
         font-family: 'Poppins';
     }
     .search-input:focus { 
