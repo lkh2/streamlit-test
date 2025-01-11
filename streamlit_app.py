@@ -52,13 +52,14 @@ df[object_columns] = df[object_columns].astype(str)
 
 # Create styling function
 def style_state(val):
+    common_style = "padding: 4px 8px; text-align: center; border-radius: 4px; display: inline-block; width: 100%;"
     styles = {
-        'canceled': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'failed': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'suspended': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'successful': 'background-color: #16C09861; border: 1px solid #00B087; border-radius: 1px;',
-        'live': 'background-color: #E6F3FF; border: 1px solid #0066CC; border-radius: 1px;',
-        'submitted': 'background-color: #F0F0F0; border: 1px solid #808080; border-radius: 1px;'
+        'canceled': f"{common_style} background-color: #FFC5C5; color: #DF0404;",
+        'failed': f"{common_style} background-color: #FFC5C5; color: #DF0404;",
+        'suspended': f"{common_style} background-color: #FFC5C5; color: #DF0404;",
+        'successful': f"{common_style} background-color: #16C09861; color: #00B087;",
+        'live': f"{common_style} background-color: #E6F3FF; color: #0066CC;",
+        'submitted': f"{common_style} background-color: #F0F0F0; color: #808080;"
     }
     return styles.get(val.lower(), '')
 
