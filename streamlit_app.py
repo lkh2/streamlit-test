@@ -386,7 +386,8 @@ css = """
         font-weight: 500;
         font-family: 'Poppins';
         font-size: 14px;
-        font-color: #B5B7C0;
+        color: #B5B7C0;
+        text-align: left;
     }
     
     th:last-child {
@@ -492,10 +493,14 @@ css = """
         border: 1px solid #ddd;
         border-radius: 4px;
         margin-left: 1rem;
+        font-family: 'Poppins';
+        font-size: 12px;
     }
     
     #page-info {
         margin: 0 0.5rem;
+        font-family: 'Poppins';
+        font-size: 12px;
     }
 </style>
 """
