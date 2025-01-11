@@ -52,24 +52,25 @@ df[object_columns] = df[object_columns].astype(str)
 
 # Create styling function
 def style_state(val):
-    common_style = "padding: 4px 8px; text-align: center; border-radius: 4px; display: inline-block; width: 100%;"
+    common_style = "padding: 4px 8px; text-align: center; border-radius: 1px; display: inline-block; width: 80%;"
     styles = {
-        'canceled': f"{common_style} background-color: #FFC5C5; color: #DF0404;",
-        'failed': f"{common_style} background-color: #FFC5C5; color: #DF0404;",
-        'suspended': f"{common_style} background-color: #FFC5C5; color: #DF0404;",
-        'successful': f"{common_style} background-color: #16C09861; color: #00B087;",
-        'live': f"{common_style} background-color: #E6F3FF; color: #0066CC;",
-        'submitted': f"{common_style} background-color: #F0F0F0; color: #808080;"
+        'canceled': f"background-color: #FFC5C5; color: #DF0404; border: 1px solid #DF0404;",
+        'failed': f"background-color: #FFC5C5; color: #DF0404; border: 1px solid #DF0404;",
+        'suspended': f"background-color: #FFC5C5; color: #DF0404; border: 1px solid #DF0404;",
+        'successful': f"background-color: #16C09861; color: #00B087; border: 1px solid #00B087;",
+        'live': f"background-color: #E6F3FF; color: #0066CC; border: 1px solid #0066CC;",
+        'submitted': f"background-color: #F0F0F0; color: #808080; border: 1px solid #808080;"
     }
-    return styles.get(val.lower(), '')
+    style = styles.get(val.lower(), '')
+    return f'<span style="{common_style} {style}">{val}</span>'
 
 # Apply styling
 def highlight_state(df):
-    return pd.DataFrame('', index=df.index, columns=df.columns).style.apply(
-        lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1
+    return pd.DataFrame('', index=df.index, columns=df.columns).style.format(
+        {'State': lambda x: style_state(x)}
     )
 
 # Display the data with styling
 st.title('Kickstarter Data Viewer')
-styled_df = df.style.apply(lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1)
-st.dataframe(styled_df, use_container_width=True)
+styled_df = df.style.format({'State': lambda x: style_state(x)}).hide_index()
+st.dataframe(styled_df, use_container_width=True, unsafe_allow_html=True)
