@@ -8,8 +8,8 @@ from pandas import json_normalize
 @st.cache_resource
 def init_connection():
     mongo_connection_string = (
-        f"mongodb+srv://{st.secrets['mongo']['username']}:"
-        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/"
+        f"mongodb+srv://{st.secrets['mongo']['username']}:" 
+        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/" 
         f"{st.secrets['mongo']['database']}?retryWrites=true&w=majority"
     )
     return MongoClient(mongo_connection_string)
@@ -31,46 +31,72 @@ items = get_data()
 
 # Create DataFrame and restructure columns
 df = json_normalize(items)
-df = df[[
-    'data.name',
-    'data.creator.name',
-    'data.converted_pledged_amount',
-    'data.urls.web.project',
-    'data.location.expanded_country',
-    'data.state'
-]].rename(columns={
-    'data.name': 'Project Name',
-    'data.creator.name': 'Creator',
-    'data.converted_pledged_amount': 'Pledged Amount',
-    'data.urls.web.project': 'Link',
-    'data.location.expanded_country': 'Country',
-    'data.state': 'State'
+df = df[[ 
+    'data.name', 
+    'data.creator.name', 
+    'data.converted_pledged_amount', 
+    'data.urls.web.project', 
+    'data.location.expanded_country', 
+    'data.state' 
+]].rename(columns={ 
+    'data.name': 'Project Name', 
+    'data.creator.name': 'Creator', 
+    'data.converted_pledged_amount': 'Pledged Amount', 
+    'data.urls.web.project': 'Link', 
+    'data.location.expanded_country': 'Country', 
+    'data.state': 'State' 
 })
 
 # Convert object columns to string
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
-# Create styling function
-def style_state(val):
-    styles = {
-        'canceled': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'failed': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'suspended': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
-        'successful': 'background-color: #16C09861; border: 1px solid #00B087; border-radius: 1px;',
-        'live': 'background-color: #E6F3FF; border: 1px solid #0066CC; border-radius: 1px;',
-        'submitted': 'background-color: #F0F0F0; border: 1px solid #808080; border-radius: 1px;'
-    }
-    return styles.get(val.lower(), '')
-
-# Apply styling
-def highlight_state(df):
-    return pd.DataFrame('', index=df.index, columns=df.columns).style.apply(
-        lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1
-    )
-
-# Display the data with styling
+# Display the data with Shadcn UI table
 st.title('Kickstarter Data Viewer')
-styled_df = df.style.apply(lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1)
 
-ui.table(data=styled_df, maxHeight=500)
+# Define columns for the table
+columns = [
+    {"key": "Project Name", "title": "Project Name"},
+    {"key": "Creator", "title": "Creator"},
+    {"key": "Pledged Amount", "title": "Pledged Amount"},
+    {"key": "Country", "title": "Country"},
+    {"key": "State", "title": "State"}
+]
+
+# Add CSS for state styling
+st.markdown("""
+<style>
+.state-cell {
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-align: center;
+    display: inline-block;
+}
+.canceled, .failed, .suspended { 
+    background-color: #FFC5C5;
+    color: #DF0404;
+}
+.successful {
+    background-color: #16C09861;
+    color: #00B087;
+}
+.live {
+    background-color: #E6F3FF;
+    color: #0066CC;
+}
+.submitted {
+    background-color: #F0F0F0;
+    color: #808080;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Format state column with HTML
+df['State'] = df['State'].apply(lambda x: f'<div class="state-cell {x.lower()}">{x}</div>')
+
+# Display table
+ui.table(
+    data=df,
+    columns=columns,
+    maxHeight=500
+)
