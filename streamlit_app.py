@@ -51,25 +51,42 @@ df = df[[
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
-# Function to create styled state element
-def style_state(state):
+# Create a custom component for state display
+def create_state_element(state, key):
     state = state.lower()
-    if state in ['canceled', 'failed', 'suspended']:
-        return f'<span class="bg-red-100 text-red-800 px-2 py-1 rounded">{state}</span>'
-    elif state == 'successful':
-        return f'<span class="bg-green-100 text-green-800 px-2 py-1 rounded">{state}</span>'
-    elif state == 'live':
-        return f'<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">{state}</span>'
-    else:
-        return f'<span class="bg-gray-100 text-gray-800 px-2 py-1 rounded">{state}</span>'
+    style_map = {
+        'canceled': 'bg-red-100 text-red-800',
+        'failed': 'bg-red-100 text-red-800',
+        'suspended': 'bg-red-100 text-red-800',
+        'successful': 'bg-green-100 text-green-800',
+        'live': 'bg-blue-100 text-blue-800',
+        'submitted': 'bg-blue-100 text-blue-800'
+    }
+    
+    class_name = style_map.get(state, 'bg-gray-100 text-gray-800')
+    class_name += ' px-2 py-1 rounded inline-block'
+    
+    return ui.element(
+        "span",
+        key=f"state_{key}",
+        text=state,
+        className=class_name
+    )
 
-# Apply styling to State column
-df['State'] = df['State'].apply(style_state)
-
-# Display the data with Shadcn UI table
+# Display the data with Shadcn UI
 st.title('Kickstarter Data Viewer')
 
 with ui.card():
+    # Display custom state elements for each row
+    for idx, row in df.iterrows():
+        with ui.accordion(key=f"row_{idx}", label=row['Project Name']):
+            ui.text(f"Creator: {row['Creator']}")
+            ui.text(f"Pledged Amount: {row['Pledged Amount']}")
+            ui.text(f"Country: {row['Country']}")
+            ui.text("State: ")
+            create_state_element(row['State'], idx)
+
+    # Display table with basic data
     ui.table(
         data=df,
         maxHeight=500
