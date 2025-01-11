@@ -20,7 +20,7 @@ client = init_connection()
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find()  # Removed the limit(200)
+    items = collection.find().limit(500)
     
     # Convert MongoDB cursor to list and handle ObjectId
     items = [{**item, '_id': str(item['_id'])} for item in items]
@@ -50,6 +50,25 @@ df = df[[
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
-# Display the data
+# Create styling function
+def style_state(val):
+    styles = {
+        'canceled': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
+        'failed': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
+        'suspended': 'background-color: #FFC5C5; border: 1px solid #DF0404; border-radius: 1px;',
+        'successful': 'background-color: #16C09861; border: 1px solid #00B087; border-radius: 1px;',
+        'live': 'background-color: #E6F3FF; border: 1px solid #0066CC; border-radius: 1px;',
+        'submitted': 'background-color: #F0F0F0; border: 1px solid #808080; border-radius: 1px;'
+    }
+    return styles.get(val.lower(), '')
+
+# Apply styling
+def highlight_state(df):
+    return pd.DataFrame('', index=df.index, columns=df.columns).style.apply(
+        lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1
+    )
+
+# Display the data with styling
 st.title('Kickstarter Data Viewer')
-st.dataframe(df, use_container_width=True)
+styled_df = df.style.apply(lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1)
+st.dataframe(styled_df, use_container_width=True)
