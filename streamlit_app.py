@@ -14,6 +14,7 @@ def gensimplecomponent(name, template="", script=""):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
+                    <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
                     <script>
@@ -332,7 +333,7 @@ css = """
         top: 0;
         background: #ffffff;
         z-index: 2;
-        padding: 20px 10%;
+        padding: 0 10px;
         border-bottom: 1px solid #eee;
         height: 60px;
         display: flex;
@@ -381,9 +382,13 @@ css = """
         position: sticky;
         top: 0;
         z-index: 1;
-        text-align: center !important;
         padding: 12px 8px;
         font-weight: 600;
+        font-family: 'Poppins';
+    }
+    
+    th:last-child {
+        text-align: center;
     }
 
     td { 
@@ -393,12 +398,14 @@ css = """
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        font-family: 'Poppins';
     }
 
     /* Adjust state cell width */
     td:last-child {
         width: 120px;
         max-width: 120px;
+        text-align: center;
     }
 
     .state_cell { 
@@ -439,8 +446,10 @@ css = """
     .search-input { 
         padding: 8px 12px; 
         border: 1px solid #ddd; 
-        border-radius: 4px;
-        width: 200px; font-size: 14px; 
+        border-radius: 20px;
+        width: 200px; 
+        font-size: 10px; 
+        font-family: 'Poppins';
     }
     .search-input:focus { 
         outline: none; border-color: #0066CC; 
