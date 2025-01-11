@@ -399,7 +399,6 @@ css = """
     .pagination-controls {
         position: sticky;
         bottom: 0;
-        width: 100%;
         background: #ffffff;
         z-index: 2;
         display: flex;
@@ -409,6 +408,7 @@ css = """
         gap: 0.5rem;
         border-top: 1px solid #eee;
         min-height: 60px;
+        border-radius: 20px;
     }
 
     .page-numbers {
