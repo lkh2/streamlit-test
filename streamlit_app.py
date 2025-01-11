@@ -356,9 +356,9 @@ css = """
         display: flex; 
         justify-content: center; 
         padding: 20px;
-        width: 100%;
+        width: calc(100% - 40px);
         background: #ffffff;
-        min-height: 200px; /* Ensure minimum height */
+        min-height: 200px; 
     }
     table { 
         border-collapse: collapse; 
@@ -391,16 +391,24 @@ css = """
         background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
     }
     .table-wrapper { 
-        width: 100%; 
+        max-width: 100%; 
         background: #ffffff;
         border-radius: 20px;
-        overflow: visible; /* Changed from auto to visible */
+        overflow: visible;
         display: flex;
         flex-direction: column;
     }
-    .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
+    .table-controls { 
+        display: flex; 
+        justify-content: flex-end; 
+        margin-bottom: 1rem; 
+        padding: 0 10%; 
+        border-radius: 20px;
+    }
     .search-input { 
-        padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
+        padding: 8px 12px; 
+        border: 1px solid #ddd; 
+        border-radius: 4px;
         width: 200px; font-size: 14px; 
     }
     .search-input:focus { 
@@ -413,7 +421,8 @@ css = """
         border-radius: 4px; text-align: center; font-weight: 500;
     }
     .pagination-controls {
-        position: relative; /* Ensure pagination stays in flow */
+        position: relative; 
+        border-radius: 20px;
         display: flex;
         justify-content: flex-end;
         align-items: center;
