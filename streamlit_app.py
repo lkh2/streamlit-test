@@ -230,8 +230,8 @@ filter_options = get_filter_options(df)
 
 # Update template to include filter controls with default subcategory
 template = f"""
-<div class=title-wrapper">
-    <span class="big-title">Explore Successful Projects</span>
+<div class="title-wrapper">
+    <span>Explore Successful Projects</span>
 </div>
 <div class="filter-wrapper">
     <div class="reset-wrapper">
@@ -308,12 +308,14 @@ css = """
     .title-wrapper {
         width: 100%;
         text-align: center;    
+        margin-bottom: 50px;
     }
     
     .title-wrapper span {
         color: white;
         font-family: 'Playfair Display';
         font-weight: 600;
+        font-size: 88px;
     }
     
     .table-controls { 
@@ -883,6 +885,7 @@ script = """
 
         adjustHeight() {
             requestAnimationFrame(() => {
+                const titleWrapper = document.querySelector('.title-wrapper');
                 const filterWrapper = document.querySelector('.filter-wrapper');
                 const tableWrapper = document.querySelector('.table-wrapper');
                 const tableContainer = document.querySelector('.table-container');
@@ -890,7 +893,8 @@ script = """
                 const controls = document.querySelector('.table-controls');
                 const pagination = document.querySelector('.pagination-controls');
                 
-                if (filterWrapper && tableWrapper && tableContainer && table) {
+                if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
+                    const titleHeight = titleWrapper.offsetHeight;
                     const filterHeight = filterWrapper.offsetHeight;
                     const tableHeight = table.offsetHeight;
                     const controlsHeight = controls.offsetHeight;
@@ -900,12 +904,12 @@ script = """
                     // Calculate content height
                     const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
                     
-                    // Calculate total component height
-                    const totalHeight = filterHeight + contentHeight + padding;
+                    // Calculate total component height including title
+                    const totalHeight = titleHeight + filterHeight + contentHeight + padding;
                     
                     // Set minimum heights
                     const minContentHeight = 600; // Minimum height for table content
-                    const finalHeight = Math.max(totalHeight, minContentHeight);
+                    const finalHeight = Math.max(totalHeight, minContentHeight + titleHeight + filterHeight);
                     
                     // Update container heights
                     tableContainer.style.minHeight = `${Math.max(tableHeight, 400)}px`;
@@ -915,6 +919,7 @@ script = """
                     Streamlit.setFrameHeight(finalHeight + 40);
                     
                     console.log({
+                        titleHeight,
                         filterHeight,
                         tableHeight,
                         controlsHeight,
