@@ -51,11 +51,26 @@ df = df[[
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
+# Function to create styled state element
+def style_state(state):
+    state = state.lower()
+    if state in ['canceled', 'failed', 'suspended']:
+        return f'<span class="bg-red-100 text-red-800 px-2 py-1 rounded">{state}</span>'
+    elif state == 'successful':
+        return f'<span class="bg-green-100 text-green-800 px-2 py-1 rounded">{state}</span>'
+    elif state == 'live':
+        return f'<span class="bg-blue-100 text-blue-800 px-2 py-1 rounded">{state}</span>'
+    else:
+        return f'<span class="bg-gray-100 text-gray-800 px-2 py-1 rounded">{state}</span>'
+
+# Apply styling to State column
+df['State'] = df['State'].apply(style_state)
+
 # Display the data with Shadcn UI table
 st.title('Kickstarter Data Viewer')
 
-# Display table
-ui.table(
-    data=df,
-    maxHeight=200
-)
+with ui.card():
+    ui.table(
+        data=df,
+        maxHeight=500
+    )
