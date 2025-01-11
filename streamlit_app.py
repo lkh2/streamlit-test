@@ -593,13 +593,13 @@ script = """
         }
 
         initialize() {
-            this.setupSearch();
-            this.setupPagination();
+            this.setupSearchAndPagination();
             this.setupFilters();
             this.updateTable();
         }
 
-        setupSearch() {
+        setupSearchAndPagination() {
+            // Setup search
             const debouncedSearch = debounce((searchTerm) => {
                 this.currentSearchTerm = searchTerm;
                 this.applyAllFilters();
@@ -608,6 +608,11 @@ script = """
             this.searchInput.addEventListener('input', (e) => {
                 debouncedSearch(e.target.value.trim().toLowerCase());
             });
+
+            // Setup pagination controls
+            document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
+            document.getElementById('next-page').addEventListener('click', () => this.nextPage());
+            window.handlePageClick = (page) => this.goToPage(page);
         }
 
         applyAllFilters() {
