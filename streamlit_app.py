@@ -14,7 +14,7 @@ st.markdown(
             background: linear-gradient(180deg, #2A5D4E 0%, #65897F 50%, #2A5D4E 100%);
         }  
         [data-testid="stHeader"] {
-            background: #2A5D4E;
+            background: transparent;
         }  
     </style>
     """,
@@ -308,14 +308,14 @@ css = """
     .title-wrapper {
         width: 100%;
         text-align: center;    
-        margin-bottom: 50px;
+        margin-bottom: 25px;
     }
     
     .title-wrapper span {
         color: white;
         font-family: 'Playfair Display';
-        font-weight: 600;
-        font-size: 88px;
+        font-weight: 500;
+        font-size: 70px;
     }
     
     .table-controls { 
@@ -535,8 +535,8 @@ css = """
         align-items: center;
         gap: 10px;
         margin-bottom: 10px;
-        margin-left: 20px;
-        margin-right: 20px;
+        margin-left: 5px;
+        margin-right: 5px;
         width: 90%;
         justify-content: space-between;
     }
