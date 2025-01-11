@@ -586,29 +586,23 @@ script = """
             this.visibleRows = this.allRows;
             this.currentPage = 1;
             this.pageSize = 10;
+            this.currentSearchTerm = '';
+            this.currentFilters = null;
+            this.currentSort = 'newest';
             this.initialize();
-            this.setupFilters();
         }
 
         initialize() {
             this.setupSearch();
             this.setupPagination();
+            this.setupFilters();
             this.updateTable();
         }
 
         setupSearch() {
             const debouncedSearch = debounce((searchTerm) => {
-                if (!searchTerm) {
-                    this.visibleRows = this.allRows;
-                } else {
-                    const pattern = createRegexPattern(searchTerm);
-                    this.visibleRows = this.allRows.filter(row => {
-                        const text = row.textContent || row.innerText;
-                        return pattern.test(text);
-                    });
-                }
-                this.currentPage = 1;
-                this.updateTable();
+                this.currentSearchTerm = searchTerm;
+                this.applyAllFilters();
             }, 300);
 
             this.searchInput.addEventListener('input', (e) => {
@@ -616,10 +610,125 @@ script = """
             });
         }
 
-        setupPagination() {
-            document.getElementById('prev-page').onclick = () => this.previousPage();
-            document.getElementById('next-page').onclick = () => this.nextPage();
-            window.handlePageClick = (page) => this.goToPage(page);
+        applyAllFilters() {
+            // Start with all rows
+            let filteredRows = this.allRows;
+
+            // Apply search if exists
+            if (this.currentSearchTerm) {
+                const pattern = createRegexPattern(this.currentSearchTerm);
+                filteredRows = filteredRows.filter(row => {
+                    const text = row.textContent || row.innerText;
+                    return pattern.test(text);
+                });
+            }
+
+            // Apply filters if they exist
+            if (this.currentFilters) {
+                filteredRows = filteredRows.filter(row => {
+                    return this.matchesFilters(row, this.currentFilters);
+                });
+            }
+
+            // Store filtered results
+            this.visibleRows = filteredRows;
+
+            // Apply current sort
+            this.sortRows(this.currentSort);
+
+            // Reset to first page and update display
+            this.currentPage = 1;
+            this.updateTable();
+        }
+
+        applyFilters() {
+            this.currentFilters = {
+                category: document.getElementById('categoryFilter').value,
+                subcategory: document.getElementById('subcategoryFilter').value,
+                country: document.getElementById('countryFilter').value,
+                state: document.getElementById('stateFilter').value,
+                pledged: document.getElementById('pledgedFilter').value,
+                goal: document.getElementById('goalFilter').value,
+                raised: document.getElementById('raisedFilter').value,
+                date: document.getElementById('dateFilter').value
+            };
+            this.currentSort = document.getElementById('sortFilter').value;
+            
+            this.applyAllFilters();
+        }
+
+        matchesFilters(row, filters) {
+            const category = row.dataset.category;
+            const subcategory = row.dataset.subcategory;
+            const pledged = parseFloat(row.dataset.pledged);
+            const goal = parseFloat(row.dataset.goal);
+            const raised = parseFloat(row.dataset.raised);
+            const date = new Date(row.dataset.date);
+            const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
+            const country = row.querySelector('td:nth-child(5)').textContent;
+
+            // Category filters
+            if (filters.category !== 'All Categories' && category !== filters.category) return false;
+            if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
+            if (filters.country !== 'All Countries' && country !== filters.country) return false;
+            if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
+
+            // Numeric range filters
+            if (filters.pledged !== 'All Amounts') {
+                const [min, max] = filters.pledged.split('-')
+                    .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                if (pledged < min || (max && pledged > max)) return false;
+            }
+
+            if (filters.goal !== 'All Goals') {
+                const [min, max] = filters.goal.split('-')
+                    .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                if (goal < min || (max && goal > max)) return false;
+            }
+
+            if (filters.raised !== 'All Percentages') {
+                const [min, max] = filters.raised.split('-')
+                    .map(v => parseFloat(v.replace(/%/g, '')));
+                if (raised < min || raised > max) return false;
+            }
+
+            // Date filter
+            if (filters.date !== 'All Time') {
+                const now = new Date();
+                let compareDate = new Date();
+                
+                switch(filters.date) {
+                    case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
+                    case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
+                    case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
+                    case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
+                    case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
+                    case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
+                }
+                
+                if (date < compareDate) return false;
+            }
+
+            return true;
+        }
+
+        sortRows(sortType) {
+            this.visibleRows.sort((a, b) => {
+                const dateA = new Date(a.dataset.date);
+                const dateB = new Date(b.dataset.date);
+                return sortType === 'newest' ? dateB - dateA : dateA - dateB;
+            });
+        }
+
+        resetFilters() {
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => select.selectedIndex = 0);
+            this.searchInput.value = '';
+            this.currentSearchTerm = '';
+            this.currentFilters = null;
+            this.currentSort = 'newest';
+            this.visibleRows = this.allRows;
+            this.applyAllFilters();
         }
 
         updateTable() {
@@ -755,98 +864,6 @@ script = """
             });
 
             document.getElementById('resetFilters').addEventListener('click', () => this.resetFilters());
-        }
-
-        resetFilters() {
-            const selects = document.querySelectorAll('.filter-select');
-            selects.forEach(select => select.selectedIndex = 0);
-            this.applyFilters();
-        }
-
-        applyFilters() {
-            const filters = {
-                category: document.getElementById('categoryFilter').value,
-                subcategory: document.getElementById('subcategoryFilter').value,
-                country: document.getElementById('countryFilter').value,
-                state: document.getElementById('stateFilter').value,
-                pledged: document.getElementById('pledgedFilter').value,
-                goal: document.getElementById('goalFilter').value,
-                raised: document.getElementById('raisedFilter').value,
-                date: document.getElementById('dateFilter').value,
-                sort: document.getElementById('sortFilter').value
-            };
-
-            this.visibleRows = this.allRows.filter(row => {
-                // Get data from row attributes
-                const category = row.dataset.category;
-                const subcategory = row.dataset.subcategory;
-                const pledged = parseFloat(row.dataset.pledged);
-                const goal = parseFloat(row.dataset.goal);
-                const raised = parseFloat(row.dataset.raised);
-                const date = new Date(row.dataset.date);
-                const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
-                const country = row.querySelector('td:nth-child(5)').textContent;
-
-                // Category filters
-                if (filters.category !== 'All Categories' && category !== filters.category) return false;
-                if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-                if (filters.country !== 'All Countries' && country !== filters.country) return false;
-                if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
-
-                // Numeric range filters
-                if (filters.pledged !== 'All Amounts') {
-                    const [min, max] = filters.pledged.split('-')
-                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                    if (pledged < min || (max && pledged > max)) return false;
-                }
-
-                if (filters.goal !== 'All Goals') {
-                    const [min, max] = filters.goal.split('-')
-                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                    if (goal < min || (max && goal > max)) return false;
-                }
-
-                if (filters.raised !== 'All Percentages') {
-                    const [min, max] = filters.raised.split('-')
-                        .map(v => parseFloat(v.replace(/%/g, '')));
-                    if (raised < min || raised > max) return false;
-                }
-
-                // Date filter
-                if (filters.date !== 'All Time') {
-                    const now = new Date();
-                    let compareDate = new Date();
-                    
-                    switch(filters.date) {
-                        case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
-                        case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
-                        case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
-                        case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
-                        case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
-                        case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
-                    }
-                    
-                    if (date < compareDate) return false;
-                }
-
-                return true;
-            });
-
-            // Apply sorting if needed
-            if (filters.sort !== 'none') {
-                this.sortRows(filters.sort);
-            }
-
-            this.currentPage = 1;
-            this.updateTable();
-        }
-
-        sortRows(sortType) {
-            this.visibleRows.sort((a, b) => {
-                const dateA = new Date(a.dataset.date);
-                const dateB = new Date(b.dataset.date);
-                return sortType === 'newest' ? dateB - dateA : dateA - dateB;
-            });
         }
     }
 
