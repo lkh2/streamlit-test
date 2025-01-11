@@ -519,6 +519,10 @@ css = """
         align-items: center;
         gap: 10px;
         margin-bottom: 10px;
+        margin-left: 20px;
+        margin-right: 20px;
+        width: 90%;
+        justify-content: space-between;
     }
 
     .filter-label {
@@ -546,7 +550,6 @@ css = """
 
     .reset-button {
         height: 100%;
-        width: 40px;
         background: transparent;
         color: white;
         border: none;
@@ -565,7 +568,7 @@ css = """
     }
 
     .reset-button:hover {
-        background: #4a29bb;
+        background: grey;
     }
 
     .filtered-text {
