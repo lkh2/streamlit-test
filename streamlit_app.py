@@ -2,6 +2,7 @@ import streamlit as st
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
+from jinja2 import Template
 
 # Initialize connection.
 @st.cache_resource
@@ -53,46 +54,24 @@ df[object_columns] = df[object_columns].astype(str)
 # Function to style state with colored span
 def style_state(state):
     state = state.lower()
-    style_map = {
-        'canceled': 'background: #FFC5C5; color: #DF0404; border-color: #DF0404',
-        'failed': 'background: #FFC5C5; color: #DF0404; border-color: #DF0404',
-        'suspended': 'background: #FFC5C5; color: #DF0404; border-color: #DF0404',
-        'successful': 'background: #16C09861; color: #00B087; border-color: #00B087',
-        'live': 'background: #E6F3FF; color: #0066CC; border-color: #0066CC',
-        'submitted': 'background: #E6F3FF; color: #0066CC; border-color: #0066CC',
-    }
-    style = style_map.get(state, '')
-    return f'<div class="state_cell" style="width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; {style}">{state}</div>'
+    return f'<div class="state_cell state-{state}">{state}</div>'
 
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
 
-# Convert DataFrame to HTML with styling
+# Read external files
+with open('table.css', 'r') as f:
+    css = f.read()
+    
+with open('table.html', 'r') as f:
+    template = Template(f.read())
+
+# Render HTML
 html_table = f"""
 <style>
-    .table-container {{
-        display: flex;
-        justify-content: center;
-        padding: 20px;
-    }}
-    table {{
-        border-collapse: collapse;
-        width: 80%;
-        max-width: 1200px;
-    }}
-    th, td {{ 
-        padding: 8px; 
-        text-align: left; 
-        border-bottom: 1px solid #ddd; 
-    }}
-    td:has(.state_cell) {{
-        justify-items: center;
-    }}
-
+{css}
 </style>
-<div class="table-container">
-    {df.to_html(escape=False, index=False)}
-</div>
+{template.render(columns=df.columns, data=df.values)}
 """
 
 # Display the data

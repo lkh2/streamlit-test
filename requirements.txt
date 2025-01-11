@@ -1,3 +1,4 @@
+jinja2
 pandas
 pymongo[tls,srv]==3.11.1
 streamlit
