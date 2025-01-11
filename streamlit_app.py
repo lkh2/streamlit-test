@@ -14,7 +14,6 @@ def gensimplecomponent(name, template="", script=""):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
-                    <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
                     <script>
@@ -126,10 +125,9 @@ def style_state(state):
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
 
-# Update header generation to include scope attribute
 def generate_table_html(df):
-    # Generate table header with scope attribute
-    header_html = ''.join(f'<th scope="col">{column}</th>' for column in df.columns)
+    # Generate table header
+    header_html = ''.join(f'<th>{column}</th>' for column in df.columns)
     
     # Generate table rows
     rows_html = ''
@@ -218,30 +216,6 @@ script = """
             this.updateTable();
         }
 
-        updateVisibleRows(searchTerm) {
-            if (!searchTerm) {
-                this.visibleRows = this.allRows;
-            } else {
-                const pattern = createRegexPattern(searchTerm);
-                this.visibleRows = Array.from(this.allRows).filter(row => pattern.test(row.textContent));
-            }
-            this.currentPage = 1;
-            this.updateTable();
-        }
-
-        adjustHeight() {
-            requestAnimationFrame(() => {
-                const tableHeight = document.querySelector('.table-container').offsetHeight;
-                const controlsHeight = document.querySelector('.table-controls').offsetHeight;
-                const paginationHeight = document.querySelector('.pagination-controls').offsetHeight;
-                const totalHeight = tableHeight + controlsHeight + paginationHeight + 40;
-                
-                // Ensure minimum height for visibility
-                const minHeight = Math.max(totalHeight, 400);
-                Streamlit.setFrameHeight(minHeight);
-            });
-        }
-
         setupControls() {
             const pageSizeSelect = document.getElementById('page-size');
             document.getElementById('prev-page').onclick = () => this.previousPage();
@@ -259,18 +233,21 @@ script = """
             this.adjustHeight();
         }
 
-        previousPage() {
-            if (this.currentPage > 1) {
-                this.currentPage--;
-                this.updateTable();
-            }
-        }
-
-        nextPage() {
-            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            if (this.currentPage < totalPages) {
-                this.currentPage++;
-                this.updateTable();
+        adjustHeight() {
+            // Calculate total content height
+            const wrapper = document.querySelector('.table-wrapper');
+            const controls = document.querySelector('.table-controls');
+            const table = document.querySelector('.table-container');
+            const pagination = document.querySelector('.pagination-controls');
+            
+            if (wrapper && table) {
+                // Add extra padding and ensure all elements are visible
+                const totalHeight = controls.offsetHeight + 
+                                  table.offsetHeight + 
+                                  pagination.offsetHeight + 
+                                  50; // extra padding
+                
+                Streamlit.setFrameHeight(totalHeight);
             }
         }
     }
@@ -323,44 +300,7 @@ css = """
         padding: 20px;
         width: 100%;
         background: #ffffff;
-        min-height: 300px;
-        max-height: calc(100vh - 200px);
-        overflow-y: auto;
-    }
-    
-    .table-controls {
-        position: sticky;
-        top: 0;
-        background: #ffffff;
-        z-index: 2;
-        padding: 0 10px;
-        border-bottom: 1px solid #eee;
-        height: 60px;
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-    }
-    
-    .pagination-controls {
-        position: sticky;
-        bottom: 0;
-        background: #ffffff;
-        z-index: 2;
-        padding: 15px;
-        border-top: 1px solid #eee;
-        height: 60px;
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-    }
-    
-    .table-container { 
-        display: flex; 
-        justify-content: center; 
-        padding: 20px;
-        width: calc(100% - 40px);
-        background: #ffffff;
-        min-height: 200px; 
+        min-height: 200px; /* Ensure minimum height */
     }
     table { 
         border-collapse: collapse; 
@@ -368,61 +308,21 @@ css = """
         background: #ffffff;
         table-layout: fixed;
     }
-
-    /* Column width specifications */
-    th[scope="col"]:nth-child(1) { width: 25%; }  /* Project Name - 2 parts */
-    th[scope="col"]:nth-child(2) { width: 12.5%; }  /* Creator - 1 part */
-    th[scope="col"]:nth-child(3) { width: 120px; }  /* Pledged Amount - fixed */
-    th[scope="col"]:nth-child(4) { width: 25%; }  /* Link - 2 parts */
-    th[scope="col"]:nth-child(5) { width: 12.5%; }  /* Country - 1 part */
-    th[scope="col"]:nth-child(6) { width: 120px; }  /* State - fixed */
-
-    th { 
-        background: #ffffff;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        padding: 12px 8px;
-        font-weight: 500;
-        font-family: 'Poppins';
-        font-size: 14px;
-        color: #B5B7C0;
-        text-align: left;
-    }
-    
-    th:last-child {
-        text-align: center;
-    }
-
-    td { 
+    th, td { 
         padding: 8px; 
         text-align: left; 
         border-bottom: 1px solid #ddd;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-family: 'Poppins';
-        font-size: 14px;
     }
-
-    /* Adjust state cell width */
-    td:last-child {
-        width: 120px;
-        max-width: 120px;
-        text-align: center;
+    th {
+        background: #ffffff;
+        position: sticky;
+        top: 0;
+        z-index: 1;
     }
-
-    .state_cell { 
-        width: 100px;
-        max-width: 100px;
-        margin: 0 auto;
-        padding: 3px 5px; 
-        text-align: center; 
-        border-radius: 4px; 
-        border: solid 1px;
-        display: inline-block;
-    }
-
+    .state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
     .state-canceled, .state-failed, .state-suspended { 
         background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
     }
@@ -433,27 +333,17 @@ css = """
         background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
     }
     .table-wrapper { 
-        max-width: 100%; 
+        width: 100%; 
         background: #ffffff;
         border-radius: 20px;
-        overflow: visible;
+        overflow: visible; /* Changed from auto to visible */
         display: flex;
         flex-direction: column;
     }
-    .table-controls { 
-        display: flex; 
-        justify-content: flex-end; 
-        margin-bottom: 1rem; 
-        padding: 0 10px; 
-        border-radius: 20px;
-    }
+    .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
     .search-input { 
-        padding: 8px 12px; 
-        border: 1px solid #ddd; 
-        border-radius: 20px;
-        width: 200px; 
-        font-size: 12px; 
-        font-family: 'Poppins';
+        padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
+        width: 200px; font-size: 14px; 
     }
     .search-input:focus { 
         outline: none; border-color: #0066CC; 
@@ -465,8 +355,7 @@ css = """
         border-radius: 4px; text-align: center; font-weight: 500;
     }
     .pagination-controls {
-        position: relative; 
-        border-radius: 20px;
+        position: relative; /* Ensure pagination stays in flow */
         display: flex;
         justify-content: flex-end;
         align-items: center;
@@ -493,14 +382,10 @@ css = """
         border: 1px solid #ddd;
         border-radius: 4px;
         margin-left: 1rem;
-        font-family: 'Poppins';
-        font-size: 12px;
     }
     
     #page-info {
         margin: 0 0.5rem;
-        font-family: 'Poppins';
-        font-size: 12px;
     }
 </style>
 """
