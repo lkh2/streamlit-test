@@ -62,7 +62,7 @@ def style_state(state):
         'submitted': 'background: #E6F3FF; color: #0066CC; border-color: #0066CC',
     }
     style = style_map.get(state, '')
-    return f'<div style="width: 80%; text-align: center; padding: 4px 8px; border-radius: 4px; border: solid 1px; {style}">{state}</div>'
+    return f'<div class="state_cell" style="width: 90%; text-align: center; border-radius: 4px; border: solid 1px; {style}">{state}</div>'
 
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
@@ -84,6 +84,10 @@ html_table = f"""
         padding: 8px; 
         text-align: left; 
         border-bottom: 1px solid #ddd; 
+    }}
+    td:has(.state_cell) {{
+        padding: 0;
+        justify-items: center;
     }}
 
 </style>
