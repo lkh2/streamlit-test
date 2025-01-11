@@ -20,9 +20,13 @@ client = init_connection()
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(200)  # Limit to the first 200 entries
-    items = list(items)  # Make hashable for st.cache_data
-    return items
+    items = collection.find().limit(200)
+    # Convert ObjectId to string for each document
+    processed_items = []
+    for item in items:
+        item['_id'] = str(item['_id'])  # Convert ObjectId to string
+        processed_items.append(item)
+    return processed_items
 
 items = get_data()
 
