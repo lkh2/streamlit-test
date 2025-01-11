@@ -54,18 +54,8 @@ df[object_columns] = df[object_columns].astype(str)
 # Display the data with Shadcn UI table
 st.title('Kickstarter Data Viewer')
 
-# Define columns for the table
-columns = [
-    {"key": "Project Name", "title": "Project Name"},
-    {"key": "Creator", "title": "Creator"},
-    {"key": "Pledged Amount", "title": "Pledged Amount"},
-    {"key": "Country", "title": "Country"},
-    {"key": "State", "title": "State"}
-]
-
 # Display table
 ui.table(
     data=df,
-    columns=columns,
     maxHeight=200
 )
