@@ -848,6 +848,19 @@ script = """
     Streamlit.setComponentReady();
 """
 
+# After DataFrame processing and before component creation
+st.write("### DataFrame Preview")
+st.write("Number of rows:", len(df))
+st.write("Columns:", df.columns.tolist())
+
+# Create expandable sections for detailed data views
+with st.expander("View DataFrame Sample"):
+    st.dataframe(df.head(10))
+
+with st.expander("View Data Statistics"):
+    # Display all columns including hidden ones using st.dataframe
+    st.dataframe(df)
+
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
