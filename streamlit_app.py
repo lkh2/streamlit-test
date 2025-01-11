@@ -14,6 +14,7 @@ def gensimplecomponent(name, template="", script=""):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
+                    <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
                     <script>
@@ -126,8 +127,8 @@ def style_state(state):
 df['State'] = df['State'].apply(style_state)
 
 def generate_table_html(df):
-    # Generate table header
-    header_html = ''.join(f'<th>{column}</th>' for column in df.columns)
+    # Generate table header with scope attribute
+    header_html = ''.join(f'<th scope="col">{column}</th>' for column in df.columns)
     
     # Generate table rows
     rows_html = ''
@@ -265,8 +266,12 @@ script = """
             const start = (this.currentPage - 1) * this.pageSize;
             const end = start + this.pageSize;
             
-            this.allRows.forEach((row, index) => {
-                row.style.display = (index >= start && index < end) ? '' : 'none';
+            // First hide all rows
+            this.allRows.forEach(row => row.style.display = 'none');
+            
+            // Then show only visible rows for current page
+            this.visibleRows.slice(start, end).forEach(row => {
+                row.style.display = '';
             });
             
             this.updatePageNumbers();
@@ -277,20 +282,15 @@ script = """
                 this.visibleRows = this.allRows;
             } else {
                 const pattern = createRegexPattern(searchTerm);
-                this.visibleRows = this.allRows.filter(row => pattern.test(row.textContent));
+                this.visibleRows = this.allRows.filter(row => {
+                    const text = row.textContent || row.innerText;
+                    return pattern.test(text);
+                });
             }
+            
+            console.log(`Filtered to ${this.visibleRows.length} rows`);
             this.currentPage = 1;
             this.updateTable();
-        }
-
-        setupControls() {
-            const prevBtn = document.getElementById('prev-page');
-            const nextBtn = document.getElementById('next-page');
-            
-            prevBtn.onclick = () => this.previousPage();
-            nextBtn.onclick = () => this.nextPage();
-            
-            this.updatePageNumbers();
         }
 
         updatePageNumbers() {
@@ -307,8 +307,12 @@ script = """
                     onclick="window.handlePageClick(${page})">${page}</button>`;
             }).join('');
 
+            // Update navigation buttons and info
             document.getElementById('prev-page').disabled = this.currentPage <= 1;
             document.getElementById('next-page').disabled = this.currentPage >= totalPages;
+            
+            // Log pagination state
+            console.log(`Page ${this.currentPage} of ${totalPages}, showing ${this.visibleRows.length} results`);
         }
 
         previousPage() {
@@ -347,25 +351,26 @@ script = """
         const tableRows = document.querySelectorAll('#data-table tbody tr');
         
         if (!searchInput || !tableRows.length) {
+            console.log('Waiting for elements...');
             setTimeout(initializeTable, 100);
             return;
         }
 
+        console.log('Initializing table with', tableRows.length, 'rows');
         window.tablePagination = new TablePagination(tableRows);
         
-        const debouncedSearch = debounce(
-            (term) => window.tablePagination.updateVisibleRows(term),
-            300
-        );
+        searchInput.addEventListener('input', debounce((e) => {
+            const searchTerm = e.target.value.trim().toLowerCase();
+            console.log('Searching for:', searchTerm);
+            window.tablePagination.updateVisibleRows(searchTerm);
+        }, 300));
 
-        searchInput.addEventListener('input', (e) => {
-            debouncedSearch(e.target.value.trim().toLowerCase());
-        });
-
-        // Set initial frame height
+        // Adjust height after initialization
         const wrapper = document.querySelector('.table-wrapper');
         if (wrapper) {
-            Streamlit.setFrameHeight(wrapper.offsetHeight + 50);
+            const height = wrapper.offsetHeight + 50;
+            console.log('Setting frame height to:', height);
+            Streamlit.setFrameHeight(height);
         }
     }
 
@@ -415,21 +420,82 @@ css = """
         background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
     }
     .state-successful { 
+    th[scope="col"]:nth-child(1) { width: 25%; }  /* Project Name - 2 parts */
+    th[scope="col"]:nth-child(2) { width: 12.5%; }  /* Creator - 1 part */
+    th[scope="col"]:nth-child(3) { width: 120px; }  /* Pledged Amount - fixed */
+    th[scope="col"]:nth-child(4) { width: 25%; }  /* Link - 2 parts */
+    th[scope="col"]:nth-child(5) { width: 12.5%; }  /* Country - 1 part */
+    th[scope="col"]:nth-child(6) { width: 120px; }  /* State - fixed */
+
+    th { 
+        background: #ffffff;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        padding: 12px 8px;
+        font-weight: 500;
+        font-family: 'Poppins';
+        font-size: 14px;
+        color: #B5B7C0;
+        text-align: left;
+    }
+    
+    th:last-child {
+        text-align: center;
+    }
+
+    td { 
+        padding: 8px; 
+        text-align: left; 
+        border-bottom: 1px solid #ddd;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: 'Poppins';
+        font-size: 14px;
+    }
+
+    td:last-child {
+        width: 120px;
+        max-width: 120px;
+        text-align: center;
+    }
+
+    .state_cell { 
+        width: 100px;
+        max-width: 100px;
+        margin: 0 auto;
+        padding: 3px 5px; 
+        text-align: center; 
+        border-radius: 4px; 
+        border: solid 1px;
+        display: inline-block;
+    }
+
+    .state-canceled, .state-failed, .state-suspended { 
+        background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
+    }
+    .state-successful { 
         background: #16C09861; color: #00B087; border-color: #00B087; 
     }
     .state-live, .state-submitted { 
         background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
     }
     .table-wrapper { 
-        width: 100%; 
+        max-width: 100%; 
         background: #ffffff;
         border-radius: 20px;
-        overflow-x: auto;
+        overflow: visible;
+        display: flex;
+        flex-direction: column;
     }
-    .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
     .search-input { 
-        padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
-        width: 200px; font-size: 14px; 
+        padding: 8px 12px; 
+        border: 1px solid #ddd; 
+        border-radius: 20px;
+        width: 200px; 
+        font-size: 12px; 
+        font-family: 'Poppins';
     }
     .search-input:focus { 
         outline: none; border-color: #0066CC; 
@@ -440,6 +506,7 @@ css = """
         margin-bottom: 20px; border: 1px solid #ffeeba;
         border-radius: 4px; text-align: center; font-weight: 500;
     }
+
     .pagination-controls {
         display: flex;
         justify-content: flex-end;
