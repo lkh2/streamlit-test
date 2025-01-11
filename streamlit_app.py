@@ -14,7 +14,6 @@ def gensimplecomponent(name, template="", script=""):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
-                    <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
                     <script>
@@ -127,8 +126,8 @@ def style_state(state):
 df['State'] = df['State'].apply(style_state)
 
 def generate_table_html(df):
-    # Generate table header with scope attribute
-    header_html = ''.join(f'<th scope="col">{column}</th>' for column in df.columns)
+    # Generate table header
+    header_html = ''.join(f'<th>{column}</th>' for column in df.columns)
     
     # Generate table rows
     rows_html = ''
@@ -167,6 +166,7 @@ template = f"""
 
 # Create table component script with improved search and pagination
 script = """
+    // Helper functions
     function debounce(func, wait) {
         let timeout;
         return function(...args) {
@@ -176,126 +176,82 @@ script = """
     }
 
     function createRegexPattern(searchTerm) {
-        // Split search term into individual words and escape special characters
+        if (!searchTerm) return null;
         const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
         const escapedWords = words.map(word => 
             word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
         );
-        
-        // Create a regex pattern that matches all words in any order
         return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
     }
 
-    function performSearch(searchTerm, tableRows) {
-        console.log('Performing search for:', searchTerm);
+    function updateTableRows(rows, currentPage, pageSize) {
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
         
-        try {
-            const pattern = createRegexPattern(searchTerm);
-            let matchCount = 0;
-
-            tableRows.forEach(row => {
-                const text = row.textContent;
-                const isMatch = pattern.test(text);
-                row.style.display = isMatch ? '' : 'none';
-                if (isMatch) matchCount++;
-            });
-
-            console.log(`Found ${matchCount} matches`);
-        } catch (error) {
-            console.error('Search error:', error);
-        }
-    }
-
-    function initializeSearch() {
-        console.log('Initializing search functionality...');
-        const searchInput = document.getElementById('table-search');
-        const tableRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
-
-        if (!searchInput || !tableRows.length) {
-            console.log('Elements not found, retrying...');
-            setTimeout(initializeSearch, 100);
-            return;
-        }
-
-        const debouncedSearch = debounce(
-            (value) => performSearch(value, tableRows),
-            300
-        );
-
-        searchInput.addEventListener('input', (e) => {
-            const searchTerm = e.target.value.trim().toLowerCase();
-            debouncedSearch(searchTerm);
+        rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
         });
-
-        console.log('Search initialized with', tableRows.length, 'rows');
     }
 
-    function generatePageNumbers(currentPage, totalPages) {
-        let pages = [];
-        
-        if (totalPages <= 10) {
-            // Show all pages if total pages are 10 or less
-            pages = Array.from({length: totalPages}, (_, i) => i + 1);
-        } else {
-            // Always show first and last page
-            if (currentPage <= 7) {
-                // Current page is in first group
-                pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
-            } else if (currentPage >= totalPages - 6) {
-                // Current page is in last group
-                pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
-            } else {
-                // Current page is in middle
-                pages = [1, 2, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages - 1, totalPages];
-            }
-        }
-        return pages;
-    }
-
-    class TablePagination {
-        constructor(tableRows) {
-            this.allRows = Array.from(tableRows);
+    class TableManager {
+        constructor() {
+            this.searchInput = document.getElementById('table-search');
+            this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
             this.visibleRows = this.allRows;
             this.currentPage = 1;
             this.pageSize = 10;
-            this.setupControls();
+            this.initialize();
+        }
+
+        initialize() {
+            this.setupSearch();
+            this.setupPagination();
             this.updateTable();
+        }
+
+        setupSearch() {
+            const debouncedSearch = debounce((searchTerm) => {
+                if (!searchTerm) {
+                    this.visibleRows = this.allRows;
+                } else {
+                    const pattern = createRegexPattern(searchTerm);
+                    this.visibleRows = this.allRows.filter(row => {
+                        const text = row.textContent || row.innerText;
+                        return pattern.test(text);
+                    });
+                }
+                this.currentPage = 1;
+                this.updateTable();
+            }, 300);
+
+            this.searchInput.addEventListener('input', (e) => {
+                debouncedSearch(e.target.value.trim().toLowerCase());
+            });
+        }
+
+        setupPagination() {
+            document.getElementById('prev-page').onclick = () => this.previousPage();
+            document.getElementById('next-page').onclick = () => this.nextPage();
+            window.handlePageClick = (page) => this.goToPage(page);
         }
 
         updateTable() {
-            const start = (this.currentPage - 1) * this.pageSize;
-            const end = start + this.pageSize;
-            
-            // First hide all rows
+            // Hide all rows first
             this.allRows.forEach(row => row.style.display = 'none');
             
-            // Then show only visible rows for current page
+            // Show only visible rows for current page
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = start + this.pageSize;
             this.visibleRows.slice(start, end).forEach(row => {
                 row.style.display = '';
             });
-            
-            this.updatePageNumbers();
+
+            this.updatePagination();
         }
 
-        updateVisibleRows(searchTerm) {
-            if (!searchTerm) {
-                this.visibleRows = this.allRows;
-            } else {
-                const pattern = createRegexPattern(searchTerm);
-                this.visibleRows = this.allRows.filter(row => {
-                    const text = row.textContent || row.innerText;
-                    return pattern.test(text);
-                });
-            }
-            
-            console.log(`Filtered to ${this.visibleRows.length} rows`);
-            this.currentPage = 1;
-            this.updateTable();
-        }
-
-        updatePageNumbers() {
+        updatePagination() {
             const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
-            const pageNumbers = generatePageNumbers(this.currentPage, totalPages);
+            const pageNumbers = this.generatePageNumbers(totalPages);
             const container = document.getElementById('page-numbers');
             
             container.innerHTML = pageNumbers.map(page => {
@@ -304,15 +260,29 @@ script = """
                 }
                 return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
                     ${page === this.currentPage ? 'disabled' : ''} 
-                    onclick="window.handlePageClick(${page})">${page}</button>`;
+                    onclick="handlePageClick(${page})">${page}</button>`;
             }).join('');
 
-            // Update navigation buttons and info
             document.getElementById('prev-page').disabled = this.currentPage <= 1;
             document.getElementById('next-page').disabled = this.currentPage >= totalPages;
             
-            // Log pagination state
-            console.log(`Page ${this.currentPage} of ${totalPages}, showing ${this.visibleRows.length} results`);
+            console.log(`Showing page ${this.currentPage} of ${totalPages}, ${this.visibleRows.length} total rows`);
+        }
+
+        generatePageNumbers(totalPages) {
+            let pages = [];
+            if (totalPages <= 10) {
+                pages = Array.from({length: totalPages}, (_, i) => i + 1);
+            } else {
+                if (this.currentPage <= 7) {
+                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+                } else if (this.currentPage >= totalPages - 6) {
+                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+                } else {
+                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
+                }
+            }
+            return pages;
         }
 
         previousPage() {
@@ -339,44 +309,10 @@ script = """
         }
     }
 
-    // Global page click handler
-    window.handlePageClick = function(page) {
-        if (window.tablePagination) {
-            window.tablePagination.goToPage(page);
-        }
-    };
-
-    function initializeTable() {
-        const searchInput = document.getElementById('table-search');
-        const tableRows = document.querySelectorAll('#data-table tbody tr');
-        
-        if (!searchInput || !tableRows.length) {
-            console.log('Waiting for elements...');
-            setTimeout(initializeTable, 100);
-            return;
-        }
-
-        console.log('Initializing table with', tableRows.length, 'rows');
-        window.tablePagination = new TablePagination(tableRows);
-        
-        searchInput.addEventListener('input', debounce((e) => {
-            const searchTerm = e.target.value.trim().toLowerCase();
-            console.log('Searching for:', searchTerm);
-            window.tablePagination.updateVisibleRows(searchTerm);
-        }, 300));
-
-        // Adjust height after initialization
-        const wrapper = document.querySelector('.table-wrapper');
-        if (wrapper) {
-            const height = wrapper.offsetHeight + 50;
-            console.log('Setting frame height to:', height);
-            Streamlit.setFrameHeight(height);
-        }
-    }
-
     function onRender(event) {
         if (!window.rendered) {
-            initializeTable();
+            window.tableManager = new TableManager();
+            Streamlit.setFrameHeight(600);
             window.rendered = true;
         }
     }
@@ -388,154 +324,114 @@ script = """
 # Add CSS styles
 css = """
 <style>
-    /* Table Container Styles */
     .table-container { 
         display: flex; 
         justify-content: center; 
         padding: 20px;
-        width: calc(100% - 40px);
+        width: 100%;
         background: #ffffff;
-        min-height: 200px; 
-        max-height: calc(100vh - 200px);
-        overflow-y: auto;
     }
-
-    /* Table Styles */
     table { 
         border-collapse: collapse; 
         width: 100%;
         background: #ffffff;
         table-layout: fixed;
     }
-
-    /* Column Widths */
-    th[scope="col"]:nth-child(1) { width: 25%; }
-    th[scope="col"]:nth-child(2) { width: 12.5%; }
-    th[scope="col"]:nth-child(3) { width: 120px; }
-    th[scope="col"]:nth-child(4) { width: 25%; }
-    th[scope="col"]:nth-child(5) { width: 12.5%; }
-    th[scope="col"]:nth-child(6) { width: 120px; }
-
-    /* Header Styles */
-    th { 
-        background: #ffffff;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        padding: 12px 8px;
-        font-weight: 500;
-        font-family: 'Poppins';
-        font-size: 14px;
-        color: #B5B7C0;
-        text-align: left;
-    }
-    
-    th:last-child {
-        text-align: center;
-    }
-
-    /* Cell Styles */
-    td { 
+    th, td { 
         padding: 8px; 
         text-align: left; 
         border-bottom: 1px solid #ddd;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-family: 'Poppins';
-        font-size: 14px;
     }
-
-    td:last-child {
-        width: 120px;
-        max-width: 120px;
-        text-align: center;
-    }
-
-    /* State Cell Styles */
-    .state_cell { 
-        width: 100px;
-        max-width: 100px;
-        margin: 0 auto;
-        padding: 3px 5px; 
-        text-align: center; 
-        border-radius: 4px; 
-        border: solid 1px;
-        display: inline-block;
-    }
-
-    .state-canceled, .state-failed, .state-suspended { 
-        background: #FFC5C5; 
-        color: #DF0404; 
-        border-color: #DF0404; 
-    }
-    
-    .state-successful { 
-        background: #16C09861; 
-        color: #00B087; 
-        border-color: #00B087; 
-    }
-    
-    .state-live, .state-submitted { 
-        background: #E6F3FF; 
-        color: #0066CC; 
-        border-color: #0066CC; 
-    }
-
-    /* Wrapper and Controls */
-    .table-wrapper { 
-        max-width: 100%; 
+    th {
         background: #ffffff;
-        border-radius: 20px;
-        overflow: visible;
-        display: flex;
-        flex-direction: column;
-    }
-
-    .table-controls {
         position: sticky;
         top: 0;
+        z-index: 1;
+    }
+    .state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
+    .state-canceled, .state-failed, .state-suspended { 
+        background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
+    }
+    .state-successful { 
+        background: #16C09861; color: #00B087; border-color: #00B087; 
+    }
+    .state-live, .state-submitted { 
+        background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
+    }
+    .table-wrapper { 
+        width: 100%; 
         background: #ffffff;
-        z-index: 2;
-        padding: 0 10px;
-        border-bottom: 1px solid #eee;
-        height: 60px;
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        margin-bottom: 1rem; 
         border-radius: 20px;
+        overflow-x: auto;
     }
-
+    .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
     .search-input { 
-        padding: 8px 12px; 
-        border: 1px solid #ddd; 
-        border-radius: 20px;
-        width: 200px; 
-        font-size: 12px; 
-        font-family: 'Poppins';
+        padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
+        width: 200px; font-size: 14px; 
     }
-
     .search-input:focus { 
-        outline: none;
-        border-color: #0066CC; 
+        outline: none; border-color: #0066CC; 
         box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1); 
     }
-
-    /* Pagination Styles */
+    .noscript-warning {
+        background-color: #fff3cd; color: #856404; padding: 12px;
+        margin-bottom: 20px; border: 1px solid #ffeeba;
+        border-radius: 4px; text-align: center; font-weight: 500;
+    }
     .pagination-controls {
-        position: sticky;
-        bottom: 0;
-        background: #ffffff;
         display: flex;
         justify-content: flex-end;
         align-items: center;
         padding: 1rem;
         gap: 0.5rem;
-        border-top: 1px solid #eee;
     }
 
-    /* ...existing pagination button styles... */
+    .page-numbers {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+    }
+
+    .page-number, .page-btn {
+        min-width: 32px;
+        height: 32px;
+        padding: 0 6px;
+        border: 1px solid #ddd;
+        background: #fff;
+        border-radius: 4px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: #333;
+    }
+
+    .page-number:hover:not(:disabled),
+    .page-btn:hover:not(:disabled) {
+        background: #f0f0f0;
+        border-color: #ccc;
+    }
+
+    .page-number.active {
+        background: #0066CC;
+        color: white;
+        border-color: #0066CC;
+    }
+
+    .page-ellipsis {
+        padding: 0 4px;
+        color: #666;
+    }
+
+    .page-number:disabled,
+    .page-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
 </style>
 """
 
