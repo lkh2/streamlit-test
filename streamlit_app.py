@@ -2,13 +2,14 @@ import streamlit as st
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
+from streamlit_shadcn_ui import table
 
 # Initialize connection.
 @st.cache_resource
 def init_connection():
     mongo_connection_string = (
-        f"mongodb+srv://{st.secrets['mongo']['username']}:"
-        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/"
+        f"mongodb+srv://{st.secrets['mongo']['username']}:" 
+        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/" 
         f"{st.secrets['mongo']['database']}?retryWrites=true&w=majority"
     )
     return MongoClient(mongo_connection_string)
@@ -69,7 +70,52 @@ def highlight_state(df):
         lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1
     )
 
-# Display the data with styling
+# Display the data with Shadcn UI table
 st.title('Kickstarter Data Viewer')
-styled_df = df.style.apply(lambda x: [style_state(val) if col == 'State' else '' for col, val in x.items()], axis=1)
-st.dataframe(styled_df, use_container_width=True)
+
+# Convert DataFrame to list of dictionaries for Shadcn UI table
+table_data = df.to_dict('records')
+
+# Define table columns
+columns = [
+    {"key": "Project Name", "title": "Project Name"},
+    {"key": "Creator", "title": "Creator"},
+    {"key": "Pledged Amount", "title": "Pledged Amount"},
+    {"key": "Country", "title": "Country"},
+    {"key": "State", "title": "State"}
+]
+
+# Create custom cell renderer for State column
+def render_state_cell(value):
+    state_colors = {
+        'canceled': {'bg': '#FFC5C5', 'text': '#DF0404'},
+        'failed': {'bg': '#FFC5C5', 'text': '#DF0404'},
+        'suspended': {'bg': '#FFC5C5', 'text': '#DF0404'},
+        'successful': {'bg': '#16C09861', 'text': '#00B087'},
+        'live': {'bg': '#E6F3FF', 'text': '#0066CC'},
+        'submitted': {'bg': '#F0F0F0', 'text': '#808080'}
+    }
+    
+    state = value.lower()
+    colors = state_colors.get(state, {'bg': '#F0F0F0', 'text': '#808080'})
+    
+    return {
+        "background": colors['bg'],
+        "color": colors['text'],
+        "padding": "4px 8px",
+        "border-radius": "4px",
+        "text-align": "center"
+    }
+
+# Display table with Shadcn UI
+table(
+    data=table_data,
+    columns=columns,
+    custom_column_styles={
+        "State": render_state_cell
+    },
+    pagination=True,
+    search=True,
+    sorting=True,
+    selection=True
+)
