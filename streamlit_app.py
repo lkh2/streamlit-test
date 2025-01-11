@@ -99,7 +99,7 @@ items = get_data()
 # Create DataFrame and restructure columns
 df = json_normalize(items)
 
-# Calculate additional columns and store raw values
+# Calculate and store raw values first
 df['Raw Goal'] = df['data.goal'].astype(float) * df['data.usd_exchange_rate'].astype(float)
 df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
 df['Raw Raised'] = (df['Raw Pledged'] / df['Raw Goal']) * 100
@@ -154,7 +154,6 @@ df['State'] = df['State'].apply(style_state)
 def generate_table_html(df):
     # Define visible and hidden columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
-    raw_columns = ['Raw Pledged', 'Raw Goal', 'Raw Raised', 'Raw Date']
     
     # Generate header for visible columns only
     header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
@@ -162,16 +161,21 @@ def generate_table_html(df):
     # Generate table rows with raw values in data attributes
     rows_html = ''
     for _, row in df.iterrows():
+        # Add data attributes to each row for filtering
+        data_attrs = f'''
+            data-category="{row['Category']}"
+            data-subcategory="{row['Subcategory']}"
+            data-pledged="{row['Raw Pledged']}"
+            data-goal="{row['Raw Goal']}"
+            data-raised="{row['Raw Raised']}"
+            data-date="{row['Raw Date'].strftime('%Y-%m-%d')}"
+        '''
+        
+        # Create visible cells
         visible_cells = ''.join(f'<td>{row[col]}</td>' for col in visible_columns)
-        hidden_cells = (
-            f'<td class="hidden-cell" data-raw-value="{row["Raw Pledged"]}">{row["Category"]}</td>'
-            f'<td class="hidden-cell" data-raw-value="{row["Raw Goal"]}">{row["Subcategory"]}</td>'
-            f'<td class="hidden-cell" data-raw-value="{row["Raw Raised"]}">{row["Raw Date"]}</td>'
-            f'<td class="hidden-cell">{row["Raw Goal"]}</td>'
-            f'<td class="hidden-cell">{row["Raw Raised"]}</td>'
-            f'<td class="hidden-cell">{row["Raw Pledged"]}</td>'
-        )
-        rows_html += f'<tr class="table-row">{visible_cells}{hidden_cells}</tr>'
+        
+        # Add the row with data attributes
+        rows_html += f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>'
     
     return header_html, rows_html
 
@@ -182,7 +186,7 @@ header_html, rows_html = generate_table_html(df)
 def get_filter_options(df):
     return {
         'categories': sorted(['All Categories'] + df['Category'].unique().tolist()),
-        'subcategories': sorted(['All Subcategories'] + df['Subcategory'].unique().tolist()),
+        'subcategories': sorted(['All Subcategories'] + df['Subcategory'].unique().tolist()),  # Keep all subcategories
         'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
         'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
         'pledged_ranges': ['All Amounts'] + [
@@ -744,7 +748,10 @@ script = """
             ];
             
             filterIds.forEach(id => {
-                document.getElementById(id).addEventListener('change', () => this.applyFilters());
+                document.getElementById(id).addEventListener('change', () => {
+                    // No need to update subcategories when category changes
+                    this.applyFilters();
+                });
             });
 
             document.getElementById('resetFilters').addEventListener('click', () => this.resetFilters());
@@ -770,21 +777,62 @@ script = """
             };
 
             this.visibleRows = this.allRows.filter(row => {
-                const cells = Array.from(row.cells);
-                const rowData = {
-                    category: cells[6].textContent,
-                    subcategory: cells[7].textContent,
-                    country: cells[4].textContent,
-                    state: cells[5].textContent.toLowerCase(),
-                    pledged: Number(cells[11].getAttribute('data-raw-value')),
-                    goal: Number(cells[9].getAttribute('data-raw-value')),
-                    raised: Number(cells[10].getAttribute('data-raw-value')),
-                    date: new Date(cells[8].textContent)
-                };
+                // Get data from row attributes
+                const category = row.dataset.category;
+                const subcategory = row.dataset.subcategory;
+                const pledged = parseFloat(row.dataset.pledged);
+                const goal = parseFloat(row.dataset.goal);
+                const raised = parseFloat(row.dataset.raised);
+                const date = new Date(row.dataset.date);
+                const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
+                const country = row.querySelector('td:nth-child(5)').textContent;
 
-                return this.matchesFilters(rowData, filters);
+                // Category filters
+                if (filters.category !== 'All Categories' && category !== filters.category) return false;
+                if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
+                if (filters.country !== 'All Countries' && country !== filters.country) return false;
+                if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
+
+                // Numeric range filters
+                if (filters.pledged !== 'All Amounts') {
+                    const [min, max] = filters.pledged.split('-')
+                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                    if (pledged < min || (max && pledged > max)) return false;
+                }
+
+                if (filters.goal !== 'All Goals') {
+                    const [min, max] = filters.goal.split('-')
+                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                    if (goal < min || (max && goal > max)) return false;
+                }
+
+                if (filters.raised !== 'All Percentages') {
+                    const [min, max] = filters.raised.split('-')
+                        .map(v => parseFloat(v.replace(/%/g, '')));
+                    if (raised < min || raised > max) return false;
+                }
+
+                // Date filter
+                if (filters.date !== 'All Time') {
+                    const now = new Date();
+                    let compareDate = new Date();
+                    
+                    switch(filters.date) {
+                        case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
+                        case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
+                        case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
+                        case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
+                        case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
+                        case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
+                    }
+                    
+                    if (date < compareDate) return false;
+                }
+
+                return true;
             });
 
+            // Apply sorting if needed
             if (filters.sort !== 'none') {
                 this.sortRows(filters.sort);
             }
@@ -793,52 +841,10 @@ script = """
             this.updateTable();
         }
 
-        matchesFilters(rowData, filters) {
-            if (filters.category !== 'All Categories' && rowData.category !== filters.category) return false;
-            if (filters.subcategory !== 'All Subcategories' && rowData.subcategory !== filters.subcategory) return false;
-            if (filters.country !== 'All Countries' && rowData.country !== filters.country) return false;
-            if (filters.state !== 'All States' && !rowData.state.includes(filters.state.toLowerCase())) return false;
-
-            // Handle range filters with raw values
-            if (filters.pledged !== 'All Amounts') {
-                const [min, max] = filters.pledged.split('-')
-                    .map(v => Number(v.replace(/[^0-9.-]+/g,"")));
-                if (rowData.pledged < min || (max && rowData.pledged > max)) return false;
-            }
-
-            if (filters.goal !== 'All Goals') {
-                const [min, max] = filters.goal.split('-')
-                    .map(v => Number(v.replace(/[^0-9.-]+/g,"")));
-                if (rowData.goal < min || (max && rowData.goal > max)) return false;
-            }
-
-            if (filters.raised !== 'All Percentages') {
-                const [min, max] = filters.raised.split('-')
-                    .map(v => Number(v.replace(/%/g, '')));
-                if (rowData.raised < min || rowData.raised > max) return false;
-            }
-
-            const now = new Date();
-            let compareDate = new Date();
-            
-            switch(filters.date) {
-                case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
-                case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
-                case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
-                case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
-                case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
-                case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
-            }
-            
-            if (rowData.date < compareDate) return false;
-
-            return true;
-        }
-
         sortRows(sortType) {
             this.visibleRows.sort((a, b) => {
-                const dateA = new Date(a.cells[8].getAttribute('data-raw-value'));
-                const dateB = new Date(b.cells[8].getAttribute('data-raw-value'));
+                const dateA = new Date(a.dataset.date);
+                const dateB = new Date(b.dataset.date);
                 return sortType === 'newest' ? dateB - dateA : dateA - dateB;
             });
         }
