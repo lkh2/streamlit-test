@@ -71,6 +71,7 @@ with open('table.js', 'r') as f:
 
 # Render HTML
 html_table = f"""
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <style>
 {css}
 </style>

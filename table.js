@@ -1,17 +1,32 @@
-document.addEventListener("DOMContentLoaded", function () {
+function initializeSearch() {
   const searchInput = document.getElementById("table-search");
-  const rows = document.querySelectorAll(".table-row");
+  const tableRows = document.querySelectorAll("#data-table tbody tr");
+
+  if (!searchInput || !tableRows.length) {
+    setTimeout(initializeSearch, 100);
+    return;
+  }
 
   searchInput.addEventListener("input", function (e) {
-    const searchTerm = e.target.value.toLowerCase();
+    const searchTerm = e.target.value.toLowerCase().trim();
 
-    rows.forEach((row) => {
-      const text = row.textContent.toLowerCase();
-      if (text.includes(searchTerm)) {
-        row.classList.remove("hidden");
+    tableRows.forEach((row) => {
+      // Get both text content and innerHTML for complete search
+      const textContent = row.textContent.toLowerCase();
+      const innerHTML = row.innerHTML.toLowerCase();
+
+      // Search in both text and HTML content
+      if (textContent.includes(searchTerm) || innerHTML.includes(searchTerm)) {
+        row.style.display = "";
       } else {
-        row.classList.add("hidden");
+        row.style.display = "none";
       }
     });
   });
-});
+}
+
+// Initialize search when DOM loads
+document.addEventListener("DOMContentLoaded", initializeSearch);
+
+// Also initialize when component updates
+initializeSearch();
