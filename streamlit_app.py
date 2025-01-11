@@ -86,7 +86,6 @@ html_table = f"""
         border-bottom: 1px solid #ddd; 
     }}
     td:has(.state_cell) {{
-        padding: 0;
         justify-items: center;
     }}
 
