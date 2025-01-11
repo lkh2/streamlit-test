@@ -28,10 +28,25 @@ def get_data():
 
 items = get_data()
 
-# Convert the data to DataFrame with proper type handling
+# Create DataFrame and restructure columns
 df = json_normalize(items)
+df = df[[
+    'data.name',
+    'data.creator.name',
+    'data.converted_pledged_amount',
+    'data.urls.web.project',
+    'data.location.expanded_country',
+    'data.state'
+]].rename(columns={
+    'data.name': 'Project Name',
+    'data.creator.name': 'Creator',
+    'data.converted_pledged_amount': 'Pledged Amount',
+    'data.urls.web.project': 'Link',
+    'data.location.expanded_country': 'Country',
+    'data.state': 'State'
+})
 
-# Convert object columns to string to avoid Arrow serialization issues
+# Convert object columns to string
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
