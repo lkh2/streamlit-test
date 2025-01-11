@@ -125,9 +125,10 @@ def style_state(state):
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
 
+# Update header generation to include scope attribute
 def generate_table_html(df):
-    # Generate table header
-    header_html = ''.join(f'<th>{column}</th>' for column in df.columns)
+    # Generate table header with scope attribute
+    header_html = ''.join(f'<th scope="col">{column}</th>' for column in df.columns)
     
     # Generate table rows
     rows_html = ''
@@ -366,7 +367,26 @@ css = """
         background: #ffffff;
         table-layout: fixed;
     }
-    th, td { 
+
+    /* Column width specifications */
+    th[scope="col"]:nth-child(1) { width: 25%; }  /* Project Name - 2 parts */
+    th[scope="col"]:nth-child(2) { width: 12.5%; }  /* Creator - 1 part */
+    th[scope="col"]:nth-child(3) { width: 120px; }  /* Pledged Amount - fixed */
+    th[scope="col"]:nth-child(4) { width: 25%; }  /* Link - 2 parts */
+    th[scope="col"]:nth-child(5) { width: 12.5%; }  /* Country - 1 part */
+    th[scope="col"]:nth-child(6) { width: 120px; }  /* State - fixed */
+
+    th { 
+        background: #ffffff;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        text-align: center !important;
+        padding: 12px 8px;
+        font-weight: 600;
+    }
+
+    td { 
         padding: 8px; 
         text-align: left; 
         border-bottom: 1px solid #ddd;
@@ -374,13 +394,24 @@ css = """
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    th {
-        background: #ffffff;
-        position: sticky;
-        top: 0;
-        z-index: 1;
+
+    /* Adjust state cell width */
+    td:last-child {
+        width: 120px;
+        max-width: 120px;
     }
-    .state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
+
+    .state_cell { 
+        width: 100px;
+        max-width: 100px;
+        margin: 0 auto;
+        padding: 3px 5px; 
+        text-align: center; 
+        border-radius: 4px; 
+        border: solid 1px;
+        display: inline-block;
+    }
+
     .state-canceled, .state-failed, .state-suspended { 
         background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
     }
