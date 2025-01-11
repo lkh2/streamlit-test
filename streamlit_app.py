@@ -5,6 +5,8 @@ from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
 
+st.set_page_config(layout="wide")
+
 def gensimplecomponent(name, template="", script=""):
     """Generate a simple Streamlit component."""
     def html():
