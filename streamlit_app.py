@@ -65,20 +65,13 @@ with open('table.css', 'r') as f:
     
 with open('table.html', 'r') as f:
     template = Template(f.read())
-    
-with open('table.js', 'r') as f:
-    js = f.read()
 
-# Render HTML
+# Render HTML with CSS only
 html_table = f"""
-<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 <style>
 {css}
 </style>
 {template.render(columns=df.columns, data=df.values)}
-<script>
-{js}
-</script>
 """
 
 # Display the data
