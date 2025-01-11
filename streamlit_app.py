@@ -20,7 +20,7 @@ client = init_connection()
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(200)
+    items = collection.find()  # Removed the limit(200)
     
     # Convert MongoDB cursor to list and handle ObjectId
     items = [{**item, '_id': str(item['_id'])} for item in items]
