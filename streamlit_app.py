@@ -191,15 +191,15 @@ def get_filter_options(df):
         'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
         'pledged_ranges': ['All Amounts'] + [
             f"${i}-${j}" for i, j in [(1,99), (100,999), (1000,9999), 
-            (10000,99999), (100000,999999), (1000000,float('inf'))]
-        ],
+            (10000,99999), (100000,999999)]
+        ] + ['>$1000000'],
         'goal_ranges': ['All Goals'] + [
             f"${i}-${j}" for i, j in [(1,99), (100,999), (1000,9999), 
-            (10000,99999), (100000,999999), (1000000,float('inf'))]
-        ],
+            (10000,99999), (100000,999999)]
+        ] + ['>$1000000'],
         'raised_ranges': ['All Percentages'] + [
             f"{i}%-{j}%" for i, j in [(0,20), (21,40), (41,60), (61,80), (81,100)]
-        ],
+        ] + ['>100%'],
         'date_ranges': [
             'All Time',
             'Last Month',
@@ -680,21 +680,35 @@ script = """
 
             // Numeric range filters
             if (filters.pledged !== 'All Amounts') {
-                const [min, max] = filters.pledged.split('-')
-                    .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                if (pledged < min || (max && pledged > max)) return false;
+                if (filters.pledged.startsWith('>')) {
+                    const min = parseFloat(filters.pledged.replace(/[^0-9.-]+/g,""));
+                    if (pledged <= min) return false;
+                } else {
+                    const [min, max] = filters.pledged.split('-')
+                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                    if (pledged < min || pledged > max) return false;
+                }
             }
 
             if (filters.goal !== 'All Goals') {
-                const [min, max] = filters.goal.split('-')
-                    .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                if (goal < min || (max && goal > max)) return false;
+                if (filters.goal.startsWith('>')) {
+                    const min = parseFloat(filters.goal.replace(/[^0-9.-]+/g,""));
+                    if (goal <= min) return false;
+                } else {
+                    const [min, max] = filters.goal.split('-')
+                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                    if (goal < min || goal > max) return false;
+                }
             }
 
             if (filters.raised !== 'All Percentages') {
-                const [min, max] = filters.raised.split('-')
-                    .map(v => parseFloat(v.replace(/%/g, '')));
-                if (raised < min || raised > max) return false;
+                if (filters.raised === '>100%') {
+                    if (raised <= 100) return false;
+                } else {
+                    const [min, max] = filters.raised.split('-')
+                        .map(v => parseFloat(v.replace(/%/g, '')));
+                    if (raised < min || raised > max) return false;
+                }
             }
 
             // Date filter
@@ -727,7 +741,20 @@ script = """
 
         resetFilters() {
             const selects = document.querySelectorAll('.filter-select');
-            selects.forEach(select => select.selectedIndex = 0);
+            selects.forEach(select => {
+                if (select.id === 'subcategoryFilter') {
+                    // Find and select "All Subcategories" option
+                    const allSubcatsOption = Array.from(select.options)
+                        .find(option => option.value === 'All Subcategories');
+                    if (allSubcatsOption) {
+                        select.value = 'All Subcategories';
+                    } else {
+                        select.selectedIndex = 0;
+                    }
+                } else {
+                    select.selectedIndex = 0;
+                }
+            });
             this.searchInput.value = '';
             this.currentSearchTerm = '';
             this.currentFilters = null;
@@ -888,14 +915,6 @@ script = """
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
     Streamlit.setComponentReady();
 """
-
-# After DataFrame processing and before component creation
-st.write("### DataFrame Preview")
-st.write("Number of rows:", len(df))
-st.write("Columns:", df.columns.tolist())
-
-with st.expander("View Data Statistics"):
-    st.dataframe(df)
 
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
