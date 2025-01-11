@@ -65,6 +65,9 @@ with open('table.css', 'r') as f:
     
 with open('table.html', 'r') as f:
     template = Template(f.read())
+    
+with open('table.js', 'r') as f:
+    js = f.read()
 
 # Render HTML
 html_table = f"""
@@ -72,8 +75,10 @@ html_table = f"""
 {css}
 </style>
 {template.render(columns=df.columns, data=df.values)}
+<script>
+{js}
+</script>
 """
 
 # Display the data
-st.title('Kickstarter Data Viewer')
 st.markdown(html_table, unsafe_allow_html=True)

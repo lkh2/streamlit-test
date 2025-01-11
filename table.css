@@ -49,3 +49,35 @@ td:has(.state_cell) {
     color: #0066CC;
     border-color: #0066CC;
 }
+
+.table-wrapper {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.table-controls {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 1rem;
+    padding: 0 10%;
+}
+
+.search-input {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    width: 200px;
+    font-size: 14px;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: #0066CC;
+    box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1);
+}
+
+/* Hide rows that don't match search */
+.table-row.hidden {
+    display: none;
+}

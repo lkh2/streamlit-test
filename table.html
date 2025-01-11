@@ -1,20 +1,25 @@
-<div class="table-container">
-    <table>
-        <thead>
-            <tr>
-                {%- for column in columns %}
-                <th>{{ column }}</th>
+<div class="table-wrapper">
+    <div class="table-controls">
+        <input type="text" id="table-search" class="search-input" placeholder="Search table...">
+    </div>
+    <div class="table-container">
+        <table id="data-table">
+            <thead>
+                <tr>
+                    {%- for column in columns %}
+                    <th>{{ column }}</th>
+                    {%- endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {%- for row in data %}
+                <tr class="table-row">
+                    {%- for value in row %}
+                    <td>{{ value }}</td>
+                    {%- endfor %}
+                </tr>
                 {%- endfor %}
-            </tr>
-        </thead>
-        <tbody>
-            {%- for row in data %}
-            <tr>
-                {%- for value in row %}
-                <td>{{ value }}</td>
-                {%- endfor %}
-            </tr>
-            {%- endfor %}
-        </tbody>
-    </table>
+            </tbody>
+        </table>
+    </div>
 </div>
