@@ -230,6 +230,9 @@ filter_options = get_filter_options(df)
 
 # Update template to include filter controls with default subcategory
 template = f"""
+<div class=title-wrapper">
+    <span class="big-title">Explore Successful Projects</span>
+</div>
 <div class="filter-wrapper">
     <div class="reset-wrapper">
         <button class="reset-button" id="resetFilters">
@@ -301,7 +304,18 @@ template = f"""
 
 # Add new CSS styles
 css = """
-<style>  
+<style> 
+    .title-wrapper {
+        width: 100%;
+        text-align: center;    
+    }
+    
+    .title-wrapper span {
+        color: white;
+        font-family: 'Playfair Display';
+        font-weight: 600;
+    }
+    
     .table-controls { 
         position: sticky; 
         top: 0; 
@@ -573,9 +587,9 @@ css = """
 
     .filtered-text {
         font-family: 'Poppins';
-        font-size: 16px;
-        font-weight: 500;
-        color: #333;
+        font-size: 22px;
+        font-weight: 600;
+        color: black;
     }
 </style>
 """
