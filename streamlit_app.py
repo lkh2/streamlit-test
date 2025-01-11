@@ -14,6 +14,7 @@ def gensimplecomponent(name, template="", script=""):
             <!DOCTYPE html>
             <html lang="en">
                 <head>
+                    <link href='https://fonts.googleapis.com/css?family=Poppins' rel='stylesheet'>
                     <meta charset="UTF-8" />
                     <title>{name}</title>
                     <script>
@@ -324,63 +325,134 @@ script = """
 # Add CSS styles
 css = """
 <style>
+    .table-controls { 
+        position: sticky; 
+        top: 0; 
+        background: #ffffff; 
+        z-index: 2; 
+        padding: 0 10px; 
+        border-bottom: 1px solid #eee; 
+        height: 60px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: flex-end; 
+        margin-bottom: 1rem; 
+        border-radius: 20px; 
+    }
+    
     .table-container { 
         display: flex; 
         justify-content: center; 
-        padding: 20px;
-        width: 100%;
-        background: #ffffff;
+        padding: 20px; 
+        width: calc(100% - 40px); 
+        background: #ffffff; 
+        min-height: 200px; 
+        max-height: calc(100vh - 200px); 
+        overflow-y: auto; 
     }
+    
     table { 
         border-collapse: collapse; 
-        width: 100%;
-        background: #ffffff;
-        table-layout: fixed;
+        width: 100%; 
+        background: #ffffff; 
+        table-layout: fixed; 
     }
-    th, td { 
+
+    /* Column width specifications */
+    th[scope="col"]:nth-child(1) { width: 25%; }  /* Project Name - 2 parts */
+    th[scope="col"]:nth-child(2) { width: 12.5%; }  /* Creator - 1 part */
+    th[scope="col"]:nth-child(3) { width: 120px; }  /* Pledged Amount - fixed */
+    th[scope="col"]:nth-child(4) { width: 25%; }  /* Link - 2 parts */
+    th[scope="col"]:nth-child(5) { width: 12.5%; }  /* Country - 1 part */
+    th[scope="col"]:nth-child(6) { width: 120px; }  /* State - fixed */
+
+    th { 
+        background: #ffffff; 
+        position: sticky; 
+        top: 0; 
+        z-index: 1; 
+        padding: 12px 8px; 
+        font-weight: 500; 
+        font-family: 'Poppins'; 
+        font-size: 14px; 
+        color: #B5B7C0; 
+        text-align: left; 
+    }
+    
+    th:last-child { 
+        text-align: center; 
+    }
+
+    td { 
         padding: 8px; 
         text-align: left; 
-        border-bottom: 1px solid #ddd;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        border-bottom: 1px solid #ddd; 
+        overflow: hidden; 
+        text-overflow: ellipsis; 
+        white-space: nowrap; 
+        font-family: 'Poppins'; 
+        font-size: 14px; 
     }
-    th {
-        background: #ffffff;
-        position: sticky;
-        top: 0;
-        z-index: 1;
+
+    td:last-child { 
+        width: 120px; 
+        max-width: 120px; 
+        text-align: center; 
     }
-    .state_cell { width: 100%; padding: 3px 5px; text-align: center; border-radius: 4px; border: solid 1px; }
+
+    .state_cell { 
+        width: 100px; 
+        max-width: 100px; 
+        margin: 0 auto; 
+        padding: 3px 5px; 
+        text-align: center; 
+        border-radius: 4px; 
+        border: solid 1px; 
+        display: inline-block; 
+    }
+
     .state-canceled, .state-failed, .state-suspended { 
-        background: #FFC5C5; color: #DF0404; border-color: #DF0404; 
+        background: #FFC5C5; 
+        color: #DF0404; 
+        border-color: #DF0404; 
     }
+    
     .state-successful { 
-        background: #16C09861; color: #00B087; border-color: #00B087; 
+        background: #16C09861; 
+        color: #00B087; 
+        border-color: #00B087; 
     }
+    
     .state-live, .state-submitted { 
-        background: #E6F3FF; color: #0066CC; border-color: #0066CC; 
+        background: #E6F3FF; 
+        color: #0066CC; 
+        border-color: #0066CC; 
     }
+
     .table-wrapper { 
-        width: 100%; 
-        background: #ffffff;
-        border-radius: 20px;
-        overflow-x: auto;
+        max-width: 100%; 
+        background: #ffffff; 
+        border-radius: 20px; 
+        overflow: visible; 
+        display: flex; 
+        flex-direction: column; 
     }
-    .table-controls { display: flex; justify-content: flex-end; margin-bottom: 1rem; padding: 0 10%; }
+
     .search-input { 
-        padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px;
-        width: 200px; font-size: 14px; 
+        padding: 8px 12px; 
+        border: 1px solid #ddd; 
+        border-radius: 20px; 
+        width: 200px; 
+        font-size: 12px; 
+        font-family: 'Poppins'; 
     }
+
     .search-input:focus { 
-        outline: none; border-color: #0066CC; 
+        outline: none; 
+        border-color: #0066CC; 
         box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.1); 
     }
-    .noscript-warning {
-        background-color: #fff3cd; color: #856404; padding: 12px;
-        margin-bottom: 20px; border: 1px solid #ffeeba;
-        border-radius: 4px; text-align: center; font-weight: 500;
-    }
+
     .pagination-controls {
         display: flex;
         justify-content: flex-end;
