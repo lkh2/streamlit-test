@@ -129,6 +129,12 @@ df = df[[
     'data.created_at': 'Date',
 })
 
+# Store raw values before formatting
+df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
+df['Raw Goal'] = df['Goal']
+df['Raw Raised'] = df['%Raised']
+df['Raw Date'] = pd.to_datetime(df['Date']).dt.strftime('%Y-%m-%d')
+
 # Add formatting for numeric columns
 df['Goal'] = df['Goal'].apply(lambda x: f"${x:,.2f}")
 df['Pledged Amount'] = df['Pledged Amount'].apply(lambda x: f"${float(x):,.2f}")
@@ -156,9 +162,19 @@ def generate_table_html(df):
     # Generate table rows with all columns but hide some
     rows_html = ''
     for _, row in df.iterrows():
+        # Visible cells
         visible_cells = ''.join(f'<td>{row[col]}</td>' for col in visible_columns)
-        hidden_cells = ''.join(f'<td class="hidden-cell">{row[col]}</td>' 
-                             for col in df.columns if col not in visible_columns)
+        
+        # Hidden cells with raw values
+        hidden_cells = f"""
+            <td class="hidden-cell">{row['Category']}</td>
+            <td class="hidden-cell">{row['Subcategory']}</td>
+            <td class="hidden-cell">{row['Raw Date']}</td>
+            <td class="hidden-cell">{row['Raw Goal']}</td>
+            <td class="hidden-cell">{row['Raw Raised']}</td>
+            <td class="hidden-cell">{row['Raw Pledged']}</td>
+        """
+        
         rows_html += f'<tr class="table-row">{visible_cells}{hidden_cells}</tr>'
     
     return header_html, rows_html
@@ -764,10 +780,10 @@ script = """
                     subcategory: cells[7].textContent,
                     country: cells[4].textContent,
                     state: cells[5].textContent.toLowerCase(),
-                    pledged: parseFloat(cells[2].textContent.replace(/[^0-9.-]+/g,"")),
-                    goal: parseFloat(cells[9].textContent.replace(/[^0-9.-]+/g,"")),
-                    raised: parseFloat(cells[10].textContent),
-                    date: new Date(cells[8].textContent)
+                    pledged: Number(cells[11].textContent), // Raw Pledged
+                    goal: Number(cells[9].textContent),     // Raw Goal
+                    raised: Number(cells[10].textContent),  // Raw Raised
+                    date: new Date(cells[8].textContent)   // Raw Date
                 };
 
                 return this.matchesFilters(rowData, filters);
@@ -787,19 +803,22 @@ script = """
             if (filters.country !== 'All Countries' && rowData.country !== filters.country) return false;
             if (filters.state !== 'All States' && !rowData.state.includes(filters.state.toLowerCase())) return false;
 
-            // Handle range filters
+            // Handle range filters using raw numerical values
             if (filters.pledged !== 'All Amounts') {
-                const [min, max] = filters.pledged.split('-').map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                const [min, max] = filters.pledged.split('-')
+                    .map(v => Number(v.replace(/[^0-9.-]+/g,"")));
                 if (rowData.pledged < min || (max && rowData.pledged > max)) return false;
             }
 
             if (filters.goal !== 'All Goals') {
-                const [min, max] = filters.goal.split('-').map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                const [min, max] = filters.goal.split('-')
+                    .map(v => Number(v.replace(/[^0-9.-]+/g,"")));
                 if (rowData.goal < min || (max && rowData.goal > max)) return false;
             }
 
             if (filters.raised !== 'All Percentages') {
-                const [min, max] = filters.raised.split('-').map(v => parseFloat(v));
+                const [min, max] = filters.raised.split('-')
+                    .map(v => Number(v.replace(/%/g, '')));
                 if (rowData.raised < min || rowData.raised > max) return false;
             }
 
@@ -824,8 +843,8 @@ script = """
 
         sortRows(sortType) {
             this.visibleRows.sort((a, b) => {
-                const dateA = new Date(a.cells[8].textContent);
-                const dateB = new Date(b.cells[8].textContent);
+                const dateA = new Date(a.cells[8].textContent); // Raw Date
+                const dateB = new Date(b.cells[8].textContent); // Raw Date
                 return sortType === 'newest' ? dateB - dateA : dateA - dateB;
             });
         }
@@ -853,12 +872,7 @@ st.write("### DataFrame Preview")
 st.write("Number of rows:", len(df))
 st.write("Columns:", df.columns.tolist())
 
-# Create expandable sections for detailed data views
-with st.expander("View DataFrame Sample"):
-    st.dataframe(df.head(10))
-
 with st.expander("View Data Statistics"):
-    # Display all columns including hidden ones using st.dataframe
     st.dataframe(df)
 
 # Create and use the component
