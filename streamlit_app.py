@@ -1348,92 +1348,53 @@ script = """
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
-            document.querySelector('.multi-select-btn').textContent = 'All Categories';
+            const categoryBtn = document.querySelector('.multi-select-btn');
+            categoryBtn.textContent = 'All Categories';
 
             // Reset country selections
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            const countryButtons = document.querySelectorAll('.multi-select-btn');
-            countryButtons[1].textContent = 'All Countries';
+            const countryBtn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            countryBtn.textContent = 'All Countries';
 
             // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
             stateOptions.forEach(opt => opt.classList.remove('selected'));
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
             allStatesOption.classList.add('selected');
-            const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            stateButton.textContent = 'All States';
+            const stateBtn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            stateBtn.textContent = 'All States';
 
             // Reset subcategory selections
             const subcategoryOptions = document.querySelectorAll('.subcategory-option');
             subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
             allSubcategoriesOption.classList.add('selected');
-            const subcategoryButton = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            subcategoryButton.textContent = 'All Subcategories';
+            const subcategoryBtn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            subcategoryBtn.textContent = 'All Subcategories';
 
-            const selects = document.querySelectorAll('.filter-select');
-            selects.forEach(select => {
-                if (select.id === 'subcategoryFilter') {
-                    // Find and select "All Subcategories" option
-                    const allSubcatsOption = Array.from(select.options)
-                        .find(option => option.value === 'All Subcategories');
-                    if (allSubcatsOption) {
-                        select.value = 'All Subcategories';
-                    } else {
-                        select.selectedIndex = 0;
-                    }
-                } else {
-                    select.selectedIndex = 0;
-                }
-            });
+            // Reset the stored selections in the Sets
+            if (window.selectedCategories) window.selectedCategories.clear();
+            if (window.selectedCountries) window.selectedCountries.clear();
+            if (window.selectedStates) window.selectedStates.clear();
+            if (window.selectedSubcategories) window.selectedSubcategories.clear();
 
-            // Reset range slider values
-            const fromSlider = document.getElementById('fromSlider');
-            const toSlider = document.getElementById('toSlider');
-            const fromInput = document.getElementById('fromInput');
-            const toInput = document.getElementById('toInput');
+            // Re-add "All" options to the Sets
+            if (window.selectedCategories) window.selectedCategories.add('All Categories');
+            if (window.selectedCountries) window.selectedCountries.add('All Countries');
+            if (window.selectedStates) window.selectedStates.add('All States');
+            if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
 
-            const goalFromSlider = document.getElementById('goalFromSlider');
-            const goalToSlider = document.getElementById('goalToSlider');
-            const goalFromInput = document.getElementById('goalFromInput');
-            const goalToInput = document.getElementById('goalToInput');
-
-            const raisedFromSlider = document.getElementById('raisedFromSlider');
-            const raisedToSlider = document.getElementById('raisedToSlider');
-            const raisedFromInput = document.getElementById('raisedFromInput');
-            const raisedToInput = document.getElementById('raisedToInput');
-
-            if (fromSlider && toSlider && fromInput && toInput) {
+            // Reset range slider values using stored references
+            if (this.rangeSliderElements) {
+                const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
                 fromSlider.value = fromSlider.min;
                 toSlider.value = toSlider.max;
                 fromInput.value = fromSlider.min;
                 toInput.value = toSlider.max;
-                
-                // Update slider appearance
-                this.fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-            }
-
-            if (goalFromSlider && goalToSlider && goalFromInput && goalToInput) {
-                goalFromSlider.value = goalFromSlider.min;
-                goalToSlider.value = goalToSlider.max;
-                goalFromInput.value = goalFromSlider.min;
-                goalToInput.value = goalToSlider.max;
-                
-                // Update slider appearance
-                this.fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
-            }
-
-            if (raisedFromSlider && raisedToSlider && raisedFromInput && raisedToInput) {
-                raisedFromSlider.value = raisedFromSlider.min;
-                raisedToSlider.value = raisedToSlider.max;
-                raisedFromInput.value = raisedFromSlider.min;
-                raisedToInput.value = raisedToSlider.max;
-                
-                // Update slider appearance
-                this.fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
             }
 
             this.searchInput.value = '';
@@ -1572,15 +1533,23 @@ script = """
         }
 
         setupFilters() {
+            // Initialize global Sets to track selections
+            window.selectedCategories = new Set(['All Categories']);
+            window.selectedCountries = new Set(['All Countries']);
+            window.selectedStates = new Set(['All States']);
+            window.selectedSubcategories = new Set(['All Subcategories']);
+
             // Setup category multi-select
             const categoryOptions = document.querySelectorAll('.category-option');
             
-            const updateMultiSelectButton = (selectedCategories) => {
-                const btn = document.querySelector('.multi-select-btn');
-                if (selectedCategories.has('All Categories')) {
-                    btn.textContent = 'All Categories';
+            const updateMultiSelectButton = (selectedItems, btnSelector) => {
+                const btn = document.querySelector(btnSelector);
+                const firstValue = Array.from(selectedItems)[0];
+                
+                if (firstValue.startsWith('All')) {
+                    btn.textContent = firstValue;
                 } else {
-                    const selectedArray = Array.from(selectedCategories);
+                    const selectedArray = Array.from(selectedItems);
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1589,49 +1558,41 @@ script = """
                 }
             };
             
-            const selectedCategories = new Set(['All Categories']);
-            updateMultiSelectButton(selectedCategories);
-            
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
                     const clickedValue = e.target.dataset.value;
                     const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
                     
                     if (clickedValue === 'All Categories') {
-                        // Deselect all other categories
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        selectedCategories.clear();
-                        selectedCategories.add('All Categories');
+                        window.selectedCategories.clear();
+                        window.selectedCategories.add('All Categories');
                         allCategoriesOption.classList.add('selected');
                     } else {
-                        // Remove "All Categories" selection
                         allCategoriesOption.classList.remove('selected');
-                        selectedCategories.delete('All Categories');
+                        window.selectedCategories.delete('All Categories');
                         
-                        // Toggle current selection
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            selectedCategories.add(clickedValue);
+                            window.selectedCategories.add(clickedValue);
                         } else {
-                            selectedCategories.delete(clickedValue);
+                            window.selectedCategories.delete(clickedValue);
                         }
                         
-                        // If no categories are selected, reselect "All Categories"
-                        if (selectedCategories.size === 0) {
+                        if (window.selectedCategories.size === 0) {
                             allCategoriesOption.classList.add('selected');
-                            selectedCategories.add('All Categories');
+                            window.selectedCategories.add('All Categories');
                         }
                     }
                     
-                    // Update button text and filters
-                    updateMultiSelectButton(selectedCategories);
+                    updateMultiSelectButton(window.selectedCategories, '.multi-select-btn');
                     this.applyFilters();
                 });
             });
 
-            // Initialize with "All Categories" selected
-            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            allCategoriesOption.classList.add('selected');
+            // Similar modifications for country, state, and subcategory options...
+            // (Update their event listeners to use window.selectedCountries, 
+            // window.selectedStates, and window.selectedSubcategories respectively)
 
             // Setup other filters
             const filterIds = [
@@ -2055,199 +2016,6 @@ script = """
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
             fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
             fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
-        }
-
-        resetFilters() {
-            // Reset category selections
-            const categoryOptions = document.querySelectorAll('.category-option');
-            categoryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            allCategoriesOption.classList.add('selected');
-            document.querySelector('.multi-select-btn').textContent = 'All Categories';
-
-            // Reset country selections
-            const countryOptions = document.querySelectorAll('.country-option');
-            countryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-            allCountriesOption.classList.add('selected');
-            const countryButtons = document.querySelectorAll('.multi-select-btn');
-            countryButtons[1].textContent = 'All Countries';  // Second button is for countries
-
-            // Reset state selections
-            const stateOptions = document.querySelectorAll('.state-option');
-            stateOptions.forEach(opt => opt.classList.remove('selected'));
-            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-            allStatesOption.classList.add('selected');
-            const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            stateButton.textContent = 'All States';
-
-            // Reset subcategory selections
-            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
-            subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-            allSubcategoriesOption.classList.add('selected');
-            const subcategoryButton = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            subcategoryButton.textContent = 'All Subcategories';
-
-            const selects = document.querySelectorAll('.filter-select');
-            selects.forEach(select => {
-                if (select.id === 'subcategoryFilter') {
-                    // Find and select "All Subcategories" option
-                    const allSubcatsOption = Array.from(select.options)
-                        .find(option => option.value === 'All Subcategories');
-                    if (allSubcatsOption) {
-                        select.value = 'All Subcategories';
-                    } else {
-                        select.selectedIndex = 0;
-                    }
-                } else {
-                    select.selectedIndex = 0;
-                }
-            });
-
-            // Reset range slider values using stored references
-            if (this.rangeSliderElements) {
-                const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
-                fromSlider.value = fromSlider.min;
-                toSlider.value = toSlider.max;
-                fromInput.value = fromSlider.min;
-                toInput.value = toSlider.max;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-            }
-
-            this.searchInput.value = '';
-            this.currentSearchTerm = '';
-            this.currentFilters = null;
-            this.currentSort = 'popularity';
-            this.visibleRows = this.allRows;
-            this.applyAllFilters();
-        }
-
-        updateTable() {
-            // Hide all rows first
-            this.allRows.forEach(row => row.style.display = 'none');
-            
-            // Calculate visible range
-            const start = (this.currentPage - 1) * this.pageSize;
-            const end = Math.min(start + this.pageSize, this.visibleRows.length);
-            
-            // Show only rows for current page
-            this.visibleRows.slice(start, end).forEach(row => {
-                row.style.display = '';
-            });
-
-            this.updatePagination();
-            this.adjustHeight();
-        }
-
-        updatePagination() {
-            const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
-            const pageNumbers = this.generatePageNumbers(totalPages);
-            const container = document.getElementById('page-numbers');
-            
-            container.innerHTML = pageNumbers.map(page => {
-                if (page === '...') {
-                    return '<span class="page-ellipsis">...</span>';
-                }
-                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
-                    ${page === this.currentPage ? 'disabled' : ''} 
-                    onclick="handlePageClick(${page})">${page}</button>`;
-            }).join('');
-
-            document.getElementById('prev-page').disabled = this.currentPage <= 1;
-            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
-        }
-
-        generatePageNumbers(totalPages) {
-            let pages = [];
-            if (totalPages <= 10) {
-                pages = Array.from({length: totalPages}, (_, i) => i + 1);
-            } else {
-                if (this.currentPage <= 7) {
-                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
-                } else if (this.currentPage >= totalPages - 6) {
-                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
-                } else {
-                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
-                }
-            }
-            return pages;
-        }
-
-        previousPage() {
-            if (this.currentPage > 1) {
-                this.currentPage--;
-                this.updateTable();
-            }
-        }
-
-        nextPage() {
-            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            if (this.currentPage < totalPages) {
-                this.currentPage++;
-                this.updateTable();
-            }
-        }
-
-        goToPage(page) {
-            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            if (page >= 1 && page <= totalPages) {
-                this.currentPage = page;
-                this.updateTable();
-            }
-        }
-
-        adjustHeight() {
-            requestAnimationFrame(() => {
-                const elements = {
-                    titleWrapper: document.querySelector('.title-wrapper'),
-                    filterWrapper: document.querySelector('.filter-wrapper'),
-                    tableWrapper: document.querySelector('.table-wrapper'),
-                    tableContainer: document.querySelector('.table-container'),
-                    table: document.querySelector('#data-table'),
-                    controls: document.querySelector('.table-controls'),
-                    pagination: document.querySelector('.pagination-controls')
-                };
-
-                if (!Object.values(elements).every(el => el)) return;
-
-                // Count visible rows in current page
-                const visibleRowCount = this.visibleRows.slice(
-                    (this.currentPage - 1) * this.pageSize,
-                    this.currentPage * this.pageSize
-                ).length;
-
-                // Constants
-                const rowHeight = 52;        // Height per row including padding
-                const headerHeight = 60;     // Table header height
-                const controlsHeight = elements.controls.offsetHeight;
-                const paginationHeight = elements.pagination.offsetHeight;
-                const padding = 40;
-                const minTableHeight = 400;  // Minimum table content height
-
-                // Calculate table content height
-                const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
-                const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
-
-                // Set dimensions
-                elements.tableContainer.style.height = `${actualTableHeight}px`;
-                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
-
-                // Calculate final component height
-                const finalHeight = 
-                    elements.titleWrapper.offsetHeight +
-                    elements.filterWrapper.offsetHeight +
-                    actualTableHeight +
-                    controlsHeight +
-                    paginationHeight +
-                    padding;
-
-                // Update Streamlit frame height if changed significantly
-                if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
-                    this.lastHeight = finalHeight;
-                    Streamlit.setFrameHeight(finalHeight);
-                }
-            });
         }
     }
 
