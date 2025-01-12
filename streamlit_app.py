@@ -187,6 +187,7 @@ df['State'] = df['State'].apply(style_state)
 # After creating the initial DataFrame, add country coordinates
 @st.cache_data
 def load_country_data():
+    # Downloaded from https://developers.google.com/public-data/docs/canonical/countries_csv
     country_df = pd.read_csv('country.csv')
     return country_df
 
@@ -510,11 +511,17 @@ css = """
         padding: 8px; 
         text-align: left; 
         border-bottom: 1px solid #ddd; 
-        overflow: hidden; 
-        text-overflow: ellipsis; 
-        white-space: nowrap; 
-        font-family: 'Poppins'; 
-        font-size: 14px; 
+        white-space: nowrap;
+        font-family: 'Poppins';
+        font-size: 14px;
+        overflow-x: auto;
+        -ms-overflow-style: none;
+        overflow: -moz-scrollbars-none;
+        scrollbar-width: none;
+    }
+    
+    td::-webkit-scrollbar {
+        display: none;  /* Safari and Chrome */
     }
 
     td:last-child { 
