@@ -803,7 +803,7 @@ script = """
                 this.visibleRows.sort((a, b) => {
                     const deadlineA = new Date(a.dataset.deadline);
                     const deadlineB = new Date(b.dataset.deadline);
-                    return deadlineA - deadlineB;  // Ascending order (closest deadline first)
+                    return deadlineB - deadlineA; 
                 });
             } else {
                 // Date-based sorting only
