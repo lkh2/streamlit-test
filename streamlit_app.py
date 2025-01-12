@@ -780,49 +780,40 @@ script = """
                     return;
                 }
 
-                // Log the first few rows' distances for debugging
-                console.log("Sorting by distance. First few rows:");
-                this.visibleRows.slice(0, 5).forEach(row => {
-                    console.log(`Distance: ${row.dataset.distance}, Country: ${row.dataset.countryCode}`);
-                });
-
-                // Sort by the pre-calculated distances
+                console.log("Sorting by distance only");
+                
+                // Sort only by distance
                 this.visibleRows.sort((a, b) => {
                     const distA = parseFloat(a.dataset.distance);
                     const distB = parseFloat(b.dataset.distance);
                     
                     // Handle invalid values
-                    if (isNaN(distA)) return 1;  // Move invalid to end
-                    if (isNaN(distB)) return -1; // Move invalid to end
+                    if (isNaN(distA)) return 1;
+                    if (isNaN(distB)) return -1;
                     
                     return distA - distB;
                 });
 
-                // Log the sorted first few rows for verification
-                console.log("After sorting, first few rows:");
+                // Debug log sorted distances
+                console.log("First 5 rows after distance sort:");
                 this.visibleRows.slice(0, 5).forEach(row => {
-                    console.log(`Distance: ${row.dataset.distance}, Country: ${row.dataset.countryCode}`);
+                    console.log(`Distance: ${row.dataset.distance} km, Country: ${row.dataset.countryCode}`);
                 });
-
-                // Update the table display
-                const tbody = document.querySelector('#data-table tbody');
-                const fragment = document.createDocumentFragment();
-                this.visibleRows.forEach(row => fragment.appendChild(row));
-                tbody.appendChild(fragment);
             } else {
-                // Existing date-based sorting logic
+                // Date-based sorting only
                 this.visibleRows.sort((a, b) => {
                     const dateA = new Date(a.dataset.date);
                     const dateB = new Date(b.dataset.date);
                     return sortType === 'newest' ? dateB - dateA : dateA - dateB;
                 });
-                
-                // Update the table display
-                const tbody = document.querySelector('#data-table tbody');
-                const fragment = document.createDocumentFragment();
-                this.visibleRows.forEach(row => fragment.appendChild(row));
-                tbody.appendChild(fragment);
             }
+
+            // Update the table display after sorting
+            const tbody = document.querySelector('#data-table tbody');
+            tbody.innerHTML = ''; // Clear the table body
+            const fragment = document.createDocumentFragment();
+            this.visibleRows.forEach(row => fragment.appendChild(row.cloneNode(true)));
+            tbody.appendChild(fragment);
         }
 
         // Modify applyAllFilters to handle async sorting
@@ -980,14 +971,6 @@ script = """
             }
 
             return true;
-        }
-
-        sortRows(sortType) {
-            this.visibleRows.sort((a, b) => {
-                const dateA = new Date(a.dataset.date);
-                const dateB = new Date(b.dataset.date);
-                return sortType === 'newest' ? dateB - dateA : dateA - dateB;
-            });
         }
 
         resetFilters() {
