@@ -1043,6 +1043,31 @@ script = """
             this.updateTable();
         }
 
+        setupSearchAndPagination() {
+            // Setup search functionality
+            if (this.searchInput) {
+                this.searchInput.addEventListener('input', debounce((e) => {
+                    this.currentSearchTerm = e.target.value;
+                    this.applyAllFilters();
+                }, 300));
+            }
+
+            // Setup pagination controls
+            const prevButton = document.getElementById('prev-page');
+            const nextButton = document.getElementById('next-page');
+            
+            if (prevButton) {
+                prevButton.addEventListener('click', () => this.previousPage());
+            }
+            
+            if (nextButton) {
+                nextButton.addEventListener('click', () => this.nextPage());
+            }
+
+            // Setup global page click handler
+            window.handlePageClick = (page) => this.goToPage(page);
+        }
+
         // Remove getUserLocation method as we don't need it anymore
 
         // Update sortRows to handle missing location
