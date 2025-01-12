@@ -255,7 +255,7 @@ capped_percentage = df['Raw Raised'].clip(upper=500)
 
 # Normalize components to 0-1 scale
 normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
-normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())
+normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].max())
 normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
 
 # Calculate popularity score
@@ -347,6 +347,10 @@ def get_filter_options(df):
 
 filter_options = get_filter_options(df)
 
+# Calculate min/max pledged values
+min_pledged = int(df['Raw Pledged'].min())
+max_pledged = int(df['Raw Pledged'].max())
+
 # Update template to include filter controls with default subcategory
 template = f"""
 <script>
@@ -393,9 +397,20 @@ template = f"""
             <select id="stateFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['states'])}
             </select>
-            <select id="pledgedFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['pledged_ranges'])}
-            </select>
+            <div class="range-slider-container">
+                <input type="range" min="{min_pledged}" max="{max_pledged}" value="{min_pledged}" class="range-slider" id="pledged-min">
+                <input type="range" min="{min_pledged}" max="{max_pledged}" value="{max_pledged}" class="range-slider" id="pledged-max">
+                <div class="range-inputs">
+                    <div>
+                        <div class="range-label">Min $</div>
+                        <input type="number" min="{min_pledged}" max="{max_pledged}" value="{min_pledged}" class="range-input" id="pledged-min-input">
+                    </div>
+                    <div>
+                        <div class="range-label">Max $</div>
+                        <input type="number" min="{min_pledged}" max="{max_pledged}" value="{max_pledged}" class="range-input" id="pledged-max-input">
+                    </div>
+                </div>
+            </div>
             <select id="goalFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['goal_ranges'])}
             </select>
@@ -438,6 +453,63 @@ template = f"""
 # Add new CSS styles
 css = """
 <style> 
+    /* Range Slider Styles */
+    .range-slider-container {
+        position: relative;
+        width: 250px;
+        padding: 15px 0;
+    }
+
+    .range-slider {
+        -webkit-appearance: none;
+        width: 100%;
+        height: 2px;
+        background: #5932EA;
+        outline: none;
+        position: absolute;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .range-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 15px;
+        height: 15px;
+        background: #5932EA;
+        border-radius: 50%;
+        cursor: pointer;
+    }
+
+    .range-slider::-moz-range-thumb {
+        width: 15px;
+        height: 15px;
+        background: #5932EA;
+        border-radius: 50%;
+        cursor: pointer;
+    }
+
+    .range-inputs {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 20px;
+    }
+
+    .range-input {
+        width: 80px;
+        padding: 4px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: 'Poppins';
+    }
+
+    .range-label {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 4px;
+    }
+    
     .title-wrapper {
         width: 100%;
         text-align: center;    
@@ -1001,16 +1073,10 @@ script = """
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
             // Numeric range filters
-            if (filters.pledged !== 'All Amounts') {
-                if (filters.pledged.startsWith('>')) {
-                    const min = parseFloat(filters.pledged.replace(/[^0-9.-]+/g,""));
-                    if (pledged <= min) return false;
-                } else {
-                    const [min, max] = filters.pledged.split('-')
-                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                    if (pledged < min || pledged > max) return false;
-                }
-            }
+            const minPledged = parseInt(document.getElementById('pledged-min').value);
+            const maxPledged = parseInt(document.getElementById('pledged-max').value);
+            
+            if (pledged < minPledged || (maxPledged < 10000000 && pledged > maxPledged)) return false;
 
             if (filters.goal !== 'All Goals') {
                 if (filters.goal.startsWith('>')) {
@@ -1074,6 +1140,10 @@ script = """
             this.currentFilters = null;
             this.currentSort = 'popularity';
             this.visibleRows = this.allRows;
+            document.getElementById('pledged-min').value = {min_pledged};
+            document.getElementById('pledged-max').value = {max_pledged};
+            document.getElementById('pledged-min-input').value = {min_pledged};
+            document.getElementById('pledged-max-input').value = {max_pledged};
             this.applyAllFilters();
         }
 
@@ -1203,6 +1273,59 @@ script = """
             });
 
             document.getElementById('resetFilters').addEventListener('click', () => this.resetFilters());
+        }
+
+        setupRangeSliders() {
+            const minSlider = document.getElementById('pledged-min');
+            const maxSlider = document.getElementById('pledged-max');
+            const minInput = document.getElementById('pledged-min-input');
+            const maxInput = document.getElementById('pledged-max-input');
+
+            // Update input when slider changes
+            minSlider.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value);
+                if (value >= parseInt(maxSlider.value)) {
+                    e.target.value = maxSlider.value;
+                    minInput.value = maxSlider.value;
+                } else {
+                    minInput.value = value;
+                }
+                this.applyFilters();
+            });
+
+            maxSlider.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value);
+                if (value <= parseInt(minSlider.value)) {
+                    e.target.value = minSlider.value;
+                    maxInput.value = minSlider.value;
+                } else {
+                    maxInput.value = value;
+                }
+                this.applyFilters();
+            });
+
+            // Update slider when input changes
+            minInput.addEventListener('input', (e) => {
+                let value = parseInt(e.target.value);
+                if (isNaN(value) || value < 0) value = 0;
+                if (value >= parseInt(maxInput.value)) {
+                    value = parseInt(maxInput.value);
+                }
+                e.target.value = value;
+                minSlider.value = value;
+                this.applyFilters();
+            });
+
+            maxInput.addEventListener('input', (e) => {
+                let value = parseInt(e.target.value);
+                if (isNaN(value) || value < 0) value = 0;
+                if (value <= parseInt(minInput.value)) {
+                    value = parseInt(minInput.value);
+                }
+                e.target.value = value;
+                maxSlider.value = value;
+                this.applyFilters();
+            });
         }
     }
 
