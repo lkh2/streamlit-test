@@ -1,3 +1,4 @@
+import time
 import streamlit as st
 import streamlit.components.v1 as components
 import tempfile, os
@@ -7,8 +8,6 @@ from pandas import json_normalize
 from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
-import time
-import threading
 
 st.set_page_config(layout="wide")
 
@@ -25,12 +24,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-def show_temp_warning(message):
-    """Show a temporary warning message in Streamlit."""
-    warning = st.warning(message, icon="⚠️")
-    time.sleep(3)
-    warning.empty()
 
 def gensimplecomponent(name, template="", script=""):
     """Generate a simple Streamlit component."""
@@ -209,10 +202,6 @@ if 'show_location_warning' not in st.session_state:
     st.session_state.show_location_warning = False
 if 'show_loading_spinner' not in st.session_state:
     st.session_state.show_loading_spinner = False
-if 'temp_warning' not in st.session_state:
-    st.session_state.temp_warning = None
-if 'warning_shown' not in st.session_state:
-    st.session_state.warning_shown = False
 
 # Add geolocation call before data processing
 loc = get_geolocation()
@@ -225,20 +214,19 @@ if (loc and 'coords' in loc):
             'longitude': loc['coords']['longitude']
         }
         time.sleep(1)  # Give time for visual feedback
-    
-    # Show success message temporarily
-    placeholder = st.empty()
-    placeholder.success("Location received successfully!")
-    # Clear success message after 2 seconds
-    time.sleep(2)
-    placeholder.empty()
+    load_success = st.success("Location received successfully!")
+    st.session_state.show_location_warning = False
+    time.sleep(1)
+    load_success.empty()
 else:
     # Set flag to show warning if needed
     st.session_state.show_location_warning = True
 
 # Show warning if needed
 if st.session_state.show_location_warning:
-    st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️")
+    location_alert = st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️")
+    time.sleep(2)
+    location_alert.empty()
 
 # Add function to calculate distances
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -858,13 +846,6 @@ script = """
                 if (!this.userLocation) {
                     this.currentSort = 'popularity';
                     document.getElementById('sortFilter').value = 'popularity';
-                    
-                    // Use Streamlit's postMessage to trigger warning
-                    window.parent.postMessage({
-                        type: 'streamlit:setComponentValue',
-                        value: { showLocationWarning: true }
-                    }, '*');
-                    
                     this.sortRows('popularity');
                     return;
                 }
@@ -1253,13 +1234,6 @@ script = """
 
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
-table_value = table_component()
-if (table_value and isinstance(table_value, dict) and 
-    table_value.get('showLocationWarning') and 
-    not st.session_state.warning_shown):
-    # Show warning only if it hasn't been shown before
-    st.session_state.warning_shown = True
-    threading.Thread(target=show_temp_warning, 
-                    args=('Please enable location services to use the "Near Me" sorting option.',)).start()
+table_component()
 
 st.dataframe(df)
