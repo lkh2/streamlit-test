@@ -1343,42 +1343,34 @@ script = """
         }
 
         resetFilters() {
-            // Reset category selections
+            // Reset category selections and clear the sets
             const categoryOptions = document.querySelectorAll('.category-option');
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedCategories = new Set(['All Categories']);  // Reset the set
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
             document.querySelector('.multi-select-btn').textContent = 'All Categories';
 
-            // Reset country selections
+            // Reset country selections and clear the sets
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedCountries = new Set(['All Countries']);  // Reset the set
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            // Fix: Get all multi-select buttons and update the correct one for countries
-            const multiSelectBtns = document.querySelectorAll('.multi-select-btn');
-            multiSelectBtns.forEach((btn, index) => {
-                if (index === 0) btn.textContent = 'All Categories';
-                if (index === 1) btn.textContent = 'All Subcategories';
-                if (index === 2) btn.textContent = 'All Countries';
-                if (index === 3) btn.textContent = 'All States';
-            });
 
-            // Reset state selections
+            // Reset state selections and clear the sets
             const stateOptions = document.querySelectorAll('.state-option');
             stateOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedStates = new Set(['All States']);  // Reset the set
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
             allStatesOption.classList.add('selected');
-            const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            stateButton.textContent = 'All States';
 
-            // Reset subcategory selections
+            // Reset subcategory selections and clear the sets
             const subcategoryOptions = document.querySelectorAll('.subcategory-option');
             subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedSubcategories = new Set(['All Subcategories']);  // Reset the set
             const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
             allSubcategoriesOption.classList.add('selected');
-            const subcategoryButton = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            subcategoryButton.textContent = 'All Subcategories';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
@@ -1586,7 +1578,7 @@ script = """
                 if (selectedCategories.has('All Categories')) {
                     btn.textContent = 'All Categories';
                 } else {
-                    const selectedArray = Array.from(selectedCategories);
+                    const selectedArray = Array.from(selectedCategories).sort();  // Sort alphabetically
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1595,7 +1587,7 @@ script = """
                 }
             };
             
-            const selectedCategories = new Set(['All Categories']);
+            let selectedCategories = new Set(['All Categories']);  // Change to let
             updateMultiSelectButton(selectedCategories);
             
             categoryOptions.forEach(option => {
@@ -1669,7 +1661,7 @@ script = """
                 if (selectedCountries.has('All Countries')) {
                     btn.textContent = 'All Countries';
                 } else {
-                    const selectedArray = Array.from(selectedCountries);
+                    const selectedArray = Array.from(selectedCountries).sort();  // Sort alphabetically
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1678,7 +1670,7 @@ script = """
                 }
             };
             
-            const selectedCountries = new Set(['All Countries']);
+            let selectedCountries = new Set(['All Countries']);  // Change to let
             updateCountryButton(selectedCountries);
             
             countryOptions.forEach(option => {
@@ -1730,7 +1722,7 @@ script = """
                 if (selectedStates.has('All States')) {
                     btn.textContent = 'All States';
                 } else {
-                    const selectedArray = Array.from(selectedStates);
+                    const selectedArray = Array.from(selectedStates).sort();  // Sort alphabetically
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1739,7 +1731,7 @@ script = """
                 }
             };
             
-            const selectedStates = new Set(['All States']);
+            let selectedStates = new Set(['All States']);  // Change to let
             updateStateButton(selectedStates);
             
             stateOptions.forEach(option => {
@@ -1785,7 +1777,7 @@ script = """
                 if (selectedSubcategories.has('All Subcategories')) {
                     btn.textContent = 'All Subcategories';
                 } else {
-                    const selectedArray = Array.from(selectedSubcategories);
+                    const selectedArray = Array.from(selectedSubcategories).sort();  // Sort alphabetically
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1794,7 +1786,7 @@ script = """
                 }
             };
             
-            const selectedSubcategories = new Set(['All Subcategories']);
+            let selectedSubcategories = new Set(['All Subcategories']);  // Change to let
             updateSubcategoryButton(selectedSubcategories);
             
             subcategoryOptions.forEach(option => {
