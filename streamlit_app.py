@@ -260,11 +260,11 @@ normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_
 
 # Calculate popularity score
 df['Popularity Score'] = (
-    normalized_backers * 0.35 +      # Backer count (35% weight)
-    normalized_pledged * 0.25 +      # Pledged amount (25% weight)
-    normalized_percentage * 0.20 +    # Percentage raised (20% weight)
-    time_factor * 0.10 +             # Time factor (10% weight)
-    df['Staff Pick'].astype(int) * 0.10  # Staff pick (10% weight)
+    normalized_backers * 0.25 +      # Backer count (25% weight, reduced from 35%)
+    normalized_pledged * 0.35 +      # Pledged amount (35% weight, increased from 25%)
+    normalized_percentage * 0.20 +    # Percentage raised (20% weight, unchanged)
+    time_factor * 0.10 +             # Time factor (10% weight, unchanged)
+    df['Staff Pick'].astype(int) * 0.10  # Staff pick (10% weight, unchanged)
 )
 
 def generate_table_html(df):
@@ -1394,14 +1394,35 @@ script = """
             if (window.selectedStates) window.selectedStates.add('All States');
             if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
 
-            // Reset range slider values using stored references
+            // Reset all range sliders and inputs
             if (this.rangeSliderElements) {
-                const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
+                const { 
+                    fromSlider, toSlider, fromInput, toInput,
+                    goalFromSlider, goalToSlider, goalFromInput, goalToInput,
+                    raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
+                    fillSlider 
+                } = this.rangeSliderElements;
+
+                // Reset pledged amount range
                 fromSlider.value = fromSlider.min;
                 toSlider.value = toSlider.max;
                 fromInput.value = fromSlider.min;
                 toInput.value = toSlider.max;
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+
+                // Reset goal amount range
+                goalFromSlider.value = goalFromSlider.min;
+                goalToSlider.value = goalToSlider.max;
+                goalFromInput.value = goalFromSlider.min;
+                goalToInput.value = goalToSlider.max;
+                fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
+
+                // Reset percentage raised range
+                raisedFromSlider.value = raisedFromSlider.min;
+                raisedToSlider.value = raisedToSlider.max;
+                raisedFromInput.value = raisedFromSlider.min;
+                raisedToInput.value = raisedToSlider.max;
+                fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
             }
 
             this.searchInput.value = '';
