@@ -192,7 +192,6 @@ if loc and 'coords' in loc:
         'latitude': loc['coords']['latitude'],
         'longitude': loc['coords']['longitude']
     }
-    st.write("Your location has been detected")
 
 # Add function to calculate distances
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -379,6 +378,10 @@ template = f"""
         <div id="page-numbers" class="page-numbers"></div>
         <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
     </div>
+</div>
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Retrieving distance data...</div>
 </div>
 <script>
     // Make user location available to JavaScript
@@ -691,6 +694,45 @@ css = """
     td a:hover {
         color: grey
     }
+
+    .loading-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(255, 255, 255, 0.8);
+        z-index: 9999;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+    }
+
+    .loading-overlay.active {
+        display: flex;
+    }
+
+    .spinner {
+        width: 50px;
+        height: 50px;
+        border: 5px solid #f3f3f3;
+        border-top: 5px solid #5932EA;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 10px;
+    }
+
+    .loading-text {
+        font-family: 'Poppins';
+        font-size: 14px;
+        color: #333;
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
 </style>
 """
 
@@ -763,8 +805,17 @@ script = """
             this.currentSort = 'newest';
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
+            this.loadingOverlay = document.getElementById('loadingOverlay');
             this.initialize();
             this.resetFilters();
+        }
+
+        showLoading() {
+            this.loadingOverlay.classList.add('active');
+        }
+
+        hideLoading() {
+            this.loadingOverlay.classList.remove('active');
         }
 
         // Remove getUserLocation method as we don't need it anymore
@@ -773,31 +824,32 @@ script = """
         async sortRows(sortType) {
             if (sortType === 'nearme') {
                 if (!this.userLocation) {
-                    console.error("Location not available");
                     this.currentSort = 'newest';
                     document.getElementById('sortFilter').value = 'newest';
                     this.sortRows('newest');
                     return;
                 }
 
-                console.log("Sorting by distance only");
-                
-                // Sort only by distance
-                this.visibleRows.sort((a, b) => {
-                    const distA = parseFloat(a.dataset.distance);
-                    const distB = parseFloat(b.dataset.distance);
-                    
-                    // Handle invalid values
-                    if (isNaN(distA)) return 1;
-                    if (isNaN(distB)) return -1;
-                    
-                    return distA - distB;
-                });
+                this.showLoading();
+                try {
+                    // Sort only by distance
+                    this.visibleRows.sort((a, b) => {
+                        const distA = parseFloat(a.dataset.distance);
+                        const distB = parseFloat(b.dataset.distance);
+                        
+                        if (isNaN(distA)) return 1;
+                        if (isNaN(distB)) return -1;
+                        
+                        return distA - distB;
+                    });
 
-                console.log("First 5 rows after distance sort:");
-                this.visibleRows.slice(0, 5).forEach(row => {
-                    console.log(`Distance: ${row.dataset.distance} km, Country: ${row.dataset.countryCode}`);
-                });
+                    // Update the table display after sorting
+                    const tbody = document.querySelector('#data-table tbody');
+                    this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
+                    this.visibleRows.forEach(row => tbody.appendChild(row));
+                } finally {
+                    this.hideLoading();
+                }
             } else {
                 // Date-based sorting only
                 this.visibleRows.sort((a, b) => {
@@ -805,14 +857,11 @@ script = """
                     const dateB = new Date(b.dataset.date);
                     return sortType === 'newest' ? dateB - dateA : dateA - dateB;
                 });
-            }
 
-            // Update the table display after sorting without cloning nodes
-            const tbody = document.querySelector('#data-table tbody');
-            // Remove all rows from their current position
-            this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
-            // Add them back in the new order
-            this.visibleRows.forEach(row => tbody.appendChild(row));
+                const tbody = document.querySelector('#data-table tbody');
+                this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
+                this.visibleRows.forEach(row => tbody.appendChild(row));
+            }
             
             // Update current page and pagination
             this.currentPage = 1;
@@ -1033,8 +1082,6 @@ script = """
 
             document.getElementById('prev-page').disabled = this.currentPage <= 1;
             document.getElementById('next-page').disabled = this.currentPage >= totalPages;
-            
-            console.log(`Showing page ${this.currentPage} of ${totalPages}, ${this.visibleRows.length} total rows`);
         }
 
         generatePageNumbers(totalPages) {
@@ -1110,16 +1157,6 @@ script = """
                     
                     // Set final component height with additional padding
                     Streamlit.setFrameHeight(finalHeight + 40);
-                    
-                    console.log({
-                        titleHeight,
-                        filterHeight,
-                        tableHeight,
-                        controlsHeight,
-                        paginationHeight,
-                        contentHeight,
-                        finalHeight
-                    });
                 }
             });
         }
@@ -1163,6 +1200,3 @@ table_component = gensimplecomponent('searchable_table', template=css + template
 table_component()
 
 st.dataframe(df)
-
-# Add debug output to verify distances
-st.write("Distance range:", df['Distance'].min(), "to", df['Distance'].max())
