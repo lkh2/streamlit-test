@@ -1012,7 +1012,6 @@ script = """
 
     class TableManager {
         constructor() {
-            // Initialize properties first
             this.searchInput = document.getElementById('table-search');
             this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
             this.visibleRows = this.allRows;
@@ -1023,49 +1022,8 @@ script = """
             this.currentSort = 'popularity';
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
-
-            // Initialize state and filters
-            this.currentFilters = {
-                categories: ['All Categories'],
-                subcategory: 'All Subcategories',
-                country: 'All Countries',
-                state: 'All States',
-                date: 'All Time'
-            };
-
-            // Setup components after initialization
-            this.setupSearchAndPagination();
-            this.setupFilters();
-            this.setupRangeSlider();
-            
-            // Apply initial state
-            this.applyAllFilters();
-            this.updateTable();
-        }
-
-        setupSearchAndPagination() {
-            // Setup search functionality
-            if (this.searchInput) {
-                this.searchInput.addEventListener('input', debounce((e) => {
-                    this.currentSearchTerm = e.target.value;
-                    this.applyAllFilters();
-                }, 300));
-            }
-
-            // Setup pagination controls
-            const prevButton = document.getElementById('prev-page');
-            const nextButton = document.getElementById('next-page');
-            
-            if (prevButton) {
-                prevButton.addEventListener('click', () => this.previousPage());
-            }
-            
-            if (nextButton) {
-                nextButton.addEventListener('click', () => this.nextPage());
-            }
-
-            // Setup global page click handler
-            window.handlePageClick = (page) => this.goToPage(page);
+            this.initialize();
+            this.resetFilters();
         }
 
         // Remove getUserLocation method as we don't need it anymore
@@ -1174,12 +1132,8 @@ script = """
 
         // Update applyFilters to handle async
         async applyFilters() {
-            // Get selected categories from selected category options
-            const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
-                .map(opt => opt.dataset.value);
-
             this.currentFilters = {
-                categories: selectedCategories,
+                category: document.getElementById('categoryFilter').value,
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
@@ -1190,10 +1144,49 @@ script = """
             await this.applyAllFilters();
         }
 
+        initialize() {
+            this.setupSearchAndPagination();
+            this.setupFilters();
+            this.setupRangeSlider();
+            this.currentSort = 'popularity';  // Set default sort to popularity
+            this.applyAllFilters();
+            this.updateTable();
+        }
+
+        setupSearchAndPagination() {
+            // Setup search
+            const debouncedSearch = debounce((searchTerm) => {
+                this.currentSearchTerm = searchTerm;
+                this.applyAllFilters();
+            }, 300);
+
+            this.searchInput.addEventListener('input', (e) => {
+                debouncedSearch(e.target.value.trim().toLowerCase());
+            });
+
+            // Setup pagination controls
+            document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
+            document.getElementById('next-page').addEventListener('click', () => this.nextPage());
+            window.handlePageClick = (page) => this.goToPage(page);
+        }
+
+        applyFilters() {
+            this.currentFilters = {
+                category: document.getElementById('categoryFilter').value,
+                subcategory: document.getElementById('subcategoryFilter').value,
+                country: document.getElementById('countryFilter').value,
+                state: document.getElementById('stateFilter').value,
+                date: document.getElementById('dateFilter').value
+            };
+            this.currentSort = document.getElementById('sortFilter').value;
+            
+            this.applyAllFilters();
+        }
+
         matchesFilters(row, filters) {
             const category = row.dataset.category;
             
-            // Category filter check for multiple selections
+            // Check category filter with multi-selection support
             if (filters.categories && filters.categories.length > 0) {
                 if (!filters.categories.includes('All Categories') && !filters.categories.includes(category)) {
                     return false;
@@ -1208,8 +1201,10 @@ script = """
             const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
             const country = row.querySelector('td:nth-child(5)').textContent;
 
-            // Category filters
-            if (filters.category !== 'All Categories' && category !== filters.category) return false;
+            // Remove the old category check since we handled it above
+            // if (filters.category !== 'All Categories' && category !== filters.category) return false;
+            
+            // Rest of the filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
             if (filters.country !== 'All Countries' && country !== filters.country) return false;
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
@@ -1448,13 +1443,9 @@ script = """
         }
 
         setupFilters() {
-            // Setup category multi-select with initial state
+            // Setup category multi-select
             const categoryOptions = document.querySelectorAll('.category-option');
-            const selectedCategories = new Set(['All Categories']); // Initialize with All Categories
-            
-            // Set initial state
-            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            allCategoriesOption.classList.add('selected');
+            const selectedCategories = new Set();
             
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1464,10 +1455,14 @@ script = """
                         // Clear all selections if "All Categories" is clicked
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
                         selectedCategories.clear();
-                        selectedCategories.add('All Categories');
-                        e.target.classList.add('selected');
+                        
+                        if (!e.target.classList.contains('selected')) {
+                            e.target.classList.add('selected');
+                            selectedCategories.add(value);
+                        }
                     } else {
                         // Remove "All Categories" selection
+                        const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
                         allCategoriesOption.classList.remove('selected');
                         selectedCategories.delete('All Categories');
                         
@@ -1491,13 +1486,10 @@ script = """
                     if (selectedCategories.has('All Categories')) {
                         btn.textContent = 'Categories';
                     } else {
-                        const selectedText = Array.from(selectedCategories).join(', ');
-                        btn.textContent = selectedText.length > 20 ? 
-                            selectedText.substring(0, 20) + '...' : 
-                            selectedText;
+                        btn.textContent = Array.from(selectedCategories).join(', ');
                     }
                     
-                    // Store selected categories in filters and apply
+                    // Store selected categories in filters
                     this.currentFilters = {
                         ...this.currentFilters,
                         categories: Array.from(selectedCategories)
@@ -1507,14 +1499,10 @@ script = """
                 });
             });
 
-            // Initialize filters with categories
-            this.currentFilters = {
-                categories: ['All Categories'],
-                subcategory: 'All Subcategories',
-                country: 'All Countries',
-                state: 'All States',
-                date: 'All Time'
-            };
+            // Initialize with "All Categories" selected
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
+            selectedCategories.add('All Categories');
 
             // Setup other filters
             const filterIds = [
