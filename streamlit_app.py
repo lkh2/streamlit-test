@@ -370,9 +370,12 @@ template = f"""
                 </div>
             </div>
             <span class="filter-label">&</span>
-            <select id="subcategoryFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}" {"selected" if opt == "All Subcategories" else ""}>{opt}</option>' for opt in filter_options['subcategories'])}
-            </select>
+            <div class="multi-select-dropdown">
+                <button class="filter-select multi-select-btn">Subcategories</button>
+                <div class="multi-select-content">
+                    {' '.join(f'<div class="subcategory-option" data-value="{opt}">{opt}</div>' for opt in filter_options['subcategories'])}
+                </div>
+            </div>
             <span class="filter-label">Projects On</span>
             <div class="multi-select-dropdown">
                 <button class="filter-select multi-select-btn">Countries</button>
@@ -1006,6 +1009,31 @@ css = """
         margin-bottom: 8px;
         padding-bottom: 12px;
     }
+
+    .subcategory-option {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        margin: 2px 0;
+        font-family: 'Poppins';
+        font-size: 12px;
+        transition: all 0.2s ease;
+    }
+
+    .subcategory-option:hover {
+        background-color: #f0f0f0;
+    }
+
+    .subcategory-option.selected {
+        background-color: #5932EA;
+        color: white;
+    }
+
+    .subcategory-option[data-value="All Subcategories"] {
+        border-bottom: 1px solid #eee;
+        margin-bottom: 8px;
+        padding-bottom: 12px;
+    }
 </style>
 """
 
@@ -1200,10 +1228,14 @@ script = """
             const selectedStates = Array.from(document.querySelectorAll('.state-option.selected'))
                 .map(option => option.dataset.value);
 
+            // Get all selected subcategories
+            const selectedSubcategories = Array.from(document.querySelectorAll('.subcategory-option.selected'))
+                .map(option => option.dataset.value);
+
             // Collect all current filter values
             this.currentFilters = {
                 categories: selectedCategories,
-                subcategory: document.getElementById('subcategoryFilter').value,
+                subcategories: selectedSubcategories,
                 countries: selectedCountries,
                 states: selectedStates,
                 date: document.getElementById('dateFilter').value
@@ -1248,6 +1280,12 @@ script = """
                 return false;
             }
 
+            // Subcategory filter
+            const subcategory = row.dataset.subcategory;
+            if (!filters.subcategories.includes('All Subcategories') && !filters.subcategories.includes(subcategory)) {
+                return false;
+            }
+
             // Country filter
             const country = row.querySelector('td:nth-child(5)').textContent.trim();
             if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
@@ -1263,15 +1301,12 @@ script = """
             }
 
             // Get all other values
-            const subcategory = row.dataset.subcategory;
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
 
             // Rest of filter checks
-            if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-
             // Check pledged range
             const minPledged = parseFloat(document.getElementById('fromInput').value);
             const maxPledged = parseFloat(document.getElementById('toInput').value);
@@ -1308,28 +1343,34 @@ script = """
         }
 
         resetFilters() {
-            // Reset category selections
+            // Reset category selections and clear the sets
             const categoryOptions = document.querySelectorAll('.category-option');
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedCategories = new Set(['All Categories']);  // Reset the set
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
             document.querySelector('.multi-select-btn').textContent = 'All Categories';
 
-            // Reset country selections
+            // Reset country selections and clear the sets
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedCountries = new Set(['All Countries']);  // Reset the set
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            const countryButtons = document.querySelectorAll('.multi-select-btn');
-            countryButtons[1].textContent = 'All Countries';
 
-            // Reset state selections
+            // Reset state selections and clear the sets
             const stateOptions = document.querySelectorAll('.state-option');
             stateOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedStates = new Set(['All States']);  // Reset the set
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
             allStatesOption.classList.add('selected');
-            const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            stateButton.textContent = 'All States';
+
+            // Reset subcategory selections and clear the sets
+            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
+            subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
+            selectedSubcategories = new Set(['All Subcategories']);  // Reset the set
+            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
+            allSubcategoriesOption.classList.add('selected');
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
@@ -1537,7 +1578,7 @@ script = """
                 if (selectedCategories.has('All Categories')) {
                     btn.textContent = 'All Categories';
                 } else {
-                    const selectedArray = Array.from(selectedCategories);
+                    const selectedArray = Array.from(selectedCategories).sort();  // Sort alphabetically
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1546,7 +1587,7 @@ script = """
                 }
             };
             
-            const selectedCategories = new Set(['All Categories']);
+            let selectedCategories = new Set(['All Categories']);  // Change to let
             updateMultiSelectButton(selectedCategories);
             
             categoryOptions.forEach(option => {
@@ -1620,7 +1661,7 @@ script = """
                 if (selectedCountries.has('All Countries')) {
                     btn.textContent = 'All Countries';
                 } else {
-                    const selectedArray = Array.from(selectedCountries);
+                    const selectedArray = Array.from(selectedCountries).sort();  // Sort alphabetically
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1629,7 +1670,7 @@ script = """
                 }
             };
             
-            const selectedCountries = new Set(['All Countries']);
+            let selectedCountries = new Set(['All Countries']);  // Change to let
             updateCountryButton(selectedCountries);
             
             countryOptions.forEach(option => {
@@ -1681,7 +1722,7 @@ script = """
                 if (selectedStates.has('All States')) {
                     btn.textContent = 'All States';
                 } else {
-                    const selectedArray = Array.from(selectedStates);
+                    const selectedArray = Array.from(selectedStates).sort();  // Sort alphabetically
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1690,7 +1731,7 @@ script = """
                 }
             };
             
-            const selectedStates = new Set(['All States']);
+            let selectedStates = new Set(['All States']);  // Change to let
             updateStateButton(selectedStates);
             
             stateOptions.forEach(option => {
@@ -1727,6 +1768,62 @@ script = """
 
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
             allStatesOption.classList.add('selected');
+
+            // Setup subcategory multi-select
+            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
+            
+            const updateSubcategoryButton = (selectedSubcategories) => {
+                const btn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+                if (selectedSubcategories.has('All Subcategories')) {
+                    btn.textContent = 'All Subcategories';
+                } else {
+                    const selectedArray = Array.from(selectedSubcategories).sort();  // Sort alphabetically
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    } else {
+                        btn.textContent = selectedArray.join(', ');
+                    }
+                }
+            };
+            
+            let selectedSubcategories = new Set(['All Subcategories']);  // Change to let
+            updateSubcategoryButton(selectedSubcategories);
+            
+            subcategoryOptions.forEach(option => {
+                option.addEventListener('click', (e) => {
+                    const clickedValue = e.target.dataset.value;
+                    const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
+                    
+                    if (clickedValue === 'All Subcategories') {
+                        subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
+                        selectedSubcategories.clear();
+                        selectedSubcategories.add('All Subcategories');
+                        allSubcategoriesOption.classList.add('selected');
+                    } else {
+                        allSubcategoriesOption.classList.remove('selected');
+                        selectedSubcategories.delete('All Subcategories');
+                        
+                        e.target.classList.toggle('selected');
+                        if (e.target.classList.contains('selected')) {
+                            selectedSubcategories.add(clickedValue);
+                        } else {
+                            selectedSubcategories.delete(clickedValue);
+                        }
+                        
+                        if (selectedSubcategories.size === 0) {
+                            allSubcategoriesOption.classList.add('selected');
+                            selectedSubcategories.add('All Subcategories');
+                        }
+                    }
+                    
+                    updateSubcategoryButton(selectedSubcategories);
+                    this.applyFilters();
+                });
+            });
+
+            // Initialize with "All Subcategories" selected
+            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
+            allSubcategoriesOption.classList.add('selected');
         }
 
         setupRangeSlider() {
@@ -1971,8 +2068,14 @@ script = """
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            const countryButtons = document.querySelectorAll('.multi-select-btn');
-            countryButtons[1].textContent = 'All Countries';  // Second button is for countries
+            // Fix: Get all multi-select buttons and update the correct one for countries
+            const multiSelectBtns = document.querySelectorAll('.multi-select-btn');
+            multiSelectBtns.forEach((btn, index) => {
+                if (index === 0) btn.textContent = 'All Categories';
+                if (index === 1) btn.textContent = 'All Subcategories';
+                if (index === 2) btn.textContent = 'All Countries';
+                if (index === 3) btn.textContent = 'All States';
+            });
 
             // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
@@ -1981,6 +2084,14 @@ script = """
             allStatesOption.classList.add('selected');
             const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             stateButton.textContent = 'All States';
+
+            // Reset subcategory selections
+            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
+            subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
+            allSubcategoriesOption.classList.add('selected');
+            const subcategoryButton = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            subcategoryButton.textContent = 'All Subcategories';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
