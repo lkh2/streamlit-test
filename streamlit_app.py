@@ -205,9 +205,13 @@ header_html, rows_html = generate_table_html(df)
 
 # After loading data and before generating table, prepare filter options
 def get_filter_options(df):
+    # Make sure 'All Subcategories' is first, then sort the rest
+    subcategories = df['Subcategory'].unique().tolist()
+    sorted_subcategories = sorted(subcategories)
+    
     return {
         'categories': sorted(['All Categories'] + df['Category'].unique().tolist()),
-        'subcategories': sorted(['All Subcategories'] + df['Subcategory'].unique().tolist()),  # Keep all subcategories
+        'subcategories': ['All Subcategories'] + sorted_subcategories,  # 'All Subcategories' first
         'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
         'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
         'pledged_ranges': ['All Pledged Amount'] + [  # Changed from 'All Amounts'
@@ -656,6 +660,7 @@ script = """
             this.currentFilters = null;
             this.currentSort = 'newest';
             this.initialize();
+            this.resetFilters();
         }
 
         initialize() {
