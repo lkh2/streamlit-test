@@ -8,7 +8,7 @@ from pandas import json_normalize
 from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
-from st_bridge import bridge
+from streamlit_javascript import st_javascript
 
 st.set_page_config(layout="wide")
 
@@ -1231,11 +1231,16 @@ script = """
 
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
-table_component()
+result = table_component()
 
-# Add bridge for location alert
-alert_trigger = bridge("location-alert-bridge", default=False)
-if alert_trigger:
+# Listen for location alert trigger using st_javascript
+alert_triggered = st_javascript("""
+    window.locationAlertTriggered || false;
+""")
+
+if alert_triggered:
     location_alert()
+    # Reset the flag
+    st_javascript("window.locationAlertTriggered = false;")
 
 st.dataframe(df)
