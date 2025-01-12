@@ -192,6 +192,7 @@ if loc and 'coords' in loc:
         'latitude': loc['coords']['latitude'],
         'longitude': loc['coords']['longitude']
     }
+    st.write("Your location has been detected")
 
 # Add function to calculate distances
 def calculate_distance(lat1, lon1, lat2, lon2):
