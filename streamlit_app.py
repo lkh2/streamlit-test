@@ -823,65 +823,78 @@ css = """
 
 # Create table component script with improved search and pagination
 script = """
-    // Helper functions
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(this, args), wait);
-        };
-    }
+    // Wait for DOM to be fully loaded before initializing
+    function initializeTableManager() {
+        // Check if all required elements are present
+        const requiredElements = [
+            'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
+            'pledgedFilter', 'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter',
+            'table-search', 'prev-page', 'next-page', 'page-numbers', 'resetFilters',
+            'pledged-min', 'pledged-max', 'pledged-min-input', 'pledged-max-input'
+        ];
 
-    function createRegexPattern(searchTerm) {
-        if (!searchTerm) return null;
-        const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
-        const escapedWords = words.map(word => 
-            word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
-        );
-        return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
-    }
-
-    function updateTableRows(rows, currentPage, pageSize) {
-        const start = (currentPage - 1) * pageSize;
-        const end = start + pageSize;
+        const missingElements = requiredElements.filter(id => !document.getElementById(id));
         
-        rows.forEach((row, index) => {
-            row.style.display = (index >= start && index < end) ? '' : 'none';
+        if (missingElements.length > 0) {
+            console.error('Missing elements:', missingElements);
+            return false;
+        }
+
+        return new TableManager();
+    }
+
+    function onRender(event) {
+        // Wait for next frame to ensure DOM is updated
+        requestAnimationFrame(() => {
+            if (!window.rendered) {
+                const tableManager = initializeTableManager();
+                if (tableManager) {
+                    window.tableManager = tableManager;
+                    window.rendered = true;
+                    
+                    // Add resize observer to handle dynamic content changes
+                    const resizeObserver = new ResizeObserver(() => {
+                        window.tableManager.adjustHeight();
+                    });
+                    
+                    const tableWrapper = document.querySelector('.table-wrapper');
+                    if (tableWrapper) {
+                        resizeObserver.observe(tableWrapper);
+                    }
+                }
+            }
         });
     }
 
-    // Add Haversine distance calculation function
-    function calculateDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371; // Earth's radius in kilometers
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = 
-            Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-            Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        return R * c;
+    // Only set up event listener if Streamlit exists
+    if (Streamlit && Streamlit.events) {
+        Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
+        Streamlit.setComponentReady();
+    } else {
+        console.error('Streamlit API not available');
     }
 
-    // Optimize distance calculations with a cache
-    class DistanceCache {
-        constructor() {
-            this.userLocation = window.userLocation;
-        }
-
-        async initialize() {
-            return window.hasLocation;
-        }
-
-        getDistance(row) {
-            return parseFloat(row.dataset.distance);
-        }
-    }
-
+    // Rest of your existing TableManager class and other code...
     class TableManager {
         constructor() {
-            this.searchInput = document.getElementById('table-search');
-            this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
+            // Add initialization checks
+            const elements = {
+                searchInput: document.getElementById('table-search'),
+                allRows: Array.from(document.querySelectorAll('#data-table tbody tr')),
+                filters: document.querySelectorAll('.filter-select'),
+                resetButton: document.getElementById('resetFilters')
+            };
+
+            // Verify all required elements exist
+            if (!elements.searchInput || !elements.allRows.length || 
+                !elements.filters.length || !elements.resetButton) {
+                console.error('Required elements not found');
+                return;
+            }
+
+            // Initialize properties
+            this.searchInput = elements.searchInput;
+            this.allRows = elements.allRows;
             this.visibleRows = this.allRows;
             this.currentPage = 1;
             this.pageSize = 10;
@@ -891,6 +904,7 @@ script = """
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
             this.initialize();
+            this.setupRangeSliders();
             this.resetFilters();
         }
 
@@ -1281,51 +1295,178 @@ script = """
             const minInput = document.getElementById('pledged-min-input');
             const maxInput = document.getElementById('pledged-max-input');
 
-            // Update input when slider changes
+            function updateRangeValues(min, max) {
+                // Update slider values
+                minSlider.value = min;
+                maxSlider.value = max;
+                
+                // Update input values
+                minInput.value = min;
+                maxInput.value = max;
+                
+                // Update the filter
+                this.applyFilters();
+            }
+
+            // Update input and filter when min slider changes
             minSlider.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value);
-                if (value >= parseInt(maxSlider.value)) {
-                    e.target.value = maxSlider.value;
-                    minInput.value = maxSlider.value;
-                } else {
-                    minInput.value = value;
+                let value = parseInt(e.target.value);
+                const maxValue = parseInt(maxSlider.value);
+                
+                // Ensure min doesn't exceed max
+                if (value > maxValue) {
+                    value = maxValue;
                 }
+                
+                minInput.value = value;
                 this.applyFilters();
             });
 
+            // Update input and filter when max slider changes
             maxSlider.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value);
-                if (value <= parseInt(minSlider.value)) {
-                    e.target.value = minSlider.value;
-                    maxInput.value = minSlider.value;
-                } else {
-                    maxInput.value = value;
+                let value = parseInt(e.target.value);
+                const minValue = parseInt(minSlider.value);
+                
+                // Ensure max doesn't go below min
+                if (value < minValue) {
+                    value = minValue;
                 }
+                
+                maxInput.value = value;
                 this.applyFilters();
             });
 
-            // Update slider when input changes
-            minInput.addEventListener('input', (e) => {
+            // Update slider and filter when min input changes
+            minInput.addEventListener('change', (e) => {
                 let value = parseInt(e.target.value);
-                if (isNaN(value) || value < 0) value = 0;
-                if (value >= parseInt(maxInput.value)) {
-                    value = parseInt(maxInput.value);
+                const maxValue = parseInt(maxInput.value);
+                
+                // Validate input
+                if (isNaN(value) || value < parseInt(minSlider.min)) {
+                    value = parseInt(minSlider.min);
+                } else if (value > maxValue) {
+                    value = maxValue;
                 }
-                e.target.value = value;
+                
                 minSlider.value = value;
+                e.target.value = value;
                 this.applyFilters();
             });
 
-            maxInput.addEventListener('input', (e) => {
+            // Update slider and filter when max input changes
+            maxInput.addEventListener('change', (e) => {
                 let value = parseInt(e.target.value);
-                if (isNaN(value) || value < 0) value = 0;
-                if (value <= parseInt(minInput.value)) {
-                    value = parseInt(minInput.value);
+                const minValue = parseInt(minInput.value);
+                
+                // Validate input
+                if (isNaN(value) || value > parseInt(maxSlider.max)) {
+                    value = parseInt(maxSlider.max);
+                } else if (value < minValue) {
+                    value = minValue;
                 }
-                e.target.value = value;
+                
                 maxSlider.value = value;
+                e.target.value = value;
                 this.applyFilters();
             });
+
+            // Reset range values when filters are reset
+            this.resetRangeValues = () => {
+                updateRangeValues.call(this, {min_pledged}, {max_pledged});
+            };
+        }
+
+        // Update resetFilters to use the new resetRangeValues method
+        resetFilters() {
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => {
+                if (select.id === 'subcategoryFilter') {
+                    // Find and select "All Subcategories" option
+                    const allSubcatsOption = Array.from(select.options)
+                        .find(option => option.value === 'All Subcategories');
+                    if (allSubcatsOption) {
+                        select.value = 'All Subcategories';
+                    } else {
+                        select.selectedIndex = 0;
+                    }
+                } else {
+                    select.selectedIndex = 0;
+                }
+            });
+            this.searchInput.value = '';
+            this.currentSearchTerm = '';
+            this.currentFilters = null;
+            this.currentSort = 'popularity';
+            this.visibleRows = this.allRows;
+            document.getElementById('pledged-min').value = {min_pledged};
+            document.getElementById('pledged-max').value = {max_pledged};
+            document.getElementById('pledged-min-input').value = {min_pledged};
+            document.getElementById('pledged-max-input').value = {max_pledged};
+            this.resetRangeValues();
+            this.applyAllFilters();
+        }
+
+        matchesFilters(row, filters) {
+            const category = row.dataset.category;
+            const subcategory = row.dataset.subcategory;
+            const pledged = parseFloat(row.dataset.pledged);
+            const goal = parseFloat(row.dataset.goal);
+            const raised = parseFloat(row.dataset.raised);
+            const date = new Date(row.dataset.date);
+            const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
+            const country = row.querySelector('td:nth-child(5)').textContent;
+
+            // Category filters
+            if (filters.category !== 'All Categories' && category !== filters.category) return false;
+            if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
+            if (filters.country !== 'All Countries' && country !== filters.country) return false;
+            if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
+
+            // Numeric range filters
+            const minPledged = parseInt(document.getElementById('pledged-min').value);
+            const maxPledged = parseInt(document.getElementById('pledged-max').value);
+            
+            if (pledged < minPledged || pledged > maxPledged) return false;
+
+            if (filters.goal !== 'All Goals') {
+                if (filters.goal.startsWith('>')) {
+                    const min = parseFloat(filters.goal.replace(/[^0-9.-]+/g,""));
+                    if (goal <= min) return false;
+                } else {
+                    const [min, max] = filters.goal.split('-')
+                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                    if (goal < min || goal > max) return false;
+                }
+            }
+
+            if (filters.raised !== 'All Percentages') {
+                if (filters.raised === '>100%') {
+                    if (raised <= 100) return false;
+                } else {
+                    const [min, max] = filters.raised.split('-')
+                        .map(v => parseFloat(v.replace(/%/g, '')));
+                    if (raised < min || raised > max) return false;
+                }
+            }
+
+            // Date filter
+            if (filters.date !== 'All Time') {
+                const now = new Date();
+                let compareDate = new Date();
+                
+                switch(filters.date) {
+                    case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
+                    case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
+                    case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
+                    case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
+                    case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
+                    case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
+                }
+                
+                if (date < compareDate) return false;
+            }
+
+            return true;
         }
     }
 
