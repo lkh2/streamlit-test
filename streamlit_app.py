@@ -197,33 +197,22 @@ df = df.merge(country_data[['country', 'latitude', 'longitude']],
               right_on='country', 
               how='left')
 
-# Add state management for warnings
-if 'show_location_warning' not in st.session_state:
-    st.session_state.show_location_warning = False
-if 'show_loading_spinner' not in st.session_state:
-    st.session_state.show_loading_spinner = False
-
 # Add geolocation call before data processing
 loc = get_geolocation()
 user_location = None
-if (loc and 'coords' in loc):
-    # Show loading spinner when location is received
-    with st.spinner('Updating table with your location...'):
-        user_location = {
-            'latitude': loc['coords']['latitude'],
-            'longitude': loc['coords']['longitude']
-        }
-        time.sleep(1)  # Give time for visual feedback
-    load_success = st.success("Location received successfully!")
-    st.session_state.show_location_warning = False
-    time.sleep(2)
-    load_success.empty()
-else:
-    # Set flag to show warning if needed
-    st.session_state.show_location_warning = True
 
-# Show warning if needed
-if st.session_state.show_location_warning:
+if loc and 'coords' in loc:
+    user_location = {
+        'latitude': loc['coords']['latitude'], 
+        'longitude': loc['coords']['longitude']
+    }
+    with st.spinner('Updating table with your location...'):
+        time.sleep(1)
+    loading_success = st.success("Location received successfully!")
+    time.sleep(1.5)
+    loading_success.empty()
+else:
+    global location_alert
     location_alert = st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️")
 
 # Add function to calculate distances
