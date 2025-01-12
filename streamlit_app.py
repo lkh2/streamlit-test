@@ -6,6 +6,7 @@ import pandas as pd
 from pandas import json_normalize
 from streamlit_js_eval import get_geolocation
 import json
+import numpy as np
 
 st.set_page_config(layout="wide")
 
@@ -183,6 +184,45 @@ df = df.merge(country_data[['country', 'latitude', 'longitude']],
               right_on='country', 
               how='left')
 
+# Add geolocation call before data processing
+loc = get_geolocation()
+user_location = None
+if loc and 'coords' in loc:
+    user_location = {
+        'latitude': loc['coords']['latitude'],
+        'longitude': loc['coords']['longitude']
+    }
+    st.write("Your location has been detected")
+
+# Add function to calculate distances
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """Calculate distance between two points using Haversine formula"""
+    R = 6371  # Earth's radius in kilometers
+    
+    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    
+    return R * c
+
+# After merging with country data, calculate distances if location is available
+if user_location:
+    df['Distance'] = df.apply(
+        lambda row: calculate_distance(
+            user_location['latitude'],
+            user_location['longitude'],
+            row['latitude'],
+            row['longitude']
+        ) if not pd.isna(row['latitude']) and not pd.isna(row['longitude']) else np.inf,
+        axis=1
+    )
+else:
+    df['Distance'] = np.inf
+
 def generate_table_html(df):
     # Define visible and hidden columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
@@ -204,6 +244,7 @@ def generate_table_html(df):
             data-latitude="{row['latitude']}"
             data-longitude="{row['longitude']}"
             data-country-code="{row['Country Code']}"
+            data-distance="{row['Distance']}"
         '''
         
         # Create visible cells with special handling for Link column
@@ -257,16 +298,6 @@ def get_filter_options(df):
     }
 
 filter_options = get_filter_options(df)
-
-# Add geolocation call before data processing
-loc = get_geolocation()
-user_location = None
-if loc and 'coords' in loc:
-    user_location = {
-        'latitude': loc['coords']['latitude'],
-        'longitude': loc['coords']['longitude']
-    }
-    st.write("Your location has been detected")
 
 # Update template to include filter controls with default subcategory
 template = f"""
@@ -706,51 +737,14 @@ script = """
     class DistanceCache {
         constructor() {
             this.userLocation = window.userLocation;
-            this.countryDistances = new Map();
         }
 
         async initialize() {
-            try {
-                if (!window.hasLocation) {
-                    throw new Error("Location not available");
-                }
-                this.calculateCountryDistances();
-                return true;
-            } catch (error) {
-                console.error("Could not initialize distance cache:", error);
-                return false;
-            }
+            return window.hasLocation;
         }
 
-        // Remove getUserLocation method as we don't need it anymore
-        
-        calculateCountryDistances() {
-            // Get unique country coordinates from the data
-            const countries = new Map();
-            document.querySelectorAll('#data-table tbody tr').forEach(row => {
-                const lat = parseFloat(row.dataset.latitude);
-                const lon = parseFloat(row.dataset.longitude);
-                const countryCode = row.dataset.countryCode;
-                
-                if (!countries.has(countryCode) && !isNaN(lat) && !isNaN(lon)) {
-                    countries.set(countryCode, { latitude: lat, longitude: lon });
-                }
-            });
-
-            // Calculate distances for each country once
-            countries.forEach((coords, countryCode) => {
-                const distance = calculateDistance(
-                    this.userLocation.latitude,
-                    this.userLocation.longitude,
-                    coords.latitude,
-                    coords.longitude
-                );
-                this.countryDistances.set(countryCode, distance);
-            });
-        }
-
-        getDistance(countryCode) {
-            return this.countryDistances.get(countryCode) || Infinity;
+        getDistance(row) {
+            return parseFloat(row.dataset.distance);
         }
     }
 
@@ -775,28 +769,19 @@ script = """
         // Update sortRows to handle missing location
         async sortRows(sortType) {
             if (sortType === 'nearme') {
-                try {
-                    if (!this.userLocation) {
-                        throw new Error("Location not available");
-                    }
-                    const initialized = await this.distanceCache.initialize();
-                    if (!initialized) {
-                        throw new Error("Could not initialize distance cache");
-                    }
-
-                    this.visibleRows.sort((a, b) => {
-                        const distA = this.distanceCache.getDistance(a.dataset.countryCode);
-                        const distB = this.distanceCache.getDistance(b.dataset.countryCode);
-                        return distA - distB;
-                    });
-                } catch (error) {
-                    console.error("Could not sort by location:", error);
-                    st.error("Location access is required for distance-based sorting. Please allow location access and try again.");
-                    // Fallback to newest first if location not available
+                if (!this.userLocation) {
+                    console.error("Location not available");
                     this.currentSort = 'newest';
                     document.getElementById('sortFilter').value = 'newest';
                     this.sortRows('newest');
+                    return;
                 }
+
+                this.visibleRows.sort((a, b) => {
+                    const distA = parseFloat(a.dataset.distance);
+                    const distB = parseFloat(b.dataset.distance);
+                    return distA - distB;
+                });
             } else {
                 // Existing date-based sorting logic
                 this.visibleRows.sort((a, b) => {
