@@ -1537,6 +1537,9 @@ script = """
                 });
             });
 
+            // Initialize with "All Categories" selected
+            document.querySelector('.category-option[data-value="All Categories"]').classList.add('selected');
+
             // Setup country multi-select
             const countryOptions = document.querySelectorAll('.country-option');
             const updateCountryButton = () => {
@@ -1587,15 +1590,11 @@ script = """
                 });
             });
 
-            // Initialize selections
-            document.querySelector('.category-option[data-value="All Categories"]').classList.add('selected');
+            // Initialize with "All Countries" selected
             document.querySelector('.country-option[data-value="All Countries"]').classList.add('selected');
 
             // Setup other filters
-            const filterIds = [
-                'subcategoryFilter', 'countryFilter', 'stateFilter',
-                'dateFilter', 'sortFilter'
-            ];
+            const filterIds = ['subcategoryFilter', 'stateFilter', 'dateFilter', 'sortFilter'];
             
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
@@ -1612,62 +1611,6 @@ script = """
 
             // Add range slider initialization
             this.setupRangeSlider();
-
-            // Setup country multi-select
-            const countryOptions = document.querySelectorAll('.country-option');
-            const selectedCountries = new Set(['All Countries']);
-            
-            const updateCountryButton = (selectedCountries) => {
-                const btn = document.getElementById('countryFilterBtn');
-                if (selectedCountries.has('All Countries')) {
-                    btn.textContent = 'All Countries';
-                } else {
-                    const selectedArray = Array.from(selectedCountries);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
-                    } else {
-                        btn.textContent = selectedArray.join(', ');
-                    }
-                }
-            };
-            
-            updateCountryButton(selectedCountries);
-            
-            countryOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-                    
-                    if (clickedValue === 'All Countries') {
-                        countryOptions.forEach(opt => opt.classList.remove('selected'));
-                        selectedCountries.clear();
-                        selectedCountries.add('All Countries');
-                        allCountriesOption.classList.add('selected');
-                    } else {
-                        allCountriesOption.classList.remove('selected');
-                        selectedCountries.delete('All Countries');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            selectedCountries.add(clickedValue);
-                        } else {
-                            selectedCountries.delete(clickedValue);
-                        }
-                        
-                        if (selectedCountries.size === 0) {
-                            allCountriesOption.classList.add('selected');
-                            selectedCountries.add('All Countries');
-                        }
-                    }
-                    
-                    updateCountryButton(selectedCountries);
-                    this.applyFilters();
-                });
-            });
-
-            // Initialize with "All Countries" selected
-            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-            allCountriesOption.classList.add('selected');
         }
 
         setupRangeSlider() {
