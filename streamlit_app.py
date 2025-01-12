@@ -221,7 +221,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
     
     dlat = lat2 - lat1
-    dlon = dlon - lon1
+    dlon = lon2 - lon1  # Fixed: Calculate dlon correctly
     
     a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
     c = 2 * np.arcsin(np.sqrt(a))
@@ -234,8 +234,8 @@ if user_location:
         lambda row: calculate_distance(
             user_location['latitude'],
             user_location['longitude'],
-            float(row['latitude']),
-            float(row['longitude'])
+            float(row['latitude']) if pd.notna(row['latitude']) else 0,  # Handle NaN values
+            float(row['longitude']) if pd.notna(row['longitude']) else 0  # Handle NaN values
         ) if pd.notna(row['latitude']) and pd.notna(row['longitude']) else float('inf'),
         axis=1
     ).astype(float)  # Ensure Distance is float type
@@ -1652,4 +1652,4 @@ script = """
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
 
-st.dataframe(df)
+# st.dataframe(df)
