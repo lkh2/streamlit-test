@@ -368,21 +368,21 @@ template = f"""
         <div class="filter-row">
             <span class="filter-label">Explore</span>
             <div class="multi-select-dropdown">
-                <button class="filter-select multi-select-btn">Categories</button>
+                <button id="categoryFilterBtn" class="filter-select multi-select-btn">Categories</button>
                 <div class="multi-select-content">
                     {' '.join(f'<div class="category-option" data-value="{opt}">{opt}</div>' for opt in filter_options['categories'])}
                 </div>
             </div>
             <span class="filter-label">&</span>
             <div class="multi-select-dropdown">
-                <button class="filter-select multi-select-btn">Subcategories</button>
+                <button id="subcategoryFilterBtn" class="filter-select multi-select-btn">Subcategories</button>
                 <div class="multi-select-content">
                     {' '.join(f'<div class="subcategory-option" data-value="{opt}">{opt}</div>' for opt in filter_options['subcategories'])}
                 </div>
             </div>
             <span class="filter-label">Projects On</span>
             <div class="multi-select-dropdown">
-                <button class="filter-select multi-select-btn">Countries</button>
+                <button id="countryFilterBtn" class="filter-select multi-select-btn">Countries</button>
                 <div class="multi-select-content">
                     {' '.join(f'<div class="country-option" data-value="{opt}">{opt}</div>' for opt in filter_options['countries'])}
                 </div>
@@ -401,7 +401,7 @@ template = f"""
         <div class="filter-row">
             <span class="filter-label">More Flexible, Dynamic Search:</span>
             <div class="multi-select-dropdown">
-                <button class="filter-select multi-select-btn">States</button>
+                <button id="stateFilterBtn" class="filter-select multi-select-btn">States</button>
                 <div class="multi-select-content">
                     {' '.join(f'<div class="state-option" data-value="{opt}">{opt}</div>' for opt in filter_options['states'])}
                 </div>
@@ -1547,6 +1547,12 @@ script = """
             window.selectedStates = new Set(['All States']);
             window.selectedSubcategories = new Set(['All Subcategories']);
 
+            // Get button elements by ID
+            const categoryBtn = document.getElementById('categoryFilterBtn');
+            const countryBtn = document.getElementById('countryFilterBtn');
+            const stateBtn = document.getElementById('stateFilterBtn');
+            const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
+
             // Create a single update function for all buttons
             const updateButtonText = (selectedItems, buttonElement) => {
                 if (!buttonElement) return;
@@ -1563,12 +1569,6 @@ script = """
                     }
                 }
             };
-
-            // Fix: Update button element selectors to be more specific and reliable
-            const categoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(2) .multi-select-btn');
-            const countryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(6) .multi-select-btn');
-            const stateBtn = document.querySelector('.filter-row:nth-child(2) .multi-select-dropdown:first-child .multi-select-btn');
-            const subcategoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
 
             // Setup multi-select handlers
             const setupMultiSelect = (options, selectedSet, allValue, buttonElement) => {
