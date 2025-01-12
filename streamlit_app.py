@@ -215,13 +215,16 @@ if user_location:
         lambda row: calculate_distance(
             user_location['latitude'],
             user_location['longitude'],
-            row['latitude'],
-            row['longitude']
-        ) if not pd.isna(row['latitude']) and not pd.isna(row['longitude']) else np.inf,
+            float(row['latitude']),
+            float(row['longitude'])
+        ) if pd.notna(row['latitude']) and pd.notna(row['longitude']) else float('inf'),
         axis=1
-    )
+    ).astype(float)  # Ensure Distance is float type
 else:
-    df['Distance'] = np.inf
+    df['Distance'] = float('inf')  # Set as float infinity
+
+# Sort DataFrame by Distance initially to verify values
+df = df.sort_values('Distance')
 
 def generate_table_html(df):
     # Define visible and hidden columns
@@ -244,7 +247,7 @@ def generate_table_html(df):
             data-latitude="{row['latitude']}"
             data-longitude="{row['longitude']}"
             data-country-code="{row['Country Code']}"
-            data-distance="{row['Distance']}"
+            data-distance="{row['Distance']:.2f}"  # Format distance to 2 decimal places
         '''
         
         # Create visible cells with special handling for Link column
@@ -778,8 +781,13 @@ script = """
                 }
 
                 this.visibleRows.sort((a, b) => {
-                    const distA = parseFloat(a.dataset.distance);
-                    const distB = parseFloat(b.dataset.distance);
+                    // Parse distances as floats and handle infinity
+                    const distA = parseFloat(a.dataset.distance) || Infinity;
+                    const distB = parseFloat(b.dataset.distance) || Infinity;
+                    
+                    // Debug logging
+                    console.log('Sorting distances:', distA, distB);
+                    
                     return distA - distB;
                 });
             } else {
@@ -1142,3 +1150,6 @@ table_component = gensimplecomponent('searchable_table', template=css + template
 table_component()
 
 st.dataframe(df)
+
+# Add debug output to verify distances
+st.write("Distance range:", df['Distance'].min(), "to", df['Distance'].max())
