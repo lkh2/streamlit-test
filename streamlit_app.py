@@ -476,7 +476,7 @@ css = """
     .table-controls { 
         position: sticky; 
         top: 0; 
-        background: #ffffff; 
+        background: linear-gradient(180deg, #ffffff 50%, transparent 100%); 
         z-index: 2; 
         padding: 0 20px; 
         border-bottom: 1px solid #eee; 
@@ -588,9 +588,8 @@ css = """
         max-width: 100%; 
         background: #ffffff; 
         border-radius: 20px; 
-        overflow: hidden;
-        height: 600px;
-        margin-bottom: 20px;
+        overflow: visible;
+        transition: height 0.3s ease;
     }
 
     .search-input { 
@@ -1284,6 +1283,58 @@ script = """
         adjustHeight() {
             requestAnimationFrame(() => {
                 const elements = {
+                    titleWrapper: document.querySelector('.title-wrapper'),
+                    filterWrapper: document.querySelector('.filter-wrapper'),
+                    tableWrapper: document.querySelector('.table-wrapper'),
+                    tableContainer: document.querySelector('.table-container'),
+                    table: document.querySelector('#data-table'),
+                    controls: document.querySelector('.table-controls'),
+                    pagination: document.querySelector('.pagination-controls')
+                };
+
+                if (!Object.values(elements).every(el => el)) return;
+
+                // Count visible rows in current page
+                const visibleRowCount = this.visibleRows.slice(
+                    (this.currentPage - 1) * this.pageSize,
+                    this.currentPage * this.pageSize
+                ).length;
+
+                // Constants
+                const rowHeight = 52;        // Height per row including padding
+                const headerHeight = 60;     // Table header height
+                const controlsHeight = elements.controls.offsetHeight;
+                const paginationHeight = elements.pagination.offsetHeight;
+                const padding = 40;
+                const minTableHeight = 400;  // Minimum table content height
+
+                // Calculate table content height
+                const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
+                const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
+
+                // Set dimensions
+                elements.tableContainer.style.height = `${actualTableHeight}px`;
+                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
+
+                // Calculate final component height
+                const finalHeight = 
+                    elements.titleWrapper.offsetHeight +
+                    elements.filterWrapper.offsetHeight +
+                    actualTableHeight +
+                    controlsHeight +
+                    paginationHeight +
+                    padding;
+
+                // Update Streamlit frame height if changed significantly
+                if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
+                    this.lastHeight = finalHeight;
+                    Streamlit.setFrameHeight(finalHeight);
+                }
+            });
+        }
+
+        setupFilters() {
+            const filterIds = [
                 'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
                 'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter'
             ];
@@ -1496,9 +1547,7 @@ script = """
             });
 
             this.updatePagination();
-
-            // Set fixed frame height
-            Streamlit.setFrameHeight(800);
+            this.adjustHeight();
         }
 
         updatePagination() {
@@ -1557,12 +1606,71 @@ script = """
                 this.updateTable();
             }
         }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const elements = {
+                    titleWrapper: document.querySelector('.title-wrapper'),
+                    filterWrapper: document.querySelector('.filter-wrapper'),
+                    tableWrapper: document.querySelector('.table-wrapper'),
+                    tableContainer: document.querySelector('.table-container'),
+                    table: document.querySelector('#data-table'),
+                    controls: document.querySelector('.table-controls'),
+                    pagination: document.querySelector('.pagination-controls')
+                };
+
+                if (!Object.values(elements).every(el => el)) return;
+
+                // Count visible rows in current page
+                const visibleRowCount = this.visibleRows.slice(
+                    (this.currentPage - 1) * this.pageSize,
+                    this.currentPage * this.pageSize
+                ).length;
+
+                // Constants
+                const rowHeight = 52;        // Height per row including padding
+                const headerHeight = 60;     // Table header height
+                const controlsHeight = elements.controls.offsetHeight;
+                const paginationHeight = elements.pagination.offsetHeight;
+                const padding = 40;
+                const minTableHeight = 400;  // Minimum table content height
+
+                // Calculate table content height
+                const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
+                const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
+
+                // Set dimensions
+                elements.tableContainer.style.height = `${actualTableHeight}px`;
+                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
+
+                // Calculate final component height
+                const finalHeight = 
+                    elements.titleWrapper.offsetHeight +
+                    elements.filterWrapper.offsetHeight +
+                    actualTableHeight +
+                    controlsHeight +
+                    paginationHeight +
+                    padding;
+
+                // Update Streamlit frame height if changed significantly
+                if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
+                    this.lastHeight = finalHeight;
+                    Streamlit.setFrameHeight(finalHeight);
+                }
+            });
+        }
     }
 
     function onRender(event) {
         if (!window.rendered) {
             window.tableManager = new TableManager();
             window.rendered = true;
+            
+            // Add resize observer to handle dynamic content changes
+            const resizeObserver = new ResizeObserver(() => {
+                window.tableManager.adjustHeight();
+            });
+            resizeObserver.observe(document.querySelector('.table-wrapper'));
         }
     }
 
@@ -1574,4 +1682,4 @@ script = """
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
 
-# st.dataframe(df)# st.dataframe(df)
+# st.dataframe(df)
