@@ -1132,13 +1132,19 @@ script = """
 
         // Update applyFilters to handle async
         async applyFilters() {
+            // Get all selected categories
+            const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
+                .map(option => option.dataset.value);
+
+            // Collect all current filter values
             this.currentFilters = {
-                category: document.getElementById('categoryFilter').value,
+                categories: selectedCategories,
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
                 date: document.getElementById('dateFilter').value
             };
+
             this.currentSort = document.getElementById('sortFilter').value;
             
             await this.applyAllFilters();
@@ -1170,30 +1176,15 @@ script = """
             window.handlePageClick = (page) => this.goToPage(page);
         }
 
-        applyFilters() {
-            this.currentFilters = {
-                category: document.getElementById('categoryFilter').value,
-                subcategory: document.getElementById('subcategoryFilter').value,
-                country: document.getElementById('countryFilter').value,
-                state: document.getElementById('stateFilter').value,
-                date: document.getElementById('dateFilter').value
-            };
-            this.currentSort = document.getElementById('sortFilter').value;
-            
-            this.applyAllFilters();
-        }
-
         matchesFilters(row, filters) {
-            // Get category directly from dataset
+            // Category filter
+            const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
+                .map(option => option.dataset.value);
             const category = row.dataset.category;
             
-            // Category filter check - must be first
-            if (filters.categories && filters.categories.length > 0) {
-                // If All Categories is not selected and category doesn't match any selected
-                if (!filters.categories.includes('All Categories')) {
-                    if (!filters.categories.includes(category)) {
-                        return false;
-                    }
+            if (selectedCategories.length > 0) {
+                if (!selectedCategories.includes('All Categories') && !selectedCategories.includes(category)) {
+                    return false;
                 }
             }
 
@@ -1203,8 +1194,6 @@ script = """
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
-            
-            // Get text content properly from cells
             const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
             const country = row.querySelector('td:nth-child(5)').textContent.trim();
 
@@ -1214,18 +1203,18 @@ script = """
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
             // Check pledged range
-            const minPledged = parseInt(document.getElementById('fromInput').value);
-            const maxPledged = parseInt(document.getElementById('toInput').value);
+            const minPledged = parseFloat(document.getElementById('fromInput').value);
+            const maxPledged = parseFloat(document.getElementById('toInput').value);
             if (pledged < minPledged || pledged > maxPledged) return false;
 
             // Check goal range
-            const minGoal = parseInt(document.getElementById('goalFromInput').value);
-            const maxGoal = parseInt(document.getElementById('goalToInput').value);
+            const minGoal = parseFloat(document.getElementById('goalFromInput').value);
+            const maxGoal = parseFloat(document.getElementById('goalToInput').value);
             if (goal < minGoal || goal > maxGoal) return false;
 
             // Check raised range
-            const minRaised = parseInt(document.getElementById('raisedFromInput').value);
-            const maxRaised = parseInt(document.getElementById('raisedToInput').value);
+            const minRaised = parseFloat(document.getElementById('raisedFromInput').value);
+            const maxRaised = parseFloat(document.getElementById('raisedToInput').value);
             if (raised < minRaised || raised > maxRaised) return false;
 
             // Date filter
@@ -1449,64 +1438,38 @@ script = """
         setupFilters() {
             // Setup category multi-select
             const categoryOptions = document.querySelectorAll('.category-option');
-            const selectedCategories = new Set(['All Categories']); // Initialize with All Categories
-            
-            const updateFilters = () => {
-                // Update button text
-                const btn = document.querySelector('.multi-select-btn');
-                btn.textContent = selectedCategories.has('All Categories') ? 
-                    'Categories' : 
-                    Array.from(selectedCategories).join(', ');
-
-                // Immediately update filters and apply
-                this.currentFilters = {
-                    ...this.currentFilters,
-                    categories: Array.from(selectedCategories)
-                };
-                
-                // Force synchronous filter application
-                this.applyAllFilters();
-            };
             
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
-                    const value = e.target.dataset.value;
+                    const clickedValue = e.target.dataset.value;
+                    const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
                     
-                    if (value === 'All Categories') {
-                        // Clear all selections if "All Categories" is clicked
+                    if (clickedValue === 'All Categories') {
+                        // Deselect all other categories
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        selectedCategories.clear();
-                        selectedCategories.add('All Categories');
-                        e.target.classList.add('selected');
+                        allCategoriesOption.classList.add('selected');
                     } else {
                         // Remove "All Categories" selection
-                        const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
                         allCategoriesOption.classList.remove('selected');
-                        selectedCategories.delete('All Categories');
                         
                         // Toggle current selection
                         e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            selectedCategories.add(value);
-                        } else {
-                            selectedCategories.delete(value);
-                        }
                         
-                        // If nothing is selected, select "All Categories"
-                        if (selectedCategories.size === 0) {
+                        // If no categories are selected, reselect "All Categories"
+                        const selectedCount = document.querySelectorAll('.category-option.selected').length;
+                        if (selectedCount === 0) {
                             allCategoriesOption.classList.add('selected');
-                            selectedCategories.add('All Categories');
                         }
                     }
                     
-                    updateFilters();
+                    // Update filters immediately
+                    this.applyFilters();
                 });
             });
 
             // Initialize with "All Categories" selected
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
-            updateFilters();
 
             // Setup other filters
             const filterIds = [
