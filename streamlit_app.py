@@ -216,7 +216,7 @@ if (loc and 'coords' in loc):
         time.sleep(1)  # Give time for visual feedback
     load_success = st.success("Location received successfully!")
     st.session_state.show_location_warning = False
-    time.sleep(1)
+    time.sleep(2)
     load_success.empty()
 else:
     # Set flag to show warning if needed
@@ -225,8 +225,6 @@ else:
 # Show warning if needed
 if st.session_state.show_location_warning:
     location_alert = st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️")
-    time.sleep(2)
-    location_alert.empty()
 
 # Add function to calculate distances
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -1235,5 +1233,6 @@ script = """
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
+location_alert.empty()
 
 st.dataframe(df)
