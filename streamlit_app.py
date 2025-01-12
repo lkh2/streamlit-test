@@ -375,7 +375,7 @@ template = f"""
             </select>
             <span class="filter-label">Projects On</span>
             <div class="multi-select-dropdown">
-                <button class="filter-select multi-select-btn" id="countryFilterBtn">Countries</button>
+                <button class="filter-select multi-select-btn">Countries</button>
                 <div class="multi-select-content">
                     {' '.join(f'<div class="country-option" data-value="{opt}">{opt}</div>' for opt in filter_options['countries'])}
                 </div>
@@ -953,32 +953,6 @@ css = """
         margin-bottom: 8px;
         padding-bottom: 12px;
     }
-
-    /* Add country option styles to match category option styles */
-    .country-option {
-        padding: 8px 12px;
-        cursor: pointer;
-        border-radius: 4px;
-        margin: 2px 0;
-        font-family: 'Poppins';
-        font-size: 12px;
-        transition: all 0.2s ease;
-    }
-
-    .country-option:hover {
-        background-color: #f0f0f0;
-    }
-
-    .country-option.selected {
-        background-color: #5932EA;
-        color: white;
-    }
-
-    .country-option[data-value="All Countries"] {
-        border-bottom: 1px solid #eee;
-        margin-bottom: 8px;
-        padding-bottom: 12px;
-    }
 </style>
 """
 
@@ -1051,9 +1025,6 @@ script = """
             this.currentSort = 'popularity';
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
-            // Add these as class properties
-            this.selectedCategories = new Set(['All Categories']);
-            this.selectedCountries = new Set(['All Countries']);
             this.initialize();
             this.resetFilters();
         }
@@ -1209,18 +1180,13 @@ script = """
         }
 
         matchesFilters(row, filters) {
-            // Category filter check using class property
+            // Category filter
+            const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
+                .map(option => option.dataset.value);
             const category = row.dataset.category;
-            if (this.selectedCategories.size > 0) {
-                if (!this.selectedCategories.has('All Categories') && !this.selectedCategories.has(category)) {
-                    return false;
-                }
-            }
-
-            // Get country from row
-            const country = row.querySelector('td:nth-child(5)').textContent.trim();
-            if (this.selectedCountries.size > 0) {
-                if (!this.selectedCountries.has('All Countries') && !this.selectedCountries.has(country)) {
+            
+            if (selectedCategories.length > 0) {
+                if (!selectedCategories.includes('All Categories') && !selectedCategories.includes(category)) {
                     return false;
                 }
             }
@@ -1232,9 +1198,11 @@ script = """
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
             const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
+            const country = row.querySelector('td:nth-child(5)').textContent.trim();
 
             // Rest of filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
+            if (filters.country !== 'All Countries' && country !== filters.country) return false;
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
             // Check pledged range
@@ -1273,24 +1241,10 @@ script = """
         }
 
         resetFilters() {
-            // Reset category selections
-            const categoryOptions = document.querySelectorAll('.category-option');
-            categoryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            allCategoriesOption.classList.add('selected');
-            document.querySelector('.multi-select-btn').textContent = 'All Categories';
-
-            // Reset country selections
-            const countryOptions = document.querySelectorAll('.country-option');
-            countryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-            allCountriesOption.classList.add('selected');
-            document.getElementById('countryFilterBtn').textContent = 'All Countries';
-
-            // Reset select elements
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
                 if (select.id === 'subcategoryFilter') {
+                    // Find and select "All Subcategories" option
                     const allSubcatsOption = Array.from(select.options)
                         .find(option => option.value === 'All Subcategories');
                     if (allSubcatsOption) {
@@ -1298,8 +1252,6 @@ script = """
                     } else {
                         select.selectedIndex = 0;
                     }
-                } else if (select.id === 'sortFilter') {
-                    select.value = 'popularity';
                 } else {
                     select.selectedIndex = 0;
                 }
@@ -1489,12 +1441,13 @@ script = """
         setupFilters() {
             // Setup category multi-select
             const categoryOptions = document.querySelectorAll('.category-option');
-            const updateCategoryButton = () => {
+            
+            const updateMultiSelectButton = (selectedCategories) => {
                 const btn = document.querySelector('.multi-select-btn');
-                if (this.selectedCategories.has('All Categories')) {
+                if (selectedCategories.has('All Categories')) {
                     btn.textContent = 'All Categories';
                 } else {
-                    const selectedArray = Array.from(this.selectedCategories);
+                    const selectedArray = Array.from(selectedCategories);
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1503,7 +1456,8 @@ script = """
                 }
             };
             
-            updateCategoryButton();
+            const selectedCategories = new Set(['All Categories']);
+            updateMultiSelectButton(selectedCategories);
             
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1511,90 +1465,46 @@ script = """
                     const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
                     
                     if (clickedValue === 'All Categories') {
+                        // Deselect all other categories
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        this.selectedCategories.clear();
-                        this.selectedCategories.add('All Categories');
+                        selectedCategories.clear();
+                        selectedCategories.add('All Categories');
                         allCategoriesOption.classList.add('selected');
                     } else {
+                        // Remove "All Categories" selection
                         allCategoriesOption.classList.remove('selected');
-                        this.selectedCategories.delete('All Categories');
+                        selectedCategories.delete('All Categories');
                         
+                        // Toggle current selection
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            this.selectedCategories.add(clickedValue);
+                            selectedCategories.add(clickedValue);
                         } else {
-                            this.selectedCategories.delete(clickedValue);
+                            selectedCategories.delete(clickedValue);
                         }
                         
-                        if (this.selectedCategories.size === 0) {
+                        // If no categories are selected, reselect "All Categories"
+                        if (selectedCategories.size === 0) {
                             allCategoriesOption.classList.add('selected');
-                            this.selectedCategories.add('All Categories');
+                            selectedCategories.add('All Categories');
                         }
                     }
                     
-                    updateCategoryButton();
+                    // Update button text and filters
+                    updateMultiSelectButton(selectedCategories);
                     this.applyFilters();
                 });
             });
 
             // Initialize with "All Categories" selected
-            document.querySelector('.category-option[data-value="All Categories"]').classList.add('selected');
-
-            // Setup country multi-select
-            const countryOptions = document.querySelectorAll('.country-option');
-            const updateCountryButton = () => {
-                const btn = document.getElementById('countryFilterBtn');
-                if (this.selectedCountries.has('All Countries')) {
-                    btn.textContent = 'All Countries';
-                } else {
-                    const selectedArray = Array.from(this.selectedCountries);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
-                    } else {
-                        btn.textContent = selectedArray.join(', ');
-                    }
-                }
-            };
-            
-            updateCountryButton();
-            
-            countryOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-                    
-                    if (clickedValue === 'All Countries') {
-                        countryOptions.forEach(opt => opt.classList.remove('selected'));
-                        this.selectedCountries.clear();
-                        this.selectedCountries.add('All Countries');
-                        allCountriesOption.classList.add('selected');
-                    } else {
-                        allCountriesOption.classList.remove('selected');
-                        this.selectedCountries.delete('All Countries');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            this.selectedCountries.add(clickedValue);
-                        } else {
-                            this.selectedCountries.delete(clickedValue);
-                        }
-                        
-                        if (this.selectedCountries.size === 0) {
-                            allCountriesOption.classList.add('selected');
-                            this.selectedCountries.add('All Countries');
-                        }
-                    }
-                    
-                    updateCountryButton();
-                    this.applyFilters();
-                });
-            });
-
-            // Initialize with "All Countries" selected
-            document.querySelector('.country-option[data-value="All Countries"]').classList.add('selected');
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
 
             // Setup other filters
-            const filterIds = ['subcategoryFilter', 'stateFilter', 'dateFilter', 'sortFilter'];
+            const filterIds = [
+                'subcategoryFilter', 'countryFilter', 'stateFilter',
+                'dateFilter', 'sortFilter'
+            ];
             
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
@@ -1611,6 +1521,67 @@ script = """
 
             // Add range slider initialization
             this.setupRangeSlider();
+
+            // Setup country multi-select
+            const countryOptions = document.querySelectorAll('.country-option');
+            
+            const updateCountryButton = (selectedCountries) => {
+                const btn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+                if (selectedCountries.has('All Countries')) {
+                    btn.textContent = 'All Countries';
+                } else {
+                    const selectedArray = Array.from(selectedCountries);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    } else {
+                        btn.textContent = selectedArray.join(', ');
+                    }
+                }
+            };
+            
+            const selectedCountries = new Set(['All Countries']);
+            updateCountryButton(selectedCountries);
+            
+            countryOptions.forEach(option => {
+                option.addEventListener('click', (e) => {
+                    const clickedValue = e.target.dataset.value;
+                    const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+                    
+                    if (clickedValue === 'All Countries') {
+                        // Deselect all other countries
+                        countryOptions.forEach(opt => opt.classList.remove('selected'));
+                        selectedCountries.clear();
+                        selectedCountries.add('All Countries');
+                        allCountriesOption.classList.add('selected');
+                    } else {
+                        // Remove "All Countries" selection
+                        allCountriesOption.classList.remove('selected');
+                        selectedCountries.delete('All Countries');
+                        
+                        // Toggle current selection
+                        e.target.classList.toggle('selected');
+                        if (e.target.classList.contains('selected')) {
+                            selectedCountries.add(clickedValue);
+                        } else {
+                            selectedCountries.delete(clickedValue);
+                        }
+                        
+                        // If no countries are selected, reselect "All Countries"
+                        if (selectedCountries.size === 0) {
+                            allCountriesOption.classList.add('selected');
+                            selectedCountries.add('All Countries');
+                        }
+                    }
+                    
+                    // Update button text and filters
+                    updateCountryButton(selectedCountries);
+                    this.applyFilters();
+                });
+            });
+
+            // Initialize with "All Countries" selected
+            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+            allCountriesOption.classList.add('selected');
         }
 
         setupRangeSlider() {
@@ -1849,13 +1820,6 @@ script = """
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
             document.querySelector('.multi-select-btn').textContent = 'All Categories';
-
-            // Reset country selections
-            const countryOptions = document.querySelectorAll('.country-option');
-            countryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-            allCountriesOption.classList.add('selected');
-            document.getElementById('countryFilterBtn').textContent = 'All Countries';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
