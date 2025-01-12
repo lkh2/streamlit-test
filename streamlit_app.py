@@ -628,7 +628,7 @@ css = """
         border-color: #00B087; 
     }
     
-    .state-live, .state-submitted { 
+    .state-live, .state-submitted, .state-started { 
         background: #E6F3FF; 
         color: #0066CC; 
         border-color: #0066CC; 
