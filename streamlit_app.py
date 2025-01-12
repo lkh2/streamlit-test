@@ -133,7 +133,7 @@ df['Backer Count'] = df['data.backers_count'].astype(int)
 
 # Format display columns
 df['Goal'] = df['Raw Goal'].map(lambda x: f"${x:,.2f}")
-df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${x:,.2f}")
+df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${x}")
 df['%Raised'] = df['Raw Raised'].map(lambda x: f"{x:.1f}%")
 df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 
@@ -341,8 +341,7 @@ def get_filter_options(df):
             'Last 6 Months',
             'Last Year',
             'Last 5 Years',
-            'Last 10 Years',
-            'Last 20 Years'
+            'Last 10 Years'
         ]
     }
 
@@ -1347,7 +1346,6 @@ script = """
                     case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
                     case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
                     case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
-                    case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
                 }
                 
                 if (date < compareDate) return false;
