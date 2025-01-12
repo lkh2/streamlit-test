@@ -317,6 +317,8 @@ min_pledged = int(df['Raw Pledged'].min())
 max_pledged = int(df['Raw Pledged'].max())
 min_goal = int(df['Raw Goal'].min())
 max_goal = int(df['Raw Goal'].max())
+min_raised = int(df['Raw Raised'].min())
+max_raised = int(df['Raw Raised'].max())
 
 # After loading data and before generating table, prepare filter options
 def get_filter_options(df):
@@ -329,9 +331,6 @@ def get_filter_options(df):
         'subcategories': ['All Subcategories'] + sorted_subcategories,  # 'All Subcategories' first
         'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
         'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
-        'raised_ranges': ['All Percentages'] + [
-            f"{i}%-{j}%" for i, j in [(0,20), (21,40), (41,60), (61,80), (81,100)]
-        ] + ['>100%'],
         'date_ranges': [
             'All Time',
             'Last Month',
@@ -433,9 +432,27 @@ template = f"""
                     </div>
                 </div>
             </div>
-            <select id="raisedFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['raised_ranges'])}
-            </select>
+            <div class="range-dropdown">
+                <button class="filter-select">Percentage Raised Range</button>
+                <div class="range-content">
+                    <div class="range-container">
+                        <div class="sliders-control">
+                            <input id="raisedFromSlider" type="range" value="{min_raised}" min="{min_raised}" max="{max_raised}"/>
+                            <input id="raisedToSlider" type="range" value="{max_raised}" min="{min_raised}" max="{max_raised}"/>
+                        </div>
+                        <div class="form-control">
+                            <div class="form-control-container">
+                                <span class="form-control-label">Min %</span>
+                                <input class="form-control-input" type="number" id="raisedFromInput" value="{min_raised}" min="{min_raised}" max="{max_raised}"/>
+                            </div>
+                            <div class="form-control-container">
+                                <span class="form-control-label">Max %</span>
+                                <input class="form-control-input" type="number" id="raisedToInput" value="{max_raised}" min="{min_raised}" max="{max_raised}"/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <select id="dateFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['date_ranges'])}
             </select>
@@ -1065,7 +1082,6 @@ script = """
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
-                raised: document.getElementById('raisedFilter').value,
                 date: document.getElementById('dateFilter').value
             };
             this.currentSort = document.getElementById('sortFilter').value;
@@ -1105,7 +1121,6 @@ script = """
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
-                raised: document.getElementById('raisedFilter').value,
                 date: document.getElementById('dateFilter').value
             };
             this.currentSort = document.getElementById('sortFilter').value;
@@ -1139,15 +1154,10 @@ script = """
             const maxGoal = parseInt(document.getElementById('goalToInput').value);
             if (goal < minGoal || goal > maxGoal) return false;
 
-            if (filters.raised !== 'All Percentages') {
-                if (filters.raised === '>100%') {
-                    if (raised <= 100) return false;
-                } else {
-                    const [min, max] = filters.raised.split('-')
-                        .map(v => parseFloat(v.replace(/%/g, '')));
-                    if (raised < min || raised > max) return false;
-                }
-            }
+            // Check raised range
+            const minRaised = parseInt(document.getElementById('raisedFromInput').value);
+            const maxRaised = parseInt(document.getElementById('raisedToInput').value);
+            if (raised < minRaised || raised > maxRaised) return false;
 
             // Date filter
             if (filters.date !== 'All Time') {
@@ -1197,6 +1207,11 @@ script = """
             const goalFromInput = document.getElementById('goalFromInput');
             const goalToInput = document.getElementById('goalToInput');
 
+            const raisedFromSlider = document.getElementById('raisedFromSlider');
+            const raisedToSlider = document.getElementById('raisedToSlider');
+            const raisedFromInput = document.getElementById('raisedFromInput');
+            const raisedToInput = document.getElementById('raisedToInput');
+
             if (fromSlider && toSlider && fromInput && toInput) {
                 fromSlider.value = fromSlider.min;
                 toSlider.value = toSlider.max;
@@ -1215,6 +1230,16 @@ script = """
                 
                 // Update slider appearance
                 this.fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
+            }
+
+            if (raisedFromSlider && raisedToSlider && raisedFromInput && raisedToInput) {
+                raisedFromSlider.value = raisedFromSlider.min;
+                raisedToSlider.value = raisedToSlider.max;
+                raisedFromInput.value = raisedFromSlider.min;
+                raisedToInput.value = raisedToSlider.max;
+                
+                // Update slider appearance
+                this.fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
             }
 
             this.searchInput.value = '';
@@ -1355,7 +1380,7 @@ script = """
         setupFilters() {
             const filterIds = [
                 'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
-                'raisedFilter', 'dateFilter', 'sortFilter'
+                'dateFilter', 'sortFilter'
             ];
             
             filterIds.forEach(id => {
@@ -1387,6 +1412,12 @@ script = """
             const goalToSlider = document.getElementById('goalToSlider');
             const goalFromInput = document.getElementById('goalFromInput');
             const goalToInput = document.getElementById('goalToInput');
+
+            // Setup for percentage raised slider
+            const raisedFromSlider = document.getElementById('raisedFromSlider');
+            const raisedToSlider = document.getElementById('raisedToSlider');
+            const raisedFromInput = document.getElementById('raisedFromInput');
+            const raisedToInput = document.getElementById('raisedToInput');
 
             let inputTimeout;
 
@@ -1496,14 +1527,25 @@ script = """
                 debouncedApplyFilters();
             });
 
+            // Add event listeners for percentage raised slider
+            raisedFromSlider.addEventListener('input', (e) => {
+                controlFromSlider(raisedFromSlider, raisedToSlider, raisedFromInput);
+                debouncedApplyFilters();
+            });
+
+            raisedToSlider.addEventListener('input', (e) => {
+                controlToSlider(raisedFromSlider, raisedToSlider, raisedToInput);
+                debouncedApplyFilters();
+            });
+
             // Input handlers for both sliders
-            [fromInput, goalFromInput].forEach(input => {
+            [fromInput, goalFromInput, raisedFromInput].forEach(input => {
                 input.addEventListener('input', () => {
                     validateAndUpdateRange(input, true, false);
                 });
             });
 
-            [toInput, goalToInput].forEach(input => {
+            [toInput, goalToInput, raisedToInput].forEach(input => {
                 input.addEventListener('input', () => {
                     validateAndUpdateRange(input, false, false);
                 });
@@ -1535,6 +1577,19 @@ script = """
                 }
             });
 
+            // Add key events for percentage raised slider inputs
+            raisedFromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(raisedFromInput, true, true);
+                }
+            });
+
+            raisedToInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(raisedToInput, false, true);
+                }
+            });
+
             // Also handle blur events for immediate validation
             fromInput.addEventListener('blur', () => {
                 validateAndUpdateRange(fromInput, true, true);
@@ -1552,16 +1607,26 @@ script = """
                 validateAndUpdateRange(goalToInput, false, true);
             });
 
+            raisedFromInput.addEventListener('blur', () => {
+                validateAndUpdateRange(raisedFromInput, true, true);
+            });
+
+            raisedToInput.addEventListener('blur', () => {
+                validateAndUpdateRange(raisedToInput, false, true);
+            });
+
             // Store references for reset function
             this.rangeSliderElements = {
                 fromSlider, toSlider, fromInput, toInput,
                 goalFromSlider, goalToSlider, goalFromInput, goalToInput,
+                raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
                 fillSlider
             };
 
             // Initial setup
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
             fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
+            fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
         }
 
         resetFilters() {
