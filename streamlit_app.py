@@ -1347,16 +1347,10 @@ script = """
             const fromInput = document.getElementById('fromInput');
             const toInput = document.getElementById('toInput');
 
-            function getParsed(currentFrom, currentTo) {
-                const from = parseInt(currentFrom.value, 10);
-                const to = parseInt(currentTo.value, 10);
-                return [from, to];
-            }
-
-            function fillSlider(from, to, sliderColor, rangeColor, controlSlider) {
-                const rangeDistance = to.max - to.min;
-                const fromPosition = from.value - to.min;
-                const toPosition = to.value - to.min;
+            const fillSlider = (from, to, sliderColor, rangeColor, controlSlider) => {
+                const rangeDistance = controlSlider.max - controlSlider.min;
+                const fromPosition = from.value - controlSlider.min;
+                const toPosition = to.value - controlSlider.min;
                 controlSlider.style.background = `linear-gradient(
                     to right,
                     ${sliderColor} 0%,
@@ -1367,58 +1361,51 @@ script = """
                     ${sliderColor} 100%)`;
             }
 
-            function controlFromInput() {
-                const [from, to] = getParsed(fromInput, toInput);
-                fillSlider(fromInput, toInput, '#C6C6C6', '#5932EA', toSlider);
-                if (from > to) {
-                    fromSlider.value = to;
-                    fromInput.value = to;
-                } else {
-                    fromSlider.value = from;
-                }
-                this.applyFilters();
-            }
-
-            function controlToInput() {
-                const [from, to] = getParsed(fromInput, toInput);
-                fillSlider(fromInput, toInput, '#C6C6C6', '#5932EA', toSlider);
-                if (from <= to) {
-                    toSlider.value = to;
-                    toInput.value = to;
-                } else {
-                    toInput.value = from;
-                    toSlider.value = from;
-                }
-                this.applyFilters();
-            }
-
-            fromSlider.oninput = () => {
-                const [from, to] = getParsed(fromSlider, toSlider);
+            const controlFromSlider = (e) => {
+                const value = Math.min(parseInt(fromSlider.value), parseInt(toSlider.value));
+                fromSlider.value = value;
+                fromInput.value = value;
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                if (from > to) {
-                    fromSlider.value = to;
-                    fromInput.value = to;
-                } else {
-                    fromInput.value = from;
-                }
                 this.applyFilters();
             };
 
-            toSlider.oninput = () => {
-                const [from, to] = getParsed(fromSlider, toSlider);
+            const controlToSlider = (e) => {
+                const value = Math.max(parseInt(fromSlider.value), parseInt(toSlider.value));
+                toSlider.value = value;
+                toInput.value = value;
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                if (from <= to) {
-                    toSlider.value = to;
-                    toInput.value = to;
-                } else {
-                    toInput.value = from;
-                    toSlider.value = from;
-                }
                 this.applyFilters();
             };
 
-            fromInput.oninput = controlFromInput.bind(this);
-            toInput.oninput = controlToInput.bind(this);
+            const controlFromInput = (e) => {
+                let value = parseInt(fromInput.value);
+                if (isNaN(value)) {
+                    value = parseInt(fromSlider.min);
+                }
+                value = Math.min(value, parseInt(toInput.value));
+                fromSlider.value = value;
+                fromInput.value = value;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                this.applyFilters();
+            };
+
+            const controlToInput = (e) => {
+                let value = parseInt(toInput.value);
+                if (isNaN(value)) {
+                    value = parseInt(toSlider.max);
+                }
+                value = Math.max(value, parseInt(fromInput.value));
+                toSlider.value = value;
+                toInput.value = value;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                this.applyFilters();
+            };
+
+            // Event Listeners
+            fromSlider.addEventListener('input', controlFromSlider);
+            toSlider.addEventListener('input', controlToSlider);
+            fromInput.addEventListener('change', controlFromInput);
+            toInput.addEventListener('change', controlToInput);
 
             // Initialize slider
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
