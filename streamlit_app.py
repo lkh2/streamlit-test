@@ -780,16 +780,35 @@ script = """
                     return;
                 }
 
+                // Log the first few rows' distances for debugging
+                console.log("Sorting by distance. First few rows:");
+                this.visibleRows.slice(0, 5).forEach(row => {
+                    console.log(`Distance: ${row.dataset.distance}, Country: ${row.dataset.countryCode}`);
+                });
+
+                // Sort by the pre-calculated distances
                 this.visibleRows.sort((a, b) => {
-                    // Parse distances as floats and handle infinity
-                    const distA = parseFloat(a.dataset.distance) || Infinity;
-                    const distB = parseFloat(b.dataset.distance) || Infinity;
+                    const distA = parseFloat(a.dataset.distance);
+                    const distB = parseFloat(b.dataset.distance);
                     
-                    // Debug logging
-                    console.log('Sorting distances:', distA, distB);
+                    // Handle invalid values
+                    if (isNaN(distA)) return 1;  // Move invalid to end
+                    if (isNaN(distB)) return -1; // Move invalid to end
                     
                     return distA - distB;
                 });
+
+                // Log the sorted first few rows for verification
+                console.log("After sorting, first few rows:");
+                this.visibleRows.slice(0, 5).forEach(row => {
+                    console.log(`Distance: ${row.dataset.distance}, Country: ${row.dataset.countryCode}`);
+                });
+
+                // Update the table display
+                const tbody = document.querySelector('#data-table tbody');
+                const fragment = document.createDocumentFragment();
+                this.visibleRows.forEach(row => fragment.appendChild(row));
+                tbody.appendChild(fragment);
             } else {
                 // Existing date-based sorting logic
                 this.visibleRows.sort((a, b) => {
@@ -797,6 +816,12 @@ script = """
                     const dateB = new Date(b.dataset.date);
                     return sortType === 'newest' ? dateB - dateA : dateA - dateB;
                 });
+                
+                // Update the table display
+                const tbody = document.querySelector('#data-table tbody');
+                const fragment = document.createDocumentFragment();
+                this.visibleRows.forEach(row => fragment.appendChild(row));
+                tbody.appendChild(fragment);
             }
         }
 
