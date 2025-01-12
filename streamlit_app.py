@@ -1209,7 +1209,8 @@ script = """
                 date: document.getElementById('dateFilter').value
             };
 
-            this.currentSort = document.getElementById('sortFilter').value;
+            const sortSelect = document.getElementById('sortFilter');
+            this.currentSort = sortSelect ? sortSelect.value : 'popularity';
             
             await this.applyAllFilters();
         }
@@ -1253,10 +1254,12 @@ script = """
                 return false;
             }
 
-            // State filter
-            const state = row.querySelector('.state_cell').textContent.trim();
-            if (!filters.states.includes('All States') && !filters.states.includes(state)) {
-                return false;
+            // State filter - Get state without HTML wrapper
+            const stateCell = row.querySelector('.state_cell');
+            const state = stateCell ? stateCell.textContent.trim().toLowerCase() : '';
+            if (!filters.states.includes('All States')) {
+                const matchingState = filters.states.find(s => state === s.toLowerCase());
+                if (!matchingState) return false;
             }
 
             // Get all other values
@@ -1265,11 +1268,9 @@ script = """
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
-            const stateText = row.querySelector('.state_cell').textContent.trim().toLowerCase();
 
             // Rest of filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-            if (filters.state !== 'All States' && !stateText.includes(filters.state.toLowerCase())) return false;
 
             // Check pledged range
             const minPledged = parseFloat(document.getElementById('fromInput').value);
