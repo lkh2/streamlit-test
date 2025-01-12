@@ -1755,7 +1755,7 @@ script = """
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
-            document.querySelector('.multi-select-btn').textContent = 'Categories';
+            document.querySelector('.multi-select-btn').textContent = 'All Categories';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
