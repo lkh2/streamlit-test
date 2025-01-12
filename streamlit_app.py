@@ -133,7 +133,7 @@ df['Backer Count'] = df['data.backers_count'].astype(int)
 
 # Format display columns
 df['Goal'] = df['Raw Goal'].map(lambda x: f"${x:,.2f}")
-df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${x}")
+df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${int(x):,}")
 df['%Raised'] = df['Raw Raised'].map(lambda x: f"{x:.1f}%")
 df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 
