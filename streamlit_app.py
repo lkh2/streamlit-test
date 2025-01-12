@@ -156,7 +156,7 @@ df = df[[
     'Raw Date',
     'Raw Deadline',
     'Backer Count', 
-    'data.location.country'
+    'data.location.country',
     'data.staff_pick' 
 ]].rename(columns={ 
     'data.name': 'Project Name', 
