@@ -25,8 +25,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-def gensimplecomponent(name, template="", script=""):
-    """Generate a simple Streamlit component."""
+def generate_component(name, template="", script=""):
     def html():
         return f"""
             <!DOCTYPE html>
@@ -1937,7 +1936,7 @@ script = """
 """
 
 # Create and use the component
-table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
+table_component = generate_component('searchable_table', template=css + template, script=script)
 table_component()
 
 # st.dataframe(df) # Display the dataframe
