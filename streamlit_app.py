@@ -121,14 +121,24 @@ df = json_normalize(items)
 # Calculate and store raw values first
 df['Raw Goal'] = df['data.goal'].fillna(0).astype(float) * df['data.usd_exchange_rate'].fillna(0).astype(float)
 df['Raw Pledged'] = df['data.converted_pledged_amount'].fillna(0).astype(float)
-df['Raw Raised'] = (df['Raw Pledged'] / df['Raw Goal']) * 100
+
+# Modify Raw Goal to treat anything less than $1 as $1
+df['Raw Goal'] = df['Raw Goal'].apply(lambda x: max(1.0, x))
+
+# Calculate Raw Raised with special handling for zero pledged amount
+df['Raw Raised'] = df.apply(
+    lambda row: 0.0 if row['Raw Pledged'] == 0 
+    else (row['Raw Pledged'] / row['Raw Goal']) * 100, 
+    axis=1
+)
+
 df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s')
 
-# After Raw Date calculation, add Raw Deadline calculation
+# Convert deadline to datetime and format display columns
 df['Raw Deadline'] = pd.to_datetime(df['data.deadline'], unit='s')
 df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
 
-# After Raw Deadline calculation, modify Backer Count (single column)
+# Backer count with null handling
 df['Backer Count'] = df['data.backers_count'].fillna(0).astype(int)
 
 # Format display columns - Add null handling
@@ -1328,7 +1338,11 @@ script = """
             // Check raised range
             const minRaised = parseFloat(document.getElementById('raisedFromInput').value);
             const maxRaised = parseFloat(document.getElementById('raisedToInput').value);
-            if (raised < minRaised || raised > maxRaised) return false;
+            const raisedValue = parseFloat(row.dataset.raised);
+            
+            // Handle the case where raised is exactly 0%
+            if (raisedValue === 0 && minRaised > 0) return false;
+            if (raisedValue < minRaised || raisedValue > maxRaised) return false;
 
             // Date filter
             if (filters.date !== 'All Time') {
@@ -1927,3 +1941,5 @@ script = """
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
+
+st.dataframe(df) # Display the dataframe
