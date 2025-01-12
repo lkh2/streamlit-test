@@ -324,7 +324,7 @@ header_html, rows_html = generate_table_html(df)
 min_pledged = int(df['Raw Pledged'].min())
 max_pledged = int(df['Raw Pledged'].max())
 min_goal = int(df['Raw Goal'].min())
-max_goal = int(df['Raw Goal'].max()) + 1
+max_goal = int(df['Raw Goal'].max())
 min_raised = int(df['Raw Raised'].min())
 max_raised = int(df['Raw Raised'].max())
 
@@ -439,8 +439,8 @@ template = f"""
                 <div class="range-content">
                     <div class="range-container">
                         <div class="sliders-control">
-                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal}"/>
-                            <input id="goalToSlider" type="range" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
+                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal + 1}"/>
+                            <input id="goalToSlider" type="range" value="{max_goal}" min="{min_goal}" max="{max_goal + 1}"/>
                         </div>
                         <div class="form-control">
                             <div class="form-control-container">
