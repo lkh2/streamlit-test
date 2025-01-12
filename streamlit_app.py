@@ -166,6 +166,20 @@ def style_state(state):
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
 
+# Add country data import
+@st.cache_data
+def load_country_data():
+    country_df = pd.read_csv('country.csv')
+    return country_df
+
+# After creating the initial DataFrame, add country code and merge with country data
+df['Country Code'] = df['data.location.country']  # Add Country Code column
+country_data = load_country_data()
+df = df.merge(country_data[['country', 'latitude', 'longitude']], 
+              left_on='Country Code', 
+              right_on='country', 
+              how='left')
+
 def generate_table_html(df):
     # Define visible and hidden columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
@@ -184,6 +198,9 @@ def generate_table_html(df):
             data-goal="{row['Raw Goal']}"
             data-raised="{row['Raw Raised']}"
             data-date="{row['Raw Date'].strftime('%Y-%m-%d')}"
+            data-latitude="{row['latitude']}"
+            data-longitude="{row['longitude']}"
+            data-country-code="{row['Country Code']}"
         '''
         
         # Create visible cells with special handling for Link column
@@ -267,6 +284,7 @@ template = f"""
             <select id="sortFilter" class="filter-select">
                 <option value="newest">Newest First</option>
                 <option value="oldest">Oldest First</option>
+                <option value="nearme">Near Me</option>
             </select>
         </div>
         <div class="filter-row">
@@ -649,6 +667,86 @@ script = """
         });
     }
 
+    // Add Haversine distance calculation function
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; // Earth's radius in kilometers
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    // Optimize distance calculations with a cache
+    class DistanceCache {
+        constructor() {
+            this.userLocation = null;
+            this.countryDistances = new Map();
+        }
+
+        async initialize() {
+            try {
+                this.userLocation = await this.getUserLocation();
+                this.calculateCountryDistances();
+                return true;
+            } catch (error) {
+                console.error("Could not initialize distance cache:", error);
+                return false;
+            }
+        }
+
+        async getUserLocation() {
+            return new Promise((resolve, reject) => {
+                if ("geolocation" in navigator) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const location = {
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude
+                            };
+                            resolve(location);
+                        },
+                        (error) => reject(error)
+                    );
+                } else {
+                    reject(new Error("Geolocation not available"));
+                }
+            });
+        }
+
+        calculateCountryDistances() {
+            // Get unique country coordinates from the data
+            const countries = new Map();
+            document.querySelectorAll('#data-table tbody tr').forEach(row => {
+                const lat = parseFloat(row.dataset.latitude);
+                const lon = parseFloat(row.dataset.longitude);
+                const countryCode = row.dataset.countryCode;
+                
+                if (!countries.has(countryCode) && !isNaN(lat) && !isNaN(lon)) {
+                    countries.set(countryCode, { latitude: lat, longitude: lon });
+                }
+            });
+
+            // Calculate distances for each country once
+            countries.forEach((coords, countryCode) => {
+                const distance = calculateDistance(
+                    this.userLocation.latitude,
+                    this.userLocation.longitude,
+                    coords.latitude,
+                    coords.longitude
+                );
+                this.countryDistances.set(countryCode, distance);
+            });
+        }
+
+        getDistance(countryCode) {
+            return this.countryDistances.get(countryCode) || Infinity;
+        }
+    }
+
     class TableManager {
         constructor() {
             this.searchInput = document.getElementById('table-search');
@@ -659,34 +757,67 @@ script = """
             this.currentSearchTerm = '';
             this.currentFilters = null;
             this.currentSort = 'newest';
+            this.userLocation = null;
+            this.distanceCache = new DistanceCache();
             this.initialize();
             this.resetFilters();
         }
 
-        initialize() {
-            this.setupSearchAndPagination();
-            this.setupFilters();
-            this.updateTable();
-        }
-
-        setupSearchAndPagination() {
-            // Setup search
-            const debouncedSearch = debounce((searchTerm) => {
-                this.currentSearchTerm = searchTerm;
-                this.applyAllFilters();
-            }, 300);
-
-            this.searchInput.addEventListener('input', (e) => {
-                debouncedSearch(e.target.value.trim().toLowerCase());
+        // Add method to get user location
+        async getUserLocation() {
+            return new Promise((resolve, reject) => {
+                if ("geolocation" in navigator) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            this.userLocation = {
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude
+                            };
+                            resolve(this.userLocation);
+                        },
+                        (error) => {
+                            console.error("Error getting location:", error);
+                            reject(error);
+                        }
+                    );
+                } else {
+                    reject(new Error("Geolocation not available"));
+                }
             });
-
-            // Setup pagination controls
-            document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
-            document.getElementById('next-page').addEventListener('click', () => this.nextPage());
-            window.handlePageClick = (page) => this.goToPage(page);
         }
 
-        applyAllFilters() {
+        // Modify sortRows method to include distance-based sorting
+        async sortRows(sortType) {
+            if (sortType === 'nearme') {
+                try {
+                    const initialized = await this.distanceCache.initialize();
+                    if (!initialized) {
+                        throw new Error("Could not initialize distance cache");
+                    }
+
+                    this.visibleRows.sort((a, b) => {
+                        const distA = this.distanceCache.getDistance(a.dataset.countryCode);
+                        const distB = this.distanceCache.getDistance(b.dataset.countryCode);
+                        return distA - distB;
+                    });
+                } catch (error) {
+                    console.error("Could not sort by location:", error);
+                    // Fallback to newest first if geolocation fails
+                    this.currentSort = 'newest';
+                    this.sortRows('newest');
+                }
+            } else {
+                // Existing date-based sorting logic
+                this.visibleRows.sort((a, b) => {
+                    const dateA = new Date(a.dataset.date);
+                    const dateB = new Date(b.dataset.date);
+                    return sortType === 'newest' ? dateB - dateA : dateA - dateB;
+                });
+            }
+        }
+
+        // Modify applyAllFilters to handle async sorting
+        async applyAllFilters() {
             // Start with all rows
             let filteredRows = this.allRows;
 
@@ -710,11 +841,51 @@ script = """
             this.visibleRows = filteredRows;
 
             // Apply current sort
-            this.sortRows(this.currentSort);
+            await this.sortRows(this.currentSort);
 
             // Reset to first page and update display
             this.currentPage = 1;
             this.updateTable();
+        }
+
+        // Update applyFilters to handle async
+        async applyFilters() {
+            this.currentFilters = {
+                category: document.getElementById('categoryFilter').value,
+                subcategory: document.getElementById('subcategoryFilter').value,
+                country: document.getElementById('countryFilter').value,
+                state: document.getElementById('stateFilter').value,
+                pledged: document.getElementById('pledgedFilter').value,
+                goal: document.getElementById('goalFilter').value,
+                raised: document.getElementById('raisedFilter').value,
+                date: document.getElementById('dateFilter').value
+            };
+            this.currentSort = document.getElementById('sortFilter').value;
+            
+            await this.applyAllFilters();
+        }
+
+        initialize() {
+            this.setupSearchAndPagination();
+            this.setupFilters();
+            this.updateTable();
+        }
+
+        setupSearchAndPagination() {
+            // Setup search
+            const debouncedSearch = debounce((searchTerm) => {
+                this.currentSearchTerm = searchTerm;
+                this.applyAllFilters();
+            }, 300);
+
+            this.searchInput.addEventListener('input', (e) => {
+                debouncedSearch(e.target.value.trim().toLowerCase());
+            });
+
+            // Setup pagination controls
+            document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
+            document.getElementById('next-page').addEventListener('click', () => this.nextPage());
+            window.handlePageClick = (page) => this.goToPage(page);
         }
 
         applyFilters() {
