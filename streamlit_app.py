@@ -777,11 +777,16 @@ script = """
                     this.sortRows('newest');
                     return;
                 }
-
+                
                 // Sort only by distance
                 this.visibleRows.sort((a, b) => {
-                    const distA = parseFloat(a.dataset.distance) || Infinity;
-                    const distB = parseFloat(b.dataset.distance) || Infinity;
+                    const distA = parseFloat(a.dataset.distance);
+                    const distB = parseFloat(b.dataset.distance);
+                    
+                    // Handle invalid values
+                    if (isNaN(distA)) return 1;
+                    if (isNaN(distB)) return -1;
+                    
                     return distA - distB;
                 });
             } else {
@@ -1135,5 +1140,3 @@ script = """
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
-
-st.dataframe(df)
