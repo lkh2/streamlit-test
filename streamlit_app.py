@@ -1361,54 +1361,457 @@ script = """
                     ${sliderColor} 100%)`;
             }
 
-            const controlFromSlider = (e) => {
-                const value = Math.min(parseInt(fromSlider.value), parseInt(toSlider.value));
+            // Debounce the filter application
+            const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
+
+            const updateFromValue = (value) => {
+                // Ensure the value doesn't exceed the maximum
+                value = Math.min(value, parseInt(toSlider.value));
+                value = Math.max(value, parseInt(fromSlider.min));
                 fromSlider.value = value;
                 fromInput.value = value;
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                this.applyFilters();
             };
 
-            const controlToSlider = (e) => {
-                const value = Math.max(parseInt(fromSlider.value), parseInt(toSlider.value));
+            const updateToValue = (value) => {
+                // Ensure the value doesn't go below the minimum
+                value = Math.max(value, parseInt(fromSlider.value));
+                value = Math.min(value, parseInt(toSlider.max));
                 toSlider.value = value;
                 toInput.value = value;
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                this.applyFilters();
             };
 
-            const controlFromInput = (e) => {
-                let value = parseInt(fromInput.value);
-                if (isNaN(value)) {
-                    value = parseInt(fromSlider.min);
-                }
-                value = Math.min(value, parseInt(toInput.value));
-                fromSlider.value = value;
-                fromInput.value = value;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                this.applyFilters();
+            // Slider event handlers
+            fromSlider.addEventListener('input', (e) => {
+                updateFromValue(parseInt(e.target.value));
+                debouncedApplyFilters();
+            });
+
+            toSlider.addEventListener('input', (e) => {
+                updateToValue(parseInt(e.target.value));
+                debouncedApplyFilters();
+            });
+
+            // Input event handlers
+            fromInput.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value) || parseInt(fromSlider.min);
+                updateFromValue(value);
+                debouncedApplyFilters();
+            });
+
+            toInput.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value) || parseInt(toSlider.max);
+                updateToValue(value);
+                debouncedApplyFilters();
+            });
+
+            // Store references for reset function
+            this.rangeSliderElements = {
+                fromSlider,
+                toSlider,
+                fromInput,
+                toInput,
+                fillSlider
             };
 
-            const controlToInput = (e) => {
-                let value = parseInt(toInput.value);
-                if (isNaN(value)) {
-                    value = parseInt(toSlider.max);
-                }
-                value = Math.max(value, parseInt(fromInput.value));
-                toSlider.value = value;
-                toInput.value = value;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                this.applyFilters();
-            };
-
-            // Event Listeners
-            fromSlider.addEventListener('input', controlFromSlider);
-            toSlider.addEventListener('input', controlToSlider);
-            fromInput.addEventListener('change', controlFromInput);
-            toInput.addEventListener('change', controlToInput);
-
-            // Initialize slider
+            // Initial setup
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+        }
+
+        resetFilters() {
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => {
+                if (select.id === 'subcategoryFilter') {
+                    // Find and select "All Subcategories" option
+                    const allSubcatsOption = Array.from(select.options)
+                        .find(option => option.value === 'All Subcategories');
+                    if (allSubcatsOption) {
+                        select.value = 'All Subcategories';
+                    } else {
+                        select.selectedIndex = 0;
+                    }
+                } else {
+                    select.selectedIndex = 0;
+                }
+            });
+
+            // Reset range slider values using stored references
+            if (this.rangeSliderElements) {
+                const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
+                fromSlider.value = fromSlider.min;
+                toSlider.value = toSlider.max;
+                fromInput.value = fromSlider.min;
+                toInput.value = toSlider.max;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            }
+
+            this.searchInput.value = '';
+            this.currentSearchTerm = '';
+            this.currentFilters = null;
+            this.currentSort = 'popularity';
+            this.visibleRows = this.allRows;
+            this.applyAllFilters();
+        }
+
+        updateTable() {
+            // Hide all rows first
+            this.allRows.forEach(row => row.style.display = 'none');
+            
+            // Calculate visible range
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = Math.min(start + this.pageSize, this.visibleRows.length);
+            
+            // Show only rows for current page
+            this.visibleRows.slice(start, end).forEach(row => {
+                row.style.display = '';
+            });
+
+            this.updatePagination();
+            this.adjustHeight();
+        }
+
+        updatePagination() {
+            const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
+            const pageNumbers = this.generatePageNumbers(totalPages);
+            const container = document.getElementById('page-numbers');
+            
+            container.innerHTML = pageNumbers.map(page => {
+                if (page === '...') {
+                    return '<span class="page-ellipsis">...</span>';
+                }
+                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
+                    ${page === this.currentPage ? 'disabled' : ''} 
+                    onclick="handlePageClick(${page})">${page}</button>`;
+            }).join('');
+
+            document.getElementById('prev-page').disabled = this.currentPage <= 1;
+            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
+        }
+
+        generatePageNumbers(totalPages) {
+            let pages = [];
+            if (totalPages <= 10) {
+                pages = Array.from({length: totalPages}, (_, i) => i + 1);
+            } else {
+                if (this.currentPage <= 7) {
+                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+                } else if (this.currentPage >= totalPages - 6) {
+                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+                } else {
+                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
+                }
+            }
+            return pages;
+        }
+
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
+            }
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
+            }
+        }
+
+        goToPage(page) {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (page >= 1 && page <= totalPages) {
+                this.currentPage = page;
+                this.updateTable();
+            }
+        }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const titleWrapper = document.querySelector('.title-wrapper');
+                const filterWrapper = document.querySelector('.filter-wrapper');
+                const tableWrapper = document.querySelector('.table-wrapper');
+                const tableContainer = document.querySelector('.table-container');
+                const table = document.querySelector('#data-table');
+                const controls = document.querySelector('.table-controls');
+                const pagination = document.querySelector('.pagination-controls');
+                
+                if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
+                    const titleHeight = titleWrapper.offsetHeight;
+                    const filterHeight = filterWrapper.offsetHeight;
+                    const tableHeight = table.offsetHeight;
+                    const controlsHeight = controls.offsetHeight;
+                    const paginationHeight = pagination.offsetHeight;
+                    const padding = 40;
+                    
+                    // Calculate content height
+                    const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
+                    
+                    // Calculate total component height including title
+                    const totalHeight = titleHeight + filterHeight + contentHeight + padding;
+                    
+                    // Set minimum heights
+                    const minContentHeight = 600; // Minimum height for table content
+                    const finalHeight = Math.max(totalHeight, minContentHeight + titleHeight + filterHeight);
+                    
+                    // Update container heights
+                    tableContainer.style.minHeight = `${Math.max(tableHeight, 400)}px`;
+                    tableWrapper.style.minHeight = `${Math.max(contentHeight, minContentHeight)}px`;
+                    
+                    // Set final component height with additional padding
+                    Streamlit.setFrameHeight(finalHeight + 40);
+                }
+            });
+        }
+
+        setupFilters() {
+            const filterIds = [
+                'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
+                'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter'
+            ];
+            
+            filterIds.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('change', () => this.applyFilters());
+                }
+            });
+
+            // Add reset button handler
+            const resetButton = document.getElementById('resetFilters');
+            if (resetButton) {
+                resetButton.addEventListener('click', () => this.resetFilters());
+            }
+
+            // Add range slider initialization
+            this.setupRangeSlider();
+        }
+
+        setupRangeSlider() {
+            const fromSlider = document.getElementById('fromSlider');
+            const toSlider = document.getElementById('toSlider');
+            const fromInput = document.getElementById('fromInput');
+            const toInput = document.getElementById('toInput');
+
+            const fillSlider = (from, to, sliderColor, rangeColor, controlSlider) => {
+                const rangeDistance = controlSlider.max - controlSlider.min;
+                const fromPosition = from.value - controlSlider.min;
+                const toPosition = to.value - controlSlider.min;
+                controlSlider.style.background = `linear-gradient(
+                    to right,
+                    ${sliderColor} 0%,
+                    ${sliderColor} ${(fromPosition)/(rangeDistance)*100}%,
+                    ${rangeColor} ${((fromPosition)/(rangeDistance))*100}%,
+                    ${rangeColor} ${(toPosition)/(rangeDistance)*100}%, 
+                    ${sliderColor} ${(toPosition)/(rangeDistance)*100}%, 
+                    ${sliderColor} 100%)`;
+            }
+
+            // Debounce the filter application
+            const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
+
+            const updateFromValue = (value) => {
+                // Ensure the value doesn't exceed the maximum
+                value = Math.min(value, parseInt(toSlider.value));
+                value = Math.max(value, parseInt(fromSlider.min));
+                fromSlider.value = value;
+                fromInput.value = value;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            };
+
+            const updateToValue = (value) => {
+                // Ensure the value doesn't go below the minimum
+                value = Math.max(value, parseInt(fromSlider.value));
+                value = Math.min(value, parseInt(toSlider.max));
+                toSlider.value = value;
+                toInput.value = value;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            };
+
+            // Slider event handlers
+            fromSlider.addEventListener('input', (e) => {
+                updateFromValue(parseInt(e.target.value));
+                debouncedApplyFilters();
+            });
+
+            toSlider.addEventListener('input', (e) => {
+                updateToValue(parseInt(e.target.value));
+                debouncedApplyFilters();
+            });
+
+            // Input event handlers
+            fromInput.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value) || parseInt(fromSlider.min);
+                updateFromValue(value);
+                debouncedApplyFilters();
+            });
+
+            toInput.addEventListener('input', (e) => {
+                const value = parseInt(e.target.value) || parseInt(toSlider.max);
+                updateToValue(value);
+                debouncedApplyFilters();
+            });
+
+            // Store references for reset function
+            this.rangeSliderElements = {
+                fromSlider,
+                toSlider,
+                fromInput,
+                toInput,
+                fillSlider
+            };
+
+            // Initial setup
+            fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+        }
+
+        resetFilters() {
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => {
+                if (select.id === 'subcategoryFilter') {
+                    // Find and select "All Subcategories" option
+                    const allSubcatsOption = Array.from(select.options)
+                        .find(option => option.value === 'All Subcategories');
+                    if (allSubcatsOption) {
+                        select.value = 'All Subcategories';
+                    } else {
+                        select.selectedIndex = 0;
+                    }
+                } else {
+                    select.selectedIndex = 0;
+                }
+            });
+
+            // Reset range slider values using stored references
+            if (this.rangeSliderElements) {
+                const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
+                fromSlider.value = fromSlider.min;
+                toSlider.value = toSlider.max;
+                fromInput.value = fromSlider.min;
+                toInput.value = toSlider.max;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            }
+
+            this.searchInput.value = '';
+            this.currentSearchTerm = '';
+            this.currentFilters = null;
+            this.currentSort = 'popularity';
+            this.visibleRows = this.allRows;
+            this.applyAllFilters();
+        }
+
+        updateTable() {
+            // Hide all rows first
+            this.allRows.forEach(row => row.style.display = 'none');
+            
+            // Calculate visible range
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = Math.min(start + this.pageSize, this.visibleRows.length);
+            
+            // Show only rows for current page
+            this.visibleRows.slice(start, end).forEach(row => {
+                row.style.display = '';
+            });
+
+            this.updatePagination();
+            this.adjustHeight();
+        }
+
+        updatePagination() {
+            const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
+            const pageNumbers = this.generatePageNumbers(totalPages);
+            const container = document.getElementById('page-numbers');
+            
+            container.innerHTML = pageNumbers.map(page => {
+                if (page === '...') {
+                    return '<span class="page-ellipsis">...</span>';
+                }
+                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
+                    ${page === this.currentPage ? 'disabled' : ''} 
+                    onclick="handlePageClick(${page})">${page}</button>`;
+            }).join('');
+
+            document.getElementById('prev-page').disabled = this.currentPage <= 1;
+            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
+        }
+
+        generatePageNumbers(totalPages) {
+            let pages = [];
+            if (totalPages <= 10) {
+                pages = Array.from({length: totalPages}, (_, i) => i + 1);
+            } else {
+                if (this.currentPage <= 7) {
+                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+                } else if (this.currentPage >= totalPages - 6) {
+                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+                } else {
+                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
+                }
+            }
+            return pages;
+        }
+
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
+            }
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
+            }
+        }
+
+        goToPage(page) {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (page >= 1 && page <= totalPages) {
+                this.currentPage = page;
+                this.updateTable();
+            }
+        }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const titleWrapper = document.querySelector('.title-wrapper');
+                const filterWrapper = document.querySelector('.filter-wrapper');
+                const tableWrapper = document.querySelector('.table-wrapper');
+                const tableContainer = document.querySelector('.table-container');
+                const table = document.querySelector('#data-table');
+                const controls = document.querySelector('.table-controls');
+                const pagination = document.querySelector('.pagination-controls');
+                
+                if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
+                    const titleHeight = titleWrapper.offsetHeight;
+                    const filterHeight = filterWrapper.offsetHeight;
+                    const tableHeight = table.offsetHeight;
+                    const controlsHeight = controls.offsetHeight;
+                    const paginationHeight = pagination.offsetHeight;
+                    const padding = 40;
+                    
+                    // Calculate content height
+                    const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
+                    
+                    // Calculate total component height including title
+                    const totalHeight = titleHeight + filterHeight + contentHeight + padding;
+                    
+                    // Set minimum heights
+                    const minContentHeight = 600; // Minimum height for table content
+                    const finalHeight = Math.max(totalHeight, minContentHeight + titleHeight + filterHeight);
+                    
+                    // Update container heights
+                    tableContainer.style.minHeight = `${Math.max(tableHeight, 400)}px`;
+                    tableWrapper.style.minHeight = `${Math.max(contentHeight, minContentHeight)}px`;
+                    
+                    // Set final component height with additional padding
+                    Streamlit.setFrameHeight(finalHeight + 40);
+                }
+            });
         }
     }
 
