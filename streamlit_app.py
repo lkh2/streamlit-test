@@ -1132,12 +1132,12 @@ script = """
 
         // Update applyFilters to handle async
         async applyFilters() {
-            // Get the selected categories from the multi-select
+            // Get selected categories from selected category options
             const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
                 .map(opt => opt.dataset.value);
 
             this.currentFilters = {
-                categories: selectedCategories,  // Store selected categories
+                categories: selectedCategories,
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
@@ -1151,7 +1151,7 @@ script = """
         matchesFilters(row, filters) {
             const category = row.dataset.category;
             
-            // Check category filter
+            // Category filter check for multiple selections
             if (filters.categories && filters.categories.length > 0) {
                 if (!filters.categories.includes('All Categories') && !filters.categories.includes(category)) {
                     return false;
@@ -1166,7 +1166,8 @@ script = """
             const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
             const country = row.querySelector('td:nth-child(5)').textContent;
 
-            // Other filters
+            // Category filters
+            if (filters.category !== 'All Categories' && category !== filters.category) return false;
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
             if (filters.country !== 'All Countries' && country !== filters.country) return false;
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
@@ -1405,9 +1406,13 @@ script = """
         }
 
         setupFilters() {
-            // Setup category multi-select
+            // Setup category multi-select with initial state
             const categoryOptions = document.querySelectorAll('.category-option');
             const selectedCategories = new Set(['All Categories']); // Initialize with All Categories
+            
+            // Set initial state
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
             
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1421,7 +1426,6 @@ script = """
                         e.target.classList.add('selected');
                     } else {
                         // Remove "All Categories" selection
-                        const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
                         allCategoriesOption.classList.remove('selected');
                         selectedCategories.delete('All Categories');
                         
@@ -1451,13 +1455,24 @@ script = """
                             selectedText;
                     }
                     
+                    // Store selected categories in filters and apply
+                    this.currentFilters = {
+                        ...this.currentFilters,
+                        categories: Array.from(selectedCategories)
+                    };
+                    
                     this.applyFilters();
                 });
             });
 
-            // Initialize with "All Categories" selected
-            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            allCategoriesOption.classList.add('selected');
+            // Initialize filters with categories
+            this.currentFilters = {
+                categories: ['All Categories'],
+                subcategory: 'All Subcategories',
+                country: 'All Countries',
+                state: 'All States',
+                date: 'All Time'
+            };
 
             // Setup other filters
             const filterIds = [
