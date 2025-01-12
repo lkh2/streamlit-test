@@ -348,6 +348,7 @@ template = f"""
             <select id="sortFilter" class="filter-select">
                 <option value="newest">Newest First</option>
                 <option value="oldest">Oldest First</option>
+                <option value="mostfunded">Most Funded</option>
                 <option value="mostbacked">Most Backed</option>
                 <option value="enddate">End Date</option>
                 <option value="nearme">Near Me</option>
@@ -810,6 +811,13 @@ script = """
                     const deadlineA = new Date(a.dataset.deadline);
                     const deadlineB = new Date(b.dataset.deadline);
                     return deadlineB - deadlineA; 
+                });
+            } else if (sortType === 'mostfunded') {
+                // Sort by pledged amount
+                this.visibleRows.sort((a, b) => {
+                    const pledgedA = parseFloat(a.dataset.pledged);
+                    const pledgedB = parseFloat(b.dataset.pledged);
+                    return pledgedB - pledgedA;  // Descending order (most funded first)
                 });
             } else if (sortType === 'mostbacked') {
                 // Sort by backer count
