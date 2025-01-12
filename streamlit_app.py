@@ -255,7 +255,7 @@ capped_percentage = df['Raw Raised'].clip(upper=500)
 
 # Normalize components to 0-1 scale
 normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
-normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())
+normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].max())
 normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
 
 # Calculate popularity score
@@ -326,11 +326,15 @@ def get_filter_options(df):
     subcategories = df['Subcategory'].unique().tolist()
     sorted_subcategories = sorted(subcategories)
     
+    # Extract states without HTML formatting
+    states = df['State'].str.extract(r'state-(\w+)')[0].unique().tolist()
+    states = [state.title() for state in states]  # Capitalize first letter
+    
     return {
         'categories': sorted(['All Categories'] + df['Category'].unique().tolist()),
-        'subcategories': ['All Subcategories'] + sorted_subcategories,  # 'All Subcategories' first
+        'subcategories': ['All Subcategories'] + sorted_subcategories,
         'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
-        'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
+        'states': sorted(['All States'] + states),
         'date_ranges': [
             'All Time',
             'Last Month',
@@ -1292,11 +1296,15 @@ script = """
                 return false;
             }
 
-            // State filter - Get state without HTML wrapper
+            // State filter - Extract state from class name instead of text content
             const stateCell = row.querySelector('.state_cell');
-            const state = stateCell ? stateCell.textContent.trim().toLowerCase() : '';
+            const stateMatch = stateCell ? stateCell.className.match(/state-(\w+)/) : null;
+            const state = stateMatch ? stateMatch[1] : '';
+            
             if (!filters.states.includes('All States')) {
-                const matchingState = filters.states.find(s => state === s.toLowerCase());
+                const matchingState = filters.states.find(s => 
+                    s.toLowerCase() === state.toLowerCase()
+                );
                 if (!matchingState) return false;
             }
 
