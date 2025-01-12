@@ -1293,10 +1293,10 @@ script = """
                 if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
                     const titleHeight = titleWrapper.offsetHeight;
                     const filterHeight = filterWrapper.offsetHeight;
-                    const tableHeight = table.offsetHeight - 20;
+                    const tableHeight = table.offsetHeight;
                     const controlsHeight = controls.offsetHeight;
                     const paginationHeight = pagination.offsetHeight;
-                    const padding = 40;
+                    const padding = 20;
                     
                     // Calculate content height
                     const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
@@ -1305,7 +1305,7 @@ script = """
                     const totalHeight = titleHeight + filterHeight + contentHeight + padding;
                     
                     // Set minimum heights
-                    const minContentHeight = 600; // Minimum height for table content
+                    const minContentHeight = 580; // Minimum height for table content
                     const finalHeight = Math.max(totalHeight, minContentHeight + titleHeight + filterHeight);
                     
                     // Update container heights
@@ -1605,10 +1605,10 @@ script = """
                 if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
                     const titleHeight = titleWrapper.offsetHeight;
                     const filterHeight = filterWrapper.offsetHeight;
-                    const tableHeight = table.offsetHeight - 20;
+                    const tableHeight = table.offsetHeight;
                     const controlsHeight = controls.offsetHeight;
                     const paginationHeight = pagination.offsetHeight;
-                    const padding = 40;
+                    const padding = 20;
                     
                     // Calculate content height
                     const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
@@ -1617,7 +1617,7 @@ script = """
                     const totalHeight = titleHeight + filterHeight + contentHeight + padding;
                     
                     // Set minimum heights
-                    const minContentHeight = 600; // Minimum height for table content
+                    const minContentHeight = 580; // Minimum height for table content
                     const finalHeight = Math.max(totalHeight, minContentHeight + titleHeight + filterHeight);
                     
                     // Update container heights
