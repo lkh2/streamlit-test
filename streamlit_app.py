@@ -197,7 +197,7 @@ df = df.merge(country_data[['country', 'latitude', 'longitude']],
 # Add geolocation call before data processing
 loc = get_geolocation()
 user_location = None
-if loc and 'coords' in loc:
+if (loc and 'coords' in loc):
     user_location = {
         'latitude': loc['coords']['latitude'],
         'longitude': loc['coords']['longitude']
@@ -236,6 +236,31 @@ else:
 # Sort DataFrame by Distance initially to verify values
 df = df.sort_values('Distance')
 
+# Add Staff Pick column
+df['Staff Pick'] = df['data.staff_pick'].astype(bool)
+
+# Calculate popularity score components
+now = pd.Timestamp.now()
+max_days = (now - df['Raw Date']).dt.total_seconds().max() / (24*60*60)
+time_factor = 1 - ((now - df['Raw Date']).dt.total_seconds() / (24*60*60) / max_days)
+
+# Cap percentage raised at 500% to prevent extreme outliers
+capped_percentage = df['Raw Raised'].clip(upper=500)
+
+# Normalize components to 0-1 scale
+normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
+normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())
+normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
+
+# Calculate popularity score
+df['Popularity Score'] = (
+    normalized_backers * 0.35 +      # Backer count (35% weight)
+    normalized_pledged * 0.25 +      # Pledged amount (25% weight)
+    normalized_percentage * 0.20 +    # Percentage raised (20% weight)
+    time_factor * 0.10 +             # Time factor (10% weight)
+    df['Staff Pick'].astype(int) * 0.10  # Staff pick (10% weight)
+)
+
 def generate_table_html(df):
     # Define visible and hidden columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
@@ -255,11 +280,13 @@ def generate_table_html(df):
             data-raised="{row['Raw Raised']}"
             data-date="{row['Raw Date'].strftime('%Y-%m-%d')}"
             data-deadline="{row['Raw Deadline'].strftime('%Y-%m-%d')}"
-            data-backers="{row['Backer Count']}"  # Updated column name
+            data-backers="{row['Backer Count']}"
             data-latitude="{row['latitude']}"
             data-longitude="{row['longitude']}"
             data-country-code="{row['Country Code']}"
-            data-distance="{row['Distance']:.2f}"  # Format distance to 2 decimal places
+            data-distance="{row['Distance']:.2f}"
+            data-staff-pick="{str(row['Staff Pick']).lower()}"
+            data-popularity="{row['Popularity Score']:.6f}"
         '''
         
         # Create visible cells with special handling for Link column
@@ -346,6 +373,7 @@ template = f"""
             </select>
             <span class="filter-label">Sorted By</span>
             <select id="sortFilter" class="filter-select">
+                <option value="popularity" selected>Most Popular</option>
                 <option value="newest">Newest First</option>
                 <option value="oldest">Oldest First</option>
                 <option value="mostfunded">Most Funded</option>
@@ -775,7 +803,7 @@ script = """
             this.pageSize = 10;
             this.currentSearchTerm = '';
             this.currentFilters = null;
-            this.currentSort = 'newest';
+            this.currentSort = 'popularity';
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
             this.initialize();
@@ -786,7 +814,14 @@ script = """
 
         // Update sortRows to handle missing location
         async sortRows(sortType) {
-            if (sortType === 'nearme') {
+            if (sortType === 'popularity') {
+                // Sort by popularity score
+                this.visibleRows.sort((a, b) => {
+                    const scoreA = parseFloat(a.dataset.popularity);
+                    const scoreB = parseFloat(b.dataset.popularity);
+                    return scoreB - scoreA;  // Descending order (most popular first)
+                });
+            } else if (sortType === 'nearme') {
                 if (!this.userLocation) {
                     this.currentSort = 'newest';
                     document.getElementById('sortFilter').value = 'newest';
@@ -899,6 +934,8 @@ script = """
         initialize() {
             this.setupSearchAndPagination();
             this.setupFilters();
+            this.currentSort = 'popularity';  // Set default sort to popularity
+            this.applyAllFilters();
             this.updateTable();
         }
 
@@ -1023,7 +1060,7 @@ script = """
             this.searchInput.value = '';
             this.currentSearchTerm = '';
             this.currentFilters = null;
-            this.currentSort = 'newest';
+            this.currentSort = 'popularity';
             this.visibleRows = this.allRows;
             this.applyAllFilters();
         }
