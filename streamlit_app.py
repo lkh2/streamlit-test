@@ -8,6 +8,7 @@ from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
 import time
+import threading
 
 st.set_page_config(layout="wide")
 
@@ -24,6 +25,12 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+def show_temp_warning(message):
+    """Show a temporary warning message in Streamlit."""
+    warning = st.warning(message, icon="⚠️")
+    time.sleep(3)
+    warning.empty()
 
 def gensimplecomponent(name, template="", script=""):
     """Generate a simple Streamlit component."""
@@ -202,6 +209,10 @@ if 'show_location_warning' not in st.session_state:
     st.session_state.show_location_warning = False
 if 'show_loading_spinner' not in st.session_state:
     st.session_state.show_loading_spinner = False
+if 'temp_warning' not in st.session_state:
+    st.session_state.temp_warning = None
+if 'warning_shown' not in st.session_state:
+    st.session_state.warning_shown = False
 
 # Add geolocation call before data processing
 loc = get_geolocation()
@@ -214,8 +225,13 @@ if (loc and 'coords' in loc):
             'longitude': loc['coords']['longitude']
         }
         time.sleep(1)  # Give time for visual feedback
-    st.success("Location received successfully!")
-    st.session_state.show_location_warning = False
+    
+    # Show success message temporarily
+    placeholder = st.empty()
+    placeholder.success("Location received successfully!")
+    # Clear success message after 2 seconds
+    time.sleep(2)
+    placeholder.empty()
 else:
     # Set flag to show warning if needed
     st.session_state.show_location_warning = True
@@ -1238,7 +1254,12 @@ script = """
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_value = table_component()
-if table_value and isinstance(table_value, dict) and table_value.get('showLocationWarning'):
-    st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️")
+if (table_value and isinstance(table_value, dict) and 
+    table_value.get('showLocationWarning') and 
+    not st.session_state.warning_shown):
+    # Show warning only if it hasn't been shown before
+    st.session_state.warning_shown = True
+    threading.Thread(target=show_temp_warning, 
+                    args=('Please enable location services to use the "Near Me" sorting option.',)).start()
 
 st.dataframe(df)
