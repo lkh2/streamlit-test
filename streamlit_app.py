@@ -312,9 +312,11 @@ def generate_table_html(df):
 # Generate table HTML
 header_html, rows_html = generate_table_html(df)
 
-# Calculate min/max pledged values from the DataFrame
+# Calculate min/max values from the DataFrame
 min_pledged = int(df['Raw Pledged'].min())
 max_pledged = int(df['Raw Pledged'].max())
+min_goal = int(df['Raw Goal'].min())
+max_goal = int(df['Raw Goal'].max())
 
 # After loading data and before generating table, prepare filter options
 def get_filter_options(df):
@@ -327,14 +329,6 @@ def get_filter_options(df):
         'subcategories': ['All Subcategories'] + sorted_subcategories,  # 'All Subcategories' first
         'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
         'states': sorted(['All States'] + df['State'].str.extract(r'>([^<]+)<')[0].unique().tolist()),
-        'pledged_ranges': ['All Pledged Amount'] + [  # Changed from 'All Amounts'
-            f"${i}-${j}" for i, j in [(1,99), (100,999), (1000,9999), 
-            (10000,99999), (100000,999999)]
-        ] + ['>$1000000'],
-        'goal_ranges': ['All Goals'] + [
-            f"${i}-${j}" for i, j in [(1,99), (100,999), (1000,9999), 
-            (10000,99999), (100000,999999)]
-        ] + ['>$1000000'],
         'raised_ranges': ['All Percentages'] + [
             f"{i}%-{j}%" for i, j in [(0,20), (21,40), (41,60), (61,80), (81,100)]
         ] + ['>100%'],
@@ -418,9 +412,27 @@ template = f"""
                     </div>
                 </div>
             </div>
-            <select id="goalFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['goal_ranges'])}
-            </select>
+            <div class="range-dropdown">
+                <button class="filter-select">Goal Amount Range</button>
+                <div class="range-content">
+                    <div class="range-container">
+                        <div class="sliders-control">
+                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal}"/>
+                            <input id="goalToSlider" type="range" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
+                        </div>
+                        <div class="form-control">
+                            <div class="form-control-container">
+                                <span class="form-control-label">Min $</span>
+                                <input class="form-control-input" type="number" id="goalFromInput" value="{min_goal}" min="{min_goal}" max="{max_goal}"/>
+                            </div>
+                            <div class="form-control-container">
+                                <span class="form-control-label">Max $</span>
+                                <input class="form-control-input" type="number" id="goalToInput" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <select id="raisedFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['raised_ranges'])}
             </select>
@@ -730,7 +742,7 @@ css = """
         background: transparent;
         color: white;
         border: none;
-        border-radius: 8px 0 0 8px;
+        border-radius: 8px;
         cursor: pointer;
         padding: 0;
     }
@@ -1053,7 +1065,6 @@ script = """
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
-                goal: document.getElementById('goalFilter').value,
                 raised: document.getElementById('raisedFilter').value,
                 date: document.getElementById('dateFilter').value
             };
@@ -1094,7 +1105,6 @@ script = """
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
-                goal: document.getElementById('goalFilter').value,
                 raised: document.getElementById('raisedFilter').value,
                 date: document.getElementById('dateFilter').value
             };
@@ -1124,16 +1134,10 @@ script = """
             const maxPledged = parseInt(document.getElementById('toInput').value);
             if (pledged < minPledged || pledged > maxPledged) return false;
 
-            if (filters.goal !== 'All Goals') {
-                if (filters.goal.startsWith('>')) {
-                    const min = parseFloat(filters.goal.replace(/[^0-9.-]+/g,""));
-                    if (goal <= min) return false;
-                } else {
-                    const [min, max] = filters.goal.split('-')
-                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                    if (goal < min || goal > max) return false;
-                }
-            }
+            // Check goal range
+            const minGoal = parseInt(document.getElementById('goalFromInput').value);
+            const maxGoal = parseInt(document.getElementById('goalToInput').value);
+            if (goal < minGoal || goal > maxGoal) return false;
 
             if (filters.raised !== 'All Percentages') {
                 if (filters.raised === '>100%') {
@@ -1188,6 +1192,11 @@ script = """
             const fromInput = document.getElementById('fromInput');
             const toInput = document.getElementById('toInput');
 
+            const goalFromSlider = document.getElementById('goalFromSlider');
+            const goalToSlider = document.getElementById('goalToSlider');
+            const goalFromInput = document.getElementById('goalFromInput');
+            const goalToInput = document.getElementById('goalToInput');
+
             if (fromSlider && toSlider && fromInput && toInput) {
                 fromSlider.value = fromSlider.min;
                 toSlider.value = toSlider.max;
@@ -1196,6 +1205,16 @@ script = """
                 
                 // Update slider appearance
                 this.fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            }
+
+            if (goalFromSlider && goalToSlider && goalFromInput && goalToInput) {
+                goalFromSlider.value = goalFromSlider.min;
+                goalToSlider.value = goalToSlider.max;
+                goalFromInput.value = goalFromSlider.min;
+                goalToInput.value = goalToSlider.max;
+                
+                // Update slider appearance
+                this.fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
             }
 
             this.searchInput.value = '';
@@ -1336,7 +1355,7 @@ script = """
         setupFilters() {
             const filterIds = [
                 'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
-                'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter'
+                'raisedFilter', 'dateFilter', 'sortFilter'
             ];
             
             filterIds.forEach(id => {
@@ -1357,10 +1376,18 @@ script = """
         }
 
         setupRangeSlider() {
+            // Setup for pledged amount slider
             const fromSlider = document.getElementById('fromSlider');
             const toSlider = document.getElementById('toSlider');
             const fromInput = document.getElementById('fromInput');
             const toInput = document.getElementById('toInput');
+
+            // Setup for goal amount slider
+            const goalFromSlider = document.getElementById('goalFromSlider');
+            const goalToSlider = document.getElementById('goalToSlider');
+            const goalFromInput = document.getElementById('goalFromInput');
+            const goalToInput = document.getElementById('goalToInput');
+
             let inputTimeout;
 
             const fillSlider = (from, to, sliderColor, rangeColor, controlSlider) => {
@@ -1411,23 +1438,27 @@ script = """
             const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
                 const updateValues = () => {
                     let value = parseInt(input.value);
-                    const minAllowed = parseInt(fromSlider.min);
-                    const maxAllowed = parseInt(toSlider.max);
+                    const minAllowed = parseInt(input.min);
+                    const maxAllowed = parseInt(input.max);
+                    const isGoalInput = input.id.startsWith('goal');
                     
                     if (isNaN(value)) {
                         value = isMin ? minAllowed : maxAllowed;
                     }
                     
+                    const fromSlider = isGoalInput ? goalFromSlider : this.rangeSliderElements.fromSlider;
+                    const toSlider = isGoalInput ? goalToSlider : this.rangeSliderElements.toSlider;
+                    
                     if (isMin) {
                         const maxValue = parseInt(toSlider.value);
                         value = Math.max(minAllowed, Math.min(maxValue, value));
                         fromSlider.value = value;
-                        fromInput.value = value;
+                        input.value = value;
                     } else {
                         const minValue = parseInt(fromSlider.value);
                         value = Math.max(minValue, Math.min(maxAllowed, value));
                         toSlider.value = value;
-                        toInput.value = value;
+                        input.value = value;
                     }
                     
                     fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
@@ -1443,7 +1474,7 @@ script = """
                 }
             };
 
-            // Slider event handlers
+            // Event listeners for pledged amount slider
             fromSlider.addEventListener('input', (e) => {
                 controlFromSlider(fromSlider, toSlider, fromInput);
                 debouncedApplyFilters();
@@ -1454,48 +1485,40 @@ script = """
                 debouncedApplyFilters();
             });
 
-            // Input event handlers
-            fromInput.addEventListener('input', () => {
-                validateAndUpdateRange(fromInput, true, false);
+            // Event listeners for goal amount slider
+            goalFromSlider.addEventListener('input', (e) => {
+                controlFromSlider(goalFromSlider, goalToSlider, goalFromInput);
+                debouncedApplyFilters();
             });
 
-            toInput.addEventListener('input', () => {
-                validateAndUpdateRange(toInput, false, false);
+            goalToSlider.addEventListener('input', (e) => {
+                controlToSlider(goalFromSlider, goalToSlider, goalToInput);
+                debouncedApplyFilters();
             });
 
-            // Handle key events for immediate validation on Enter
-            fromInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(fromInput, true, true);
-                }
+            // Input handlers for both sliders
+            [fromInput, goalFromInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    validateAndUpdateRange(input, true, false);
+                });
             });
 
-            toInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(toInput, false, true);
-                }
-            });
-
-            // Handle blur events for immediate validation
-            fromInput.addEventListener('blur', () => {
-                validateAndUpdateRange(fromInput, true, true);
-            });
-
-            toInput.addEventListener('blur', () => {
-                validateAndUpdateRange(toInput, false, true);
+            [toInput, goalToInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    validateAndUpdateRange(input, false, false);
+                });
             });
 
             // Store references for reset function
             this.rangeSliderElements = {
-                fromSlider,
-                toSlider,
-                fromInput,
-                toInput,
+                fromSlider, toSlider, fromInput, toInput,
+                goalFromSlider, goalToSlider, goalFromInput, goalToInput,
                 fillSlider
             };
 
             // Initial setup
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
         }
 
         resetFilters() {
