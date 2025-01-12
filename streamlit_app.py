@@ -4,6 +4,7 @@ import tempfile, os
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
+from streamlit_geolocation import streamlit_geolocation
 
 st.set_page_config(layout="wide")
 
@@ -256,6 +257,15 @@ def get_filter_options(df):
 
 filter_options = get_filter_options(df)
 
+# Add geolocation call before data processing
+location = streamlit_geolocation()
+user_location = None
+if location:
+    user_location = {
+        'latitude': location.get('latitude'),
+        'longitude': location.get('longitude')
+    }
+
 # Update template to include filter controls with default subcategory
 template = f"""
 <div class="title-wrapper">
@@ -329,6 +339,10 @@ template = f"""
         <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
     </div>
 </div>
+<script>
+    // Make user location available to JavaScript
+    window.userLocation = {user_location if user_location else 'null'};
+</script>
 """
 
 # Add new CSS styles
@@ -684,13 +698,15 @@ script = """
     // Optimize distance calculations with a cache
     class DistanceCache {
         constructor() {
-            this.userLocation = null;
+            this.userLocation = window.userLocation;
             this.countryDistances = new Map();
         }
 
         async initialize() {
             try {
-                this.userLocation = await this.getUserLocation();
+                if (!this.userLocation) {
+                    throw new Error("User location not available");
+                }
                 this.calculateCountryDistances();
                 return true;
             } catch (error) {
@@ -699,25 +715,8 @@ script = """
             }
         }
 
-        async getUserLocation() {
-            return new Promise((resolve, reject) => {
-                if ("geolocation" in navigator) {
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            const location = {
-                                latitude: position.coords.latitude,
-                                longitude: position.coords.longitude
-                            };
-                            resolve(location);
-                        },
-                        (error) => reject(error)
-                    );
-                } else {
-                    reject(new Error("Geolocation not available"));
-                }
-            });
-        }
-
+        // Remove getUserLocation method as we don't need it anymore
+        
         calculateCountryDistances() {
             // Get unique country coordinates from the data
             const countries = new Map();
@@ -758,39 +757,21 @@ script = """
             this.currentSearchTerm = '';
             this.currentFilters = null;
             this.currentSort = 'newest';
-            this.userLocation = null;
+            this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
             this.initialize();
             this.resetFilters();
         }
 
-        // Add method to get user location
-        async getUserLocation() {
-            return new Promise((resolve, reject) => {
-                if ("geolocation" in navigator) {
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            this.userLocation = {
-                                latitude: position.coords.latitude,
-                                longitude: position.coords.longitude
-                            };
-                            resolve(this.userLocation);
-                        },
-                        (error) => {
-                            console.error("Error getting location:", error);
-                            reject(error);
-                        }
-                    );
-                } else {
-                    reject(new Error("Geolocation not available"));
-                }
-            });
-        }
+        // Remove getUserLocation method as we don't need it anymore
 
-        // Modify sortRows method to include distance-based sorting
+        // Update sortRows to handle missing location
         async sortRows(sortType) {
             if (sortType === 'nearme') {
                 try {
+                    if (!this.userLocation) {
+                        throw new Error("Location not available");
+                    }
                     const initialized = await this.distanceCache.initialize();
                     if (!initialized) {
                         throw new Error("Could not initialize distance cache");
@@ -803,8 +784,10 @@ script = """
                     });
                 } catch (error) {
                     console.error("Could not sort by location:", error);
-                    // Fallback to newest first if geolocation fails
+                    st.error("Location access is required for distance-based sorting. Please allow location access and try again.");
+                    // Fallback to newest first if location not available
                     this.currentSort = 'newest';
+                    document.getElementById('sortFilter').value = 'newest';
                     this.sortRows('newest');
                 }
             } else {
