@@ -1,5 +1,7 @@
+json
+numpy
 pandas
 pymongo[tls,srv]==3.11.1
 streamlit
-streamlit-js-eval
+streamlit_js_eval
 # streamlit-shadcn-ui
