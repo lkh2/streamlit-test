@@ -524,6 +524,7 @@ css = """
         background: #ffffff; 
         overflow-y: auto;
         transition: height 0.3s ease;
+        z-index: 3;
     }
     
     table { 
@@ -615,7 +616,7 @@ css = """
         display: flex;
         flex-direction: column;
         max-width: 100%; 
-        background: linear-gradient(180deg, #ffffff 50%, transparent 100%); 
+        background: linear-gradient(180deg, #ffffff 15%, transparent 100%); 
         border-radius: 20px; 
         overflow: visible;
         transition: height 0.3s ease;
