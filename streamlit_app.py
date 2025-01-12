@@ -255,7 +255,7 @@ capped_percentage = df['Raw Raised'].clip(upper=500)
 
 # Normalize components to 0-1 scale
 normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
-normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].max())
+normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())  # Fixed this line
 normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
 
 # Calculate popularity score
@@ -1123,7 +1123,13 @@ script = """
                 this.visibleRows.sort((a, b) => {
                     const scoreA = parseFloat(a.dataset.popularity);
                     const scoreB = parseFloat(b.dataset.popularity);
-                    return scoreB - scoreA;  // Descending order (most popular first)
+                    
+                    // Handle invalid values
+                    if (isNaN(scoreA)) return 1;
+                    if (isNaN(scoreB)) return -1;
+                    
+                    // Sort in descending order
+                    return scoreB - scoreA;
                 });
             } else if (sortType === 'nearme') {
                 if (!this.userLocation) {
