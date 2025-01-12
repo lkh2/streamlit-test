@@ -440,16 +440,16 @@ template = f"""
                     <div class="range-container">
                         <div class="sliders-control">
                             <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal + 1}"/>
-                            <input id="goalToSlider" type="range" value="{max_goal}" min="{min_goal}" max="{max_goal + 1}"/>
+                            <input id="goalToSlider" type="range" value="{max_goal + 1}" min="{min_goal}" max="{max_goal + 1}"/>
                         </div>
                         <div class="form-control">
                             <div class="form-control-container">
                                 <span class="form-control-label">Min $</span>
-                                <input class="form-control-input" type="number" id="goalFromInput" value="{min_goal}" min="{min_goal}" max="{max_goal}"/>
+                                <input class="form-control-input" type="number" id="goalFromInput" value="{min_goal}" min="{min_goal}" max="{max_goal + 1}"/>
                             </div>
                             <div class="form-control-container">
                                 <span class="form-control-label">Max $</span>
-                                <input class="form-control-input" type="number" id="goalToInput" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
+                                <input class="form-control-input" type="number" id="goalToInput" value="{max_goal + 1}" min="{min_goal}" max="{max_goal + 1}"/>
                             </div>
                         </div>
                     </div>
@@ -1940,4 +1940,4 @@ script = """
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
 
-st.dataframe(df) # Display the dataframe
+# st.dataframe(df) # Display the dataframe
