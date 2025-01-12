@@ -8,7 +8,6 @@ from pandas import json_normalize
 from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
-from streamlit_javascript import st_javascript
 
 st.set_page_config(layout="wide")
 
@@ -198,11 +197,6 @@ df = df.merge(country_data[['country', 'latitude', 'longitude']],
               right_on='country', 
               how='left')
 
-def location_alert():
-    location_alert = st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️") 
-    time.sleep(1.5)
-    location_alert.empty()
-
 # Add geolocation call before data processing
 loc = get_geolocation()
 user_location = None
@@ -355,8 +349,6 @@ filter_options = get_filter_options(df)
 # Update template to include filter controls with default subcategory
 template = f"""
 <script>
-    // Define global variable first
-    window.locationAlertTriggered = false;
     // Make user location available to JavaScript
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
     window.hasLocation = {json.dumps(bool(user_location))};
@@ -838,10 +830,6 @@ script = """
                 if (!this.userLocation) {
                     this.currentSort = 'popularity';
                     document.getElementById('sortFilter').value = 'popularity';
-                    
-                    // Set the global variable
-                    window.locationAlertTriggered = true;
-                    
                     this.sortRows('popularity');
                     return;
                 }
@@ -1230,17 +1218,6 @@ script = """
 
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
-result = table_component()
-
-# Check for location alert in a more robust way
-alert_triggered = st_javascript("""
-    // Get current value and reset immediately
-    let triggered = window.locationAlertTriggered;
-    window.locationAlertTriggered = false;
-    triggered;
-""")
-
-if alert_triggered:
-    location_alert()
+table_component()
 
 st.dataframe(df)
