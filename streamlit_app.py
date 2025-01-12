@@ -255,7 +255,7 @@ capped_percentage = df['Raw Raised'].clip(upper=500)
 
 # Normalize components to 0-1 scale
 normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
-normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].max())
+normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())
 normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
 
 # Calculate popularity score
@@ -312,6 +312,10 @@ def generate_table_html(df):
 # Generate table HTML
 header_html, rows_html = generate_table_html(df)
 
+# Calculate min/max pledged values from the DataFrame
+min_pledged = int(df['Raw Pledged'].min())
+max_pledged = int(df['Raw Pledged'].max())
+
 # After loading data and before generating table, prepare filter options
 def get_filter_options(df):
     # Make sure 'All Subcategories' is first, then sort the rest
@@ -346,10 +350,6 @@ def get_filter_options(df):
     }
 
 filter_options = get_filter_options(df)
-
-# Calculate min/max pledged values
-min_pledged = int(df['Raw Pledged'].min())
-max_pledged = int(df['Raw Pledged'].max())
 
 # Update template to include filter controls with default subcategory
 template = f"""
@@ -397,17 +397,24 @@ template = f"""
             <select id="stateFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['states'])}
             </select>
-            <div class="range-slider-container">
-                <input type="range" min="{min_pledged}" max="{max_pledged}" value="{min_pledged}" class="range-slider" id="pledged-min">
-                <input type="range" min="{min_pledged}" max="{max_pledged}" value="{max_pledged}" class="range-slider" id="pledged-max">
-                <div class="range-inputs">
-                    <div>
-                        <div class="range-label">Min $</div>
-                        <input type="number" min="{min_pledged}" max="{max_pledged}" value="{min_pledged}" class="range-input" id="pledged-min-input">
-                    </div>
-                    <div>
-                        <div class="range-label">Max $</div>
-                        <input type="number" min="{min_pledged}" max="{max_pledged}" value="{max_pledged}" class="range-input" id="pledged-max-input">
+            <div class="range-dropdown">
+                <button class="filter-select">Pledged Amount Range</button>
+                <div class="range-content">
+                    <div class="range-container">
+                        <div class="sliders-control">
+                            <input id="fromSlider" type="range" value="{min_pledged}" min="{min_pledged}" max="{max_pledged}"/>
+                            <input id="toSlider" type="range" value="{max_pledged}" min="{min_pledged}" max="{max_pledged}"/>
+                        </div>
+                        <div class="form-control">
+                            <div class="form-control-container">
+                                <span class="form-control-label">Min $</span>
+                                <input class="form-control-input" type="number" id="fromInput" value="{min_pledged}" min="{min_pledged}" max="{max_pledged}"/>
+                            </div>
+                            <div class="form-control-container">
+                                <span class="form-control-label">Max $</span>
+                                <input class="form-control-input" type="number" id="toInput" value="{max_pledged}" min="{min_pledged}" max="{max_pledged}"/>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -453,63 +460,6 @@ template = f"""
 # Add new CSS styles
 css = """
 <style> 
-    /* Range Slider Styles */
-    .range-slider-container {
-        position: relative;
-        width: 250px;
-        padding: 15px 0;
-    }
-
-    .range-slider {
-        -webkit-appearance: none;
-        width: 100%;
-        height: 2px;
-        background: #5932EA;
-        outline: none;
-        position: absolute;
-        top: 50%;
-        transform: translateY(-50%);
-    }
-
-    .range-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 15px;
-        height: 15px;
-        background: #5932EA;
-        border-radius: 50%;
-        cursor: pointer;
-    }
-
-    .range-slider::-moz-range-thumb {
-        width: 15px;
-        height: 15px;
-        background: #5932EA;
-        border-radius: 50%;
-        cursor: pointer;
-    }
-
-    .range-inputs {
-        display: flex;
-        justify-content: space-between;
-        margin-top: 20px;
-    }
-
-    .range-input {
-        width: 80px;
-        padding: 4px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-size: 12px;
-        font-family: 'Poppins';
-    }
-
-    .range-label {
-        font-size: 12px;
-        color: #666;
-        margin-bottom: 4px;
-    }
-    
     .title-wrapper {
         width: 100%;
         text-align: center;    
@@ -818,83 +768,168 @@ css = """
     td a:hover {
         color: grey
     }
+
+    /* Range Slider Styles */
+    .range-dropdown {
+        position: relative;
+        display: inline-block;
+    }
+
+    .range-content {
+        display: none;
+        position: absolute;
+        background-color: #fff;
+        min-width: 300px;
+        box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+        padding: 12px;
+        border-radius: 8px;
+        z-index: 1000;
+    }
+
+    .range-dropdown:hover .range-content {
+        display: block;
+    }
+
+    .range-container {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        padding: 10px;
+    }
+
+    .sliders-control {
+        position: relative;
+        min-height: 50px;
+    }
+
+    .form-control {
+        position: relative;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 10px;
+        font-family: 'Poppins';
+    }
+
+    .form-control-container {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+    }
+
+    .form-control-label {
+        font-size: 12px;
+        color: #666;
+    }
+
+    .form-control-input {
+        width: 100px;
+        padding: 4px 8px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 12px;
+        font-family: 'Poppins';
+    }
+
+    input[type="range"] {
+        -webkit-appearance: none;
+        appearance: none;
+        height: 2px;
+        width: 100%;
+        position: absolute;
+        background-color: #C6C6C6;
+        pointer-events: none;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        pointer-events: all;
+        width: 16px;
+        height: 16px;
+        background-color: #fff;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px #5932EA;
+        cursor: pointer;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+        pointer-events: all;
+        width: 16px;
+        height: 16px;
+        background-color: #fff;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px #5932EA;
+        cursor: pointer;
+    }
+
+    #fromSlider {
+        height: 0;
+        z-index: 1;
+    }
 </style>
 """
 
 # Create table component script with improved search and pagination
 script = """
-    // Wait for DOM to be fully loaded before initializing
-    function initializeTableManager() {
-        // Check if all required elements are present
-        const requiredElements = [
-            'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
-            'pledgedFilter', 'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter',
-            'table-search', 'prev-page', 'next-page', 'page-numbers', 'resetFilters',
-            'pledged-min', 'pledged-max', 'pledged-min-input', 'pledged-max-input'
-        ];
-
-        const missingElements = requiredElements.filter(id => !document.getElementById(id));
-        
-        if (missingElements.length > 0) {
-            console.error('Missing elements:', missingElements);
-            return false;
-        }
-
-        return new TableManager();
+    // Helper functions
+    function debounce(func, wait) {
+        let timeout;
+        return function(...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
     }
 
-    function onRender(event) {
-        // Wait for next frame to ensure DOM is updated
-        requestAnimationFrame(() => {
-            if (!window.rendered) {
-                const tableManager = initializeTableManager();
-                if (tableManager) {
-                    window.tableManager = tableManager;
-                    window.rendered = true;
-                    
-                    // Add resize observer to handle dynamic content changes
-                    const resizeObserver = new ResizeObserver(() => {
-                        window.tableManager.adjustHeight();
-                    });
-                    
-                    const tableWrapper = document.querySelector('.table-wrapper');
-                    if (tableWrapper) {
-                        resizeObserver.observe(tableWrapper);
-                    }
-                }
-            }
+    function createRegexPattern(searchTerm) {
+        if (!searchTerm) return null;
+        const words = searchTerm.split(/\\s+/).filter(word => word.length > 0);
+        const escapedWords = words.map(word => 
+            word.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')
+        );
+        return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
+    }
+
+    function updateTableRows(rows, currentPage, pageSize) {
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+        
+        rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
         });
     }
 
-    // Only set up event listener if Streamlit exists
-    if (Streamlit && Streamlit.events) {
-        Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
-        Streamlit.setComponentReady();
-    } else {
-        console.error('Streamlit API not available');
+    // Add Haversine distance calculation function
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; // Earth's radius in kilometers
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
     }
 
-    // Rest of your existing TableManager class and other code...
+    // Optimize distance calculations with a cache
+    class DistanceCache {
+        constructor() {
+            this.userLocation = window.userLocation;
+        }
+
+        async initialize() {
+            return window.hasLocation;
+        }
+
+        getDistance(row) {
+            return parseFloat(row.dataset.distance);
+        }
+    }
+
     class TableManager {
         constructor() {
-            // Add initialization checks
-            const elements = {
-                searchInput: document.getElementById('table-search'),
-                allRows: Array.from(document.querySelectorAll('#data-table tbody tr')),
-                filters: document.querySelectorAll('.filter-select'),
-                resetButton: document.getElementById('resetFilters')
-            };
-
-            // Verify all required elements exist
-            if (!elements.searchInput || !elements.allRows.length || 
-                !elements.filters.length || !elements.resetButton) {
-                console.error('Required elements not found');
-                return;
-            }
-
-            // Initialize properties
-            this.searchInput = elements.searchInput;
-            this.allRows = elements.allRows;
+            this.searchInput = document.getElementById('table-search');
+            this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
             this.visibleRows = this.allRows;
             this.currentPage = 1;
             this.pageSize = 10;
@@ -904,7 +939,6 @@ script = """
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
             this.initialize();
-            this.setupRangeSliders();
             this.resetFilters();
         }
 
@@ -1032,6 +1066,7 @@ script = """
         initialize() {
             this.setupSearchAndPagination();
             this.setupFilters();
+            this.setupRangeSlider();
             this.currentSort = 'popularity';  // Set default sort to popularity
             this.applyAllFilters();
             this.updateTable();
@@ -1087,10 +1122,16 @@ script = """
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
             // Numeric range filters
-            const minPledged = parseInt(document.getElementById('pledged-min').value);
-            const maxPledged = parseInt(document.getElementById('pledged-max').value);
-            
-            if (pledged < minPledged || (maxPledged < 10000000 && pledged > maxPledged)) return false;
+            if (filters.pledged !== 'All Amounts') {
+                if (filters.pledged.startsWith('>')) {
+                    const min = parseFloat(filters.pledged.replace(/[^0-9.-]+/g,""));
+                    if (pledged <= min) return false;
+                } else {
+                    const [min, max] = filters.pledged.split('-')
+                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
+                    if (pledged < min || pledged > max) return false;
+                }
+            }
 
             if (filters.goal !== 'All Goals') {
                 if (filters.goal.startsWith('>')) {
@@ -1154,10 +1195,6 @@ script = """
             this.currentFilters = null;
             this.currentSort = 'popularity';
             this.visibleRows = this.allRows;
-            document.getElementById('pledged-min').value = {min_pledged};
-            document.getElementById('pledged-max').value = {max_pledged};
-            document.getElementById('pledged-min-input').value = {min_pledged};
-            document.getElementById('pledged-max-input').value = {max_pledged};
             this.applyAllFilters();
         }
 
@@ -1289,184 +1326,87 @@ script = """
             document.getElementById('resetFilters').addEventListener('click', () => this.resetFilters());
         }
 
-        setupRangeSliders() {
-            const minSlider = document.getElementById('pledged-min');
-            const maxSlider = document.getElementById('pledged-max');
-            const minInput = document.getElementById('pledged-min-input');
-            const maxInput = document.getElementById('pledged-max-input');
+        setupRangeSlider() {
+            const fromSlider = document.getElementById('fromSlider');
+            const toSlider = document.getElementById('toSlider');
+            const fromInput = document.getElementById('fromInput');
+            const toInput = document.getElementById('toInput');
 
-            function updateRangeValues(min, max) {
-                // Update slider values
-                minSlider.value = min;
-                maxSlider.value = max;
-                
-                // Update input values
-                minInput.value = min;
-                maxInput.value = max;
-                
-                // Update the filter
+            function getParsed(currentFrom, currentTo) {
+                const from = parseInt(currentFrom.value, 10);
+                const to = parseInt(currentTo.value, 10);
+                return [from, to];
+            }
+
+            function fillSlider(from, to, sliderColor, rangeColor, controlSlider) {
+                const rangeDistance = to.max - to.min;
+                const fromPosition = from.value - to.min;
+                const toPosition = to.value - to.min;
+                controlSlider.style.background = `linear-gradient(
+                    to right,
+                    ${sliderColor} 0%,
+                    ${sliderColor} ${(fromPosition)/(rangeDistance)*100}%,
+                    ${rangeColor} ${((fromPosition)/(rangeDistance))*100}%,
+                    ${rangeColor} ${(toPosition)/(rangeDistance)*100}%, 
+                    ${sliderColor} ${(toPosition)/(rangeDistance)*100}%, 
+                    ${sliderColor} 100%)`;
+            }
+
+            function controlFromInput() {
+                const [from, to] = getParsed(fromInput, toInput);
+                fillSlider(fromInput, toInput, '#C6C6C6', '#5932EA', toSlider);
+                if (from > to) {
+                    fromSlider.value = to;
+                    fromInput.value = to;
+                } else {
+                    fromSlider.value = from;
+                }
                 this.applyFilters();
             }
 
-            // Update input and filter when min slider changes
-            minSlider.addEventListener('input', (e) => {
-                let value = parseInt(e.target.value);
-                const maxValue = parseInt(maxSlider.value);
-                
-                // Ensure min doesn't exceed max
-                if (value > maxValue) {
-                    value = maxValue;
+            function controlToInput() {
+                const [from, to] = getParsed(fromInput, toInput);
+                fillSlider(fromInput, toInput, '#C6C6C6', '#5932EA', toSlider);
+                if (from <= to) {
+                    toSlider.value = to;
+                    toInput.value = to;
+                } else {
+                    toInput.value = from;
+                    toSlider.value = from;
                 }
-                
-                minInput.value = value;
                 this.applyFilters();
-            });
+            }
 
-            // Update input and filter when max slider changes
-            maxSlider.addEventListener('input', (e) => {
-                let value = parseInt(e.target.value);
-                const minValue = parseInt(minSlider.value);
-                
-                // Ensure max doesn't go below min
-                if (value < minValue) {
-                    value = minValue;
+            fromSlider.oninput = () => {
+                const [from, to] = getParsed(fromSlider, toSlider);
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                if (from > to) {
+                    fromSlider.value = to;
+                    fromInput.value = to;
+                } else {
+                    fromInput.value = from;
                 }
-                
-                maxInput.value = value;
                 this.applyFilters();
-            });
-
-            // Update slider and filter when min input changes
-            minInput.addEventListener('change', (e) => {
-                let value = parseInt(e.target.value);
-                const maxValue = parseInt(maxInput.value);
-                
-                // Validate input
-                if (isNaN(value) || value < parseInt(minSlider.min)) {
-                    value = parseInt(minSlider.min);
-                } else if (value > maxValue) {
-                    value = maxValue;
-                }
-                
-                minSlider.value = value;
-                e.target.value = value;
-                this.applyFilters();
-            });
-
-            // Update slider and filter when max input changes
-            maxInput.addEventListener('change', (e) => {
-                let value = parseInt(e.target.value);
-                const minValue = parseInt(minInput.value);
-                
-                // Validate input
-                if (isNaN(value) || value > parseInt(maxSlider.max)) {
-                    value = parseInt(maxSlider.max);
-                } else if (value < minValue) {
-                    value = minValue;
-                }
-                
-                maxSlider.value = value;
-                e.target.value = value;
-                this.applyFilters();
-            });
-
-            // Reset range values when filters are reset
-            this.resetRangeValues = () => {
-                updateRangeValues.call(this, {min_pledged}, {max_pledged});
             };
-        }
 
-        // Update resetFilters to use the new resetRangeValues method
-        resetFilters() {
-            const selects = document.querySelectorAll('.filter-select');
-            selects.forEach(select => {
-                if (select.id === 'subcategoryFilter') {
-                    // Find and select "All Subcategories" option
-                    const allSubcatsOption = Array.from(select.options)
-                        .find(option => option.value === 'All Subcategories');
-                    if (allSubcatsOption) {
-                        select.value = 'All Subcategories';
-                    } else {
-                        select.selectedIndex = 0;
-                    }
+            toSlider.oninput = () => {
+                const [from, to] = getParsed(fromSlider, toSlider);
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                if (from <= to) {
+                    toSlider.value = to;
+                    toInput.value = to;
                 } else {
-                    select.selectedIndex = 0;
+                    toInput.value = from;
+                    toSlider.value = from;
                 }
-            });
-            this.searchInput.value = '';
-            this.currentSearchTerm = '';
-            this.currentFilters = null;
-            this.currentSort = 'popularity';
-            this.visibleRows = this.allRows;
-            document.getElementById('pledged-min').value = {min_pledged};
-            document.getElementById('pledged-max').value = {max_pledged};
-            document.getElementById('pledged-min-input').value = {min_pledged};
-            document.getElementById('pledged-max-input').value = {max_pledged};
-            this.resetRangeValues();
-            this.applyAllFilters();
-        }
+                this.applyFilters();
+            };
 
-        matchesFilters(row, filters) {
-            const category = row.dataset.category;
-            const subcategory = row.dataset.subcategory;
-            const pledged = parseFloat(row.dataset.pledged);
-            const goal = parseFloat(row.dataset.goal);
-            const raised = parseFloat(row.dataset.raised);
-            const date = new Date(row.dataset.date);
-            const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
-            const country = row.querySelector('td:nth-child(5)').textContent;
+            fromInput.oninput = controlFromInput.bind(this);
+            toInput.oninput = controlToInput.bind(this);
 
-            // Category filters
-            if (filters.category !== 'All Categories' && category !== filters.category) return false;
-            if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-            if (filters.country !== 'All Countries' && country !== filters.country) return false;
-            if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
-
-            // Numeric range filters
-            const minPledged = parseInt(document.getElementById('pledged-min').value);
-            const maxPledged = parseInt(document.getElementById('pledged-max').value);
-            
-            if (pledged < minPledged || pledged > maxPledged) return false;
-
-            if (filters.goal !== 'All Goals') {
-                if (filters.goal.startsWith('>')) {
-                    const min = parseFloat(filters.goal.replace(/[^0-9.-]+/g,""));
-                    if (goal <= min) return false;
-                } else {
-                    const [min, max] = filters.goal.split('-')
-                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                    if (goal < min || goal > max) return false;
-                }
-            }
-
-            if (filters.raised !== 'All Percentages') {
-                if (filters.raised === '>100%') {
-                    if (raised <= 100) return false;
-                } else {
-                    const [min, max] = filters.raised.split('-')
-                        .map(v => parseFloat(v.replace(/%/g, '')));
-                    if (raised < min || raised > max) return false;
-                }
-            }
-
-            // Date filter
-            if (filters.date !== 'All Time') {
-                const now = new Date();
-                let compareDate = new Date();
-                
-                switch(filters.date) {
-                    case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
-                    case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
-                    case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
-                    case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
-                    case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
-                    case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
-                }
-                
-                if (date < compareDate) return false;
-            }
-
-            return true;
+            // Initialize slider
+            fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
         }
     }
 
