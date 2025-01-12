@@ -1012,6 +1012,7 @@ script = """
 
     class TableManager {
         constructor() {
+            // Initialize properties first
             this.searchInput = document.getElementById('table-search');
             this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
             this.visibleRows = this.allRows;
@@ -1022,8 +1023,24 @@ script = """
             this.currentSort = 'popularity';
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
-            this.initialize();
-            this.resetFilters();
+
+            // Initialize state and filters
+            this.currentFilters = {
+                categories: ['All Categories'],
+                subcategory: 'All Subcategories',
+                country: 'All Countries',
+                state: 'All States',
+                date: 'All Time'
+            };
+
+            // Setup components after initialization
+            this.setupSearchAndPagination();
+            this.setupFilters();
+            this.setupRangeSlider();
+            
+            // Apply initial state
+            this.applyAllFilters();
+            this.updateTable();
         }
 
         // Remove getUserLocation method as we don't need it anymore
