@@ -822,9 +822,9 @@ script = """
                 });
             } else if (sortType === 'nearme') {
                 if (!this.userLocation) {
-                    this.currentSort = 'newest';
-                    document.getElementById('sortFilter').value = 'newest';
-                    this.sortRows('newest');
+                    this.currentSort = 'popularity';
+                    document.getElementById('sortFilter').value = 'popularity';
+                    this.sortRows('popularity');
                     return;
                 }
                 
