@@ -192,7 +192,7 @@ if loc and 'coords' in loc:
         'latitude': loc['coords']['latitude'],
         'longitude': loc['coords']['longitude']
     }
-    st.write("Your location has been detected")
+    st.write("")
 
 # Add function to calculate distances
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -309,10 +309,6 @@ template = f"""
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
     window.hasLocation = {json.dumps(bool(user_location))};
 </script>
-<div class="loading-overlay" id="loadingOverlay">
-    <div class="spinner"></div>
-    <div class="loading-text">Retrieving distance data...</div>
-</div>
 <div class="title-wrapper">
     <span>Explore Successful Projects</span>
 </div>
@@ -393,51 +389,10 @@ template = f"""
 # Add new CSS styles
 css = """
 <style> 
-    .loading-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background: rgba(42, 93, 78, 0.8);
-        z-index: 9999;
-        justify-content: center;
-        align-items: center;
-        flex-direction: column;
-    }
-
-    .loading-overlay.active {
-        display: flex;
-    }
-
-    .spinner {
-        width: 80px;
-        height: 80px;
-        border: 8px solid #f3f3f3;
-        border-top: 8px solid #3498db;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-    }
-
-    .loading-text {
-        color: white;
-        font-family: 'Poppins';
-        font-size: 16px;
-        margin-top: 20px;
-    }
-
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-
     .title-wrapper {
         width: 100%;
         text-align: center;    
         margin-bottom: 25px;
-        position: relative;
-        z-index: 10000;
     }
     
     .title-wrapper span {
@@ -810,15 +765,6 @@ script = """
             this.distanceCache = new DistanceCache();
             this.initialize();
             this.resetFilters();
-            this.loadingOverlay = document.getElementById('loadingOverlay');
-        }
-
-        showLoading() {
-            this.loadingOverlay.classList.add('active');
-        }
-
-        hideLoading() {
-            this.loadingOverlay.classList.remove('active');
         }
 
         // Remove getUserLocation method as we don't need it anymore
@@ -899,10 +845,6 @@ script = """
 
         // Update applyFilters to handle async
         async applyFilters() {
-            if (this.currentSort === 'nearme' && !this.userLocation) {
-                this.showLoading();
-            }
-            
             this.currentFilters = {
                 category: document.getElementById('categoryFilter').value,
                 subcategory: document.getElementById('subcategoryFilter').value,
@@ -916,7 +858,6 @@ script = """
             this.currentSort = document.getElementById('sortFilter').value;
             
             await this.applyAllFilters();
-            this.hideLoading();
         }
 
         initialize() {
