@@ -127,6 +127,9 @@ df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s')
 df['Raw Deadline'] = pd.to_datetime(df['data.deadline'], unit='s')
 df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
 
+# After Raw Deadline calculation, modify Backer Count (single column)
+df['Backer Count'] = df['data.backers_count'].astype(int)
+
 # Format display columns
 df['Goal'] = df['Raw Goal'].map(lambda x: f"${x:,.2f}")
 df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${x:,.2f}")
@@ -144,14 +147,15 @@ df = df[[
     'data.category.parent_name',
     'data.category.name',
     'Date',
-    'Deadline',  # Add visible deadline
+    'Deadline',
     'Goal',
     '%Raised',
     'Raw Goal',
     'Raw Pledged',
     'Raw Raised',
     'Raw Date',
-    'Raw Deadline',  # Add raw deadline
+    'Raw Deadline',
+    'Backer Count',  # Single backer count column
     'data.location.country' 
 ]].rename(columns={ 
     'data.name': 'Project Name', 
@@ -250,7 +254,8 @@ def generate_table_html(df):
             data-goal="{row['Raw Goal']}"
             data-raised="{row['Raw Raised']}"
             data-date="{row['Raw Date'].strftime('%Y-%m-%d')}"
-            data-deadline="{row['Raw Deadline'].strftime('%Y-%m-%d')}"  # Add deadline
+            data-deadline="{row['Raw Deadline'].strftime('%Y-%m-%d')}"
+            data-backers="{row['Backer Count']}"  # Updated column name
             data-latitude="{row['latitude']}"
             data-longitude="{row['longitude']}"
             data-country-code="{row['Country Code']}"
@@ -343,6 +348,7 @@ template = f"""
             <select id="sortFilter" class="filter-select">
                 <option value="newest">Newest First</option>
                 <option value="oldest">Oldest First</option>
+                <option value="mostbacked">Most Backed</option>
                 <option value="enddate">End Date</option>
                 <option value="nearme">Near Me</option>
             </select>
@@ -804,6 +810,13 @@ script = """
                     const deadlineA = new Date(a.dataset.deadline);
                     const deadlineB = new Date(b.dataset.deadline);
                     return deadlineB - deadlineA; 
+                });
+            } else if (sortType === 'mostbacked') {
+                // Sort by backer count
+                this.visibleRows.sort((a, b) => {
+                    const backersA = parseInt(a.dataset.backers);
+                    const backersB = parseInt(b.dataset.backers);
+                    return backersB - backersA;  // Descending order (most backers first)
                 });
             } else {
                 // Date-based sorting only
