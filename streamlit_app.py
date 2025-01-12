@@ -1552,22 +1552,10 @@ script = """
                 if (!buttonElement) return;
                 
                 const selectedArray = Array.from(selectedItems);
-                const convertStateText = (text) => {
-                    // For state options, extract text from div if necessary
-                    if (text.includes('state_cell')) {
-                        const div = document.createElement('div');
-                        div.innerHTML = text;
-                        return div.textContent;
-                    }
-                    return text;
-                };
-                
                 if (selectedArray[0] && selectedArray[0].startsWith('All')) {
                     buttonElement.textContent = selectedArray[0];
                 } else {
-                    const sortedArray = selectedArray
-                        .map(item => convertStateText(item))
-                        .sort((a, b) => a.localeCompare(b));
+                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
                     if (sortedArray.length > 2) {
                         buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
                     } else {
@@ -1575,6 +1563,12 @@ script = """
                     }
                 }
             };
+
+            // Get button elements first
+            const categoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(2) .multi-select-btn');
+            const countryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(6) .multi-select-btn');
+            const stateBtn = document.querySelector('.filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn');
+            const subcategoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
 
             // Setup all multi-select handlers
             const setupMultiSelect = (options, selectedSet, allValue, buttonElement) => {
@@ -1615,29 +1609,6 @@ script = """
                 updateButtonText(selectedSet, buttonElement);
             };
 
-            // Get button elements first
-            const categoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(2) .multi-select-btn');
-            const countryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(6) .multi-select-btn');
-            const stateBtn = document.querySelector('.filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn');
-            const subcategoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
-
-            // Update button text function specifically for states
-            const updateStateButtonText = (selectedItems, buttonElement) => {
-                if (!buttonElement) return;
-                
-                const selectedArray = Array.from(selectedItems);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    buttonElement.textContent = selectedArray[0];
-                } else {
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
-                    if (sortedArray.length > 2) {
-                        buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
-                    } else {
-                        buttonElement.textContent = sortedArray.join(', ');
-                    }
-                }
-            };
-
             // Setup each multi-select with the correct button element
             setupMultiSelect(
                 document.querySelectorAll('.category-option'),
@@ -1653,43 +1624,12 @@ script = """
                 countryBtn
             );
 
-            // Special handling for states
-            const stateOptions = document.querySelectorAll('.state-option');
-            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-            
-            stateOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    
-                    if (clickedValue === 'All States') {
-                        stateOptions.forEach(opt => opt.classList.remove('selected'));
-                        window.selectedStates.clear();
-                        window.selectedStates.add('All States');
-                        allStatesOption.classList.add('selected');
-                    } else {
-                        allStatesOption.classList.remove('selected');
-                        window.selectedStates.delete('All States');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            window.selectedStates.add(clickedValue);
-                        } else {
-                            window.selectedStates.delete(clickedValue);
-                        }
-                        
-                        if (window.selectedStates.size === 0) {
-                            allStatesOption.classList.add('selected');
-                            window.selectedStates.add('All States');
-                        }
-                    }
-                    
-                    updateStateButtonText(window.selectedStates, stateBtn);
-                    this.applyFilters();
-                });
-            });
-
-            // Initialize state button text
-            updateStateButtonText(window.selectedStates, stateBtn);
+            setupMultiSelect(
+                document.querySelectorAll('.state-option'),
+                window.selectedStates,
+                'All States',
+                stateBtn
+            );
 
             setupMultiSelect(
                 document.querySelectorAll('.subcategory-option'),
