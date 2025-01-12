@@ -874,7 +874,7 @@ css = """
         cursor: pointer;
     }
 
-    #fromSlider {
+    #fromSlider, #goalFromSlider {
         height: 0;
         z-index: 1;
     }
@@ -1507,6 +1507,49 @@ script = """
                 input.addEventListener('input', () => {
                     validateAndUpdateRange(input, false, false);
                 });
+            });
+
+            // Add key events for immediate validation on Enter
+            fromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(fromInput, true, true);
+                }
+            });
+
+            toInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(toInput, false, true);
+                }
+            });
+
+            // Add key events for goal slider inputs
+            goalFromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(goalFromInput, true, true);
+                }
+            });
+
+            goalToInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(goalToInput, false, true);
+                }
+            });
+
+            // Also handle blur events for immediate validation
+            fromInput.addEventListener('blur', () => {
+                validateAndUpdateRange(fromInput, true, true);
+            });
+
+            toInput.addEventListener('blur', () => {
+                validateAndUpdateRange(toInput, false, true);
+            });
+
+            goalFromInput.addEventListener('blur', () => {
+                validateAndUpdateRange(goalFromInput, true, true);
+            });
+
+            goalToInput.addEventListener('blur', () => {
+                validateAndUpdateRange(goalToInput, false, true);
             });
 
             // Store references for reset function
