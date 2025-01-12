@@ -589,7 +589,7 @@ css = """
         background: #ffffff; 
         border-radius: 20px; 
         overflow: visible;
-        min-height: 550px;
+        min-height: 600px;
     }
 
     .search-input { 
@@ -1088,6 +1088,21 @@ script = """
             window.handlePageClick = (page) => this.goToPage(page);
         }
 
+        applyFilters() {
+            this.currentFilters = {
+                category: document.getElementById('categoryFilter').value,
+                subcategory: document.getElementById('subcategoryFilter').value,
+                country: document.getElementById('countryFilter').value,
+                state: document.getElementById('stateFilter').value,
+                goal: document.getElementById('goalFilter').value,
+                raised: document.getElementById('raisedFilter').value,
+                date: document.getElementById('dateFilter').value
+            };
+            this.currentSort = document.getElementById('sortFilter').value;
+            
+            this.applyAllFilters();
+        }
+
         matchesFilters(row, filters) {
             const category = row.dataset.category;
             const subcategory = row.dataset.subcategory;
@@ -1278,7 +1293,7 @@ script = """
                 if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
                     const titleHeight = titleWrapper.offsetHeight;
                     const filterHeight = filterWrapper.offsetHeight;
-                    const tableHeight = table.offsetHeight;
+                    const tableHeight = table.offsetHeight - 20;
                     const controlsHeight = controls.offsetHeight;
                     const paginationHeight = pagination.offsetHeight;
                     const padding = 40;
@@ -1466,6 +1481,153 @@ script = """
 
             // Initial setup
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+        }
+
+        resetFilters() {
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => {
+                if (select.id === 'subcategoryFilter') {
+                    // Find and select "All Subcategories" option
+                    const allSubcatsOption = Array.from(select.options)
+                        .find(option => option.value === 'All Subcategories');
+                    if (allSubcatsOption) {
+                        select.value = 'All Subcategories';
+                    } else {
+                        select.selectedIndex = 0;
+                    }
+                } else {
+                    select.selectedIndex = 0;
+                }
+            });
+
+            // Reset range slider values using stored references
+            if (this.rangeSliderElements) {
+                const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
+                fromSlider.value = fromSlider.min;
+                toSlider.value = toSlider.max;
+                fromInput.value = fromSlider.min;
+                toInput.value = toSlider.max;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            }
+
+            this.searchInput.value = '';
+            this.currentSearchTerm = '';
+            this.currentFilters = null;
+            this.currentSort = 'popularity';
+            this.visibleRows = this.allRows;
+            this.applyAllFilters();
+        }
+
+        updateTable() {
+            // Hide all rows first
+            this.allRows.forEach(row => row.style.display = 'none');
+            
+            // Calculate visible range
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = Math.min(start + this.pageSize, this.visibleRows.length);
+            
+            // Show only rows for current page
+            this.visibleRows.slice(start, end).forEach(row => {
+                row.style.display = '';
+            });
+
+            this.updatePagination();
+            this.adjustHeight();
+        }
+
+        updatePagination() {
+            const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
+            const pageNumbers = this.generatePageNumbers(totalPages);
+            const container = document.getElementById('page-numbers');
+            
+            container.innerHTML = pageNumbers.map(page => {
+                if (page === '...') {
+                    return '<span class="page-ellipsis">...</span>';
+                }
+                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
+                    ${page === this.currentPage ? 'disabled' : ''} 
+                    onclick="handlePageClick(${page})">${page}</button>`;
+            }).join('');
+
+            document.getElementById('prev-page').disabled = this.currentPage <= 1;
+            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
+        }
+
+        generatePageNumbers(totalPages) {
+            let pages = [];
+            if (totalPages <= 10) {
+                pages = Array.from({length: totalPages}, (_, i) => i + 1);
+            } else {
+                if (this.currentPage <= 7) {
+                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+                } else if (this.currentPage >= totalPages - 6) {
+                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+                } else {
+                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
+                }
+            }
+            return pages;
+        }
+
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
+            }
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
+            }
+        }
+
+        goToPage(page) {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (page >= 1 && page <= totalPages) {
+                this.currentPage = page;
+                this.updateTable();
+            }
+        }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const titleWrapper = document.querySelector('.title-wrapper');
+                const filterWrapper = document.querySelector('.filter-wrapper');
+                const tableWrapper = document.querySelector('.table-wrapper');
+                const tableContainer = document.querySelector('.table-container');
+                const table = document.querySelector('#data-table');
+                const controls = document.querySelector('.table-controls');
+                const pagination = document.querySelector('.pagination-controls');
+                
+                if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
+                    const titleHeight = titleWrapper.offsetHeight;
+                    const filterHeight = filterWrapper.offsetHeight;
+                    const tableHeight = table.offsetHeight - 20;
+                    const controlsHeight = controls.offsetHeight;
+                    const paginationHeight = pagination.offsetHeight;
+                    const padding = 40;
+                    
+                    // Calculate content height
+                    const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
+                    
+                    // Calculate total component height including title
+                    const totalHeight = titleHeight + filterHeight + contentHeight + padding;
+                    
+                    // Set minimum heights
+                    const minContentHeight = 600; // Minimum height for table content
+                    const finalHeight = Math.max(totalHeight, minContentHeight + titleHeight + filterHeight);
+                    
+                    // Update container heights
+                    tableContainer.style.minHeight = `${Math.max(tableHeight, 400)}px`;
+                    tableWrapper.style.minHeight = `${Math.max(contentHeight, minContentHeight)}px`;
+                    
+                    // Set final component height with additional padding
+                    Streamlit.setFrameHeight(finalHeight + 40);
+                }
+            });
         }
     }
 
