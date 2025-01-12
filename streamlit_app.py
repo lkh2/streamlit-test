@@ -1439,6 +1439,23 @@ script = """
             // Setup category multi-select
             const categoryOptions = document.querySelectorAll('.category-option');
             
+            const updateMultiSelectButton = (selectedCategories) => {
+                const btn = document.querySelector('.multi-select-btn');
+                if (selectedCategories.has('All Categories')) {
+                    btn.textContent = 'Categories';
+                } else {
+                    const selectedArray = Array.from(selectedCategories);
+                    if (selectedArray.length > 3) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    } else {
+                        btn.textContent = selectedArray.join(', ');
+                    }
+                }
+            };
+            
+            const selectedCategories = new Set(['All Categories']);
+            updateMultiSelectButton(selectedCategories);
+            
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
                     const clickedValue = e.target.dataset.value;
@@ -1447,22 +1464,31 @@ script = """
                     if (clickedValue === 'All Categories') {
                         // Deselect all other categories
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
+                        selectedCategories.clear();
+                        selectedCategories.add('All Categories');
                         allCategoriesOption.classList.add('selected');
                     } else {
                         // Remove "All Categories" selection
                         allCategoriesOption.classList.remove('selected');
+                        selectedCategories.delete('All Categories');
                         
                         // Toggle current selection
                         e.target.classList.toggle('selected');
+                        if (e.target.classList.contains('selected')) {
+                            selectedCategories.add(clickedValue);
+                        } else {
+                            selectedCategories.delete(clickedValue);
+                        }
                         
                         // If no categories are selected, reselect "All Categories"
-                        const selectedCount = document.querySelectorAll('.category-option.selected').length;
-                        if (selectedCount === 0) {
+                        if (selectedCategories.size === 0) {
                             allCategoriesOption.classList.add('selected');
+                            selectedCategories.add('All Categories');
                         }
                     }
                     
-                    // Update filters immediately
+                    // Update button text and filters
+                    updateMultiSelectButton(selectedCategories);
                     this.applyFilters();
                 });
             });
