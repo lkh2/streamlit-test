@@ -1274,10 +1274,24 @@ script = """
         }
 
         resetFilters() {
+            // Reset category selections
+            const categoryOptions = document.querySelectorAll('.category-option');
+            categoryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
+            document.querySelector('.multi-select-btn').textContent = 'All Categories';
+
+            // Reset country selections
+            const countryOptions = document.querySelectorAll('.country-option');
+            countryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+            allCountriesOption.classList.add('selected');
+            document.getElementById('countryFilterBtn').textContent = 'All Countries';
+
+            // Reset select elements
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
                 if (select.id === 'subcategoryFilter') {
-                    // Find and select "All Subcategories" option
                     const allSubcatsOption = Array.from(select.options)
                         .find(option => option.value === 'All Subcategories');
                     if (allSubcatsOption) {
@@ -1285,6 +1299,8 @@ script = """
                     } else {
                         select.selectedIndex = 0;
                     }
+                } else if (select.id === 'sortFilter') {
+                    select.value = 'popularity';
                 } else {
                     select.selectedIndex = 0;
                 }
@@ -1848,6 +1864,13 @@ script = """
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
             document.querySelector('.multi-select-btn').textContent = 'All Categories';
+
+            // Reset country selections
+            const countryOptions = document.querySelectorAll('.country-option');
+            countryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+            allCountriesOption.classList.add('selected');
+            document.getElementById('countryFilterBtn').textContent = 'All Countries';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
