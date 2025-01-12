@@ -1540,25 +1540,24 @@ script = """
             window.selectedSubcategories = new Set(['All Subcategories']);
 
             // Create a single update function for all buttons
-            const updateButtonText = (selectedItems, buttonSelector) => {
-                const btn = document.querySelector(buttonSelector);
-                if (!btn) return;
+            const updateButtonText = (selectedItems, buttonElement) => {
+                if (!buttonElement) return;
                 
                 const selectedArray = Array.from(selectedItems);
                 if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
+                    buttonElement.textContent = selectedArray[0];
                 } else {
                     const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
                     if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                        buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
                     } else {
-                        btn.textContent = sortedArray.join(', ');
+                        buttonElement.textContent = sortedArray.join(', ');
                     }
                 }
             };
 
             // Setup all multi-select handlers
-            const setupMultiSelect = (options, selectedSet, allValue, buttonSelector) => {
+            const setupMultiSelect = (options, selectedSet, allValue, buttonElement) => {
                 const allOption = document.querySelector(`[data-value="${allValue}"]`);
                 
                 options.forEach(option => {
@@ -1587,42 +1586,48 @@ script = """
                             }
                         }
                         
-                        updateButtonText(selectedSet, buttonSelector);
+                        updateButtonText(selectedSet, buttonElement);
                         this.applyFilters();
                     });
                 });
 
                 // Initialize button text
-                updateButtonText(selectedSet, buttonSelector);
+                updateButtonText(selectedSet, buttonElement);
             };
 
-            // Setup each multi-select
+            // Get button elements first
+            const categoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(2) .multi-select-btn');
+            const countryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(6) .multi-select-btn');
+            const stateBtn = document.querySelector('.filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn');
+            const subcategoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
+
+            // Setup each multi-select with the correct button element
             setupMultiSelect(
                 document.querySelectorAll('.category-option'),
                 window.selectedCategories,
                 'All Categories',
-                '.filter-controls .filter-row:first-child .multi-select-dropdown:first-child .multi-select-btn'
+                categoryBtn
             );
 
             setupMultiSelect(
                 document.querySelectorAll('.country-option'),
                 window.selectedCountries,
                 'All Countries',
-                '.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(3) .multi-select-btn'
+                countryBtn
             );
 
             setupMultiSelect(
                 document.querySelectorAll('.state-option'),
                 window.selectedStates,
                 'All States',
-                '.filter-controls .filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn'
+                stateBtn
             );
 
             setupMultiSelect(
                 document.querySelectorAll('.subcategory-option'),
                 window.selectedSubcategories,
                 'All Subcategories',
-                '.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn'
+                subcategoryBtn
             );
 
             // Setup other filters
