@@ -1215,3 +1215,4 @@ table_component = gensimplecomponent('searchable_table', template=css + template
 table_component()
 
 st.dataframe(df)
+st.warning('This is a warning', icon="⚠️")
