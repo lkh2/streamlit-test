@@ -370,12 +370,9 @@ template = f"""
                 </div>
             </div>
             <span class="filter-label">&</span>
-            <div class="multi-select-dropdown">
-                <button class="filter-select multi-select-btn">Subcategories</button>
-                <div class="multi-select-content">
-                    {' '.join(f'<div class="subcategory-option" data-value="{opt}">{opt}</div>' for opt in filter_options['subcategories'])}
-                </div>
-            </div>
+            <select id="subcategoryFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}" {"selected" if opt == "All Subcategories" else ""}>{opt}</option>' for opt in filter_options['subcategories'])}
+            </select>
             <span class="filter-label">Projects On</span>
             <div class="multi-select-dropdown">
                 <button class="filter-select multi-select-btn">Countries</button>
@@ -396,12 +393,9 @@ template = f"""
         </div>
         <div class="filter-row">
             <span class="filter-label">More Flexible, Dynamic Search:</span>
-            <div class="multi-select-dropdown">
-                <button class="filter-select multi-select-btn">States</button>
-                <div class="multi-select-content">
-                    {' '.join(f'<div class="state-option" data-value="{opt}">{opt}</div>' for opt in filter_options['states'])}
-                </div>
-            </div>
+            <select id="stateFilter" class="filter-select">
+                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['states'])}
+            </select>
             <div class="range-dropdown">
                 <button class="filter-select">Pledged Amount Range</button>
                 <div class="range-content">
@@ -984,56 +978,6 @@ css = """
         margin-bottom: 8px;
         padding-bottom: 12px;
     }
-
-    .state-option {
-        padding: 8px 12px;
-        cursor: pointer;
-        border-radius: 4px;
-        margin: 2px 0;
-        font-family: 'Poppins';
-        font-size: 12px;
-        transition: all 0.2s ease;
-    }
-
-    .state-option:hover {
-        background-color: #f0f0f0;
-    }
-
-    .state-option.selected {
-        background-color: #5932EA;
-        color: white;
-    }
-
-    .state-option[data-value="All States"] {
-        border-bottom: 1px solid #eee;
-        margin-bottom: 8px;
-        padding-bottom: 12px;
-    }
-
-    .subcategory-option {
-        padding: 8px 12px;
-        cursor: pointer;
-        border-radius: 4px;
-        margin: 2px 0;
-        font-family: 'Poppins';
-        font-size: 12px;
-        transition: all 0.2s ease;
-    }
-
-    .subcategory-option:hover {
-        background-color: #f0f0f0;
-    }
-
-    .subcategory-option.selected {
-        background-color: #5932EA;
-        color: white;
-    }
-
-    .subcategory-option[data-value="All Subcategories"] {
-        border-bottom: 1px solid #eee;
-        margin-bottom: 8px;
-        padding-bottom: 12px;
-    }
 </style>
 """
 
@@ -1106,10 +1050,6 @@ script = """
             this.currentSort = 'popularity';
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
-            this.selectedCategories = new Set(['All Categories']);
-            this.selectedCountries = new Set(['All Countries']);
-            this.selectedStates = new Set(['All States']);
-            this.selectedSubcategories = new Set(['All Subcategories']);
             this.initialize();
             this.resetFilters();
         }
@@ -1228,25 +1168,16 @@ script = """
             const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Get all selected states
-            const selectedStates = Array.from(document.querySelectorAll('.state-option.selected'))
-                .map(option => option.dataset.value);
-
-            // Get all selected subcategories
-            const selectedSubcategories = Array.from(document.querySelectorAll('.subcategory-option.selected'))
-                .map(option => option.dataset.value);
-
             // Collect all current filter values
             this.currentFilters = {
                 categories: selectedCategories,
-                subcategories: selectedSubcategories,
+                subcategory: document.getElementById('subcategoryFilter').value,
                 countries: selectedCountries,
-                states: selectedStates,
+                state: document.getElementById('stateFilter').value,
                 date: document.getElementById('dateFilter').value
             };
 
-            const sortSelect = document.getElementById('sortFilter');
-            this.currentSort = sortSelect ? sortSelect.value : 'popularity';
+            this.currentSort = document.getElementById('sortFilter').value;
             
             await this.applyAllFilters();
         }
@@ -1284,33 +1215,24 @@ script = """
                 return false;
             }
 
-            // Subcategory filter
-            const subcategory = row.dataset.subcategory;
-            if (!filters.subcategories.includes('All Subcategories') && !filters.subcategories.includes(subcategory)) {
-                return false;
-            }
-
             // Country filter
             const country = row.querySelector('td:nth-child(5)').textContent.trim();
             if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
                 return false;
             }
 
-            // State filter - Get state without HTML wrapper
-            const stateCell = row.querySelector('.state_cell');
-            const state = stateCell ? stateCell.textContent.trim().toLowerCase() : '';
-            if (!filters.states.includes('All States')) {
-                const matchingState = filters.states.find(s => state === s.toLowerCase());
-                if (!matchingState) return false;
-            }
-
             // Get all other values
+            const subcategory = row.dataset.subcategory;
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
+            const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
 
             // Rest of filter checks
+            if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
+            if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
+
             // Check pledged range
             const minPledged = parseFloat(document.getElementById('fromInput').value);
             const maxPledged = parseFloat(document.getElementById('toInput').value);
@@ -1347,54 +1269,20 @@ script = """
         }
 
         resetFilters() {
-            // Clear all sets
-            this.selectedCategories.clear();
-            this.selectedCountries.clear();
-            this.selectedStates.clear();
-            this.selectedSubcategories.clear();
-
-            // Add back default values
-            this.selectedCategories.add('All Categories');
-            this.selectedCountries.add('All Countries');
-            this.selectedStates.add('All States');
-            this.selectedSubcategories.add('All Subcategories');
-
-            // Reset category selections and clear the sets
+            // Reset category selections
             const categoryOptions = document.querySelectorAll('.category-option');
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
             document.querySelector('.multi-select-btn').textContent = 'All Categories';
 
-            // Reset country selections and clear the sets
+            // Reset country selections
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            // Fix: Get all multi-select buttons and update the correct one for countries
-            const multiSelectBtns = document.querySelectorAll('.multi-select-btn');
-            multiSelectBtns.forEach((btn, index) => {
-                if (index === 0) btn.textContent = 'All Categories';
-                if (index === 1) btn.textContent = 'All Subcategories';
-                if (index === 2) btn.textContent = 'All Countries';
-                if (index === 3) btn.textContent = 'All States';
-            });
-
-            // Reset state selections and clear the sets
-            const stateOptions = document.querySelectorAll('.state-option');
-            stateOptions.forEach(opt => opt.classList.remove('selected'));
-            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-            allStatesOption.classList.add('selected');
-            const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            stateButton.textContent = 'All States';
-
-            // Reset subcategory selections and clear the sets
-            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
-            subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-            allSubcategoriesOption.classList.add('selected');
-            const subcategoryButton = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            subcategoryButton.textContent = 'All Subcategories';
+            const countryButtons = document.querySelectorAll('.multi-select-btn');
+            countryButtons[1].textContent = 'All Countries';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
@@ -1602,7 +1490,7 @@ script = """
                 if (selectedCategories.has('All Categories')) {
                     btn.textContent = 'All Categories';
                 } else {
-                    const selectedArray = Array.from(selectedCategories).sort();  // Sort alphabetically
+                    const selectedArray = Array.from(selectedCategories);
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1611,7 +1499,8 @@ script = """
                 }
             };
             
-            updateMultiSelectButton(this.selectedCategories);
+            const selectedCategories = new Set(['All Categories']);
+            updateMultiSelectButton(selectedCategories);
             
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1621,31 +1510,31 @@ script = """
                     if (clickedValue === 'All Categories') {
                         // Deselect all other categories
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        this.selectedCategories.clear();
-                        this.selectedCategories.add('All Categories');
+                        selectedCategories.clear();
+                        selectedCategories.add('All Categories');
                         allCategoriesOption.classList.add('selected');
                     } else {
                         // Remove "All Categories" selection
                         allCategoriesOption.classList.remove('selected');
-                        this.selectedCategories.delete('All Categories');
+                        selectedCategories.delete('All Categories');
                         
                         // Toggle current selection
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            this.selectedCategories.add(clickedValue);
+                            selectedCategories.add(clickedValue);
                         } else {
-                            this.selectedCategories.delete(clickedValue);
+                            selectedCategories.delete(clickedValue);
                         }
                         
                         // If no categories are selected, reselect "All Categories"
-                        if (this.selectedCategories.size === 0) {
+                        if (selectedCategories.size === 0) {
                             allCategoriesOption.classList.add('selected');
-                            this.selectedCategories.add('All Categories');
+                            selectedCategories.add('All Categories');
                         }
                     }
                     
                     // Update button text and filters
-                    updateMultiSelectButton(this.selectedCategories);
+                    updateMultiSelectButton(selectedCategories);
                     this.applyFilters();
                 });
             });
@@ -1684,7 +1573,7 @@ script = """
                 if (selectedCountries.has('All Countries')) {
                     btn.textContent = 'All Countries';
                 } else {
-                    const selectedArray = Array.from(selectedCountries).sort();  // Sort alphabetically
+                    const selectedArray = Array.from(selectedCountries);
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1693,7 +1582,8 @@ script = """
                 }
             };
             
-            updateCountryButton(this.selectedCountries);
+            const selectedCountries = new Set(['All Countries']);
+            updateCountryButton(selectedCountries);
             
             countryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1703,31 +1593,31 @@ script = """
                     if (clickedValue === 'All Countries') {
                         // Deselect all other countries
                         countryOptions.forEach(opt => opt.classList.remove('selected'));
-                        this.selectedCountries.clear();
-                        this.selectedCountries.add('All Countries');
+                        selectedCountries.clear();
+                        selectedCountries.add('All Countries');
                         allCountriesOption.classList.add('selected');
                     } else {
                         // Remove "All Countries" selection
                         allCountriesOption.classList.remove('selected');
-                        this.selectedCountries.delete('All Countries');
+                        selectedCountries.delete('All Countries');
                         
                         // Toggle current selection
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            this.selectedCountries.add(clickedValue);
+                            selectedCountries.add(clickedValue);
                         } else {
-                            this.selectedCountries.delete(clickedValue);
+                            selectedCountries.delete(clickedValue);
                         }
                         
                         // If no countries are selected, reselect "All Countries"
-                        if (this.selectedCountries.size === 0) {
+                        if (selectedCountries.size === 0) {
                             allCountriesOption.classList.add('selected');
-                            this.selectedCountries.add('All Countries');
+                            selectedCountries.add('All Countries');
                         }
                     }
                     
                     // Update button text and filters
-                    updateCountryButton(this.selectedCountries);
+                    updateCountryButton(selectedCountries);
                     this.applyFilters();
                 });
             });
@@ -1735,115 +1625,6 @@ script = """
             // Initialize with "All Countries" selected
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-
-            // Setup state multi-select
-            const stateOptions = document.querySelectorAll('.state-option');
-            
-            const updateStateButton = (selectedStates) => {
-                const btn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedStates.has('All States')) {
-                    btn.textContent = 'All States';
-                } else {
-                    const selectedArray = Array.from(selectedStates).sort();  // Sort alphabetically
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
-                    } else {
-                        btn.textContent = selectedArray.join(', ');
-                    }
-                }
-            };
-            
-            updateStateButton(this.selectedStates);
-            
-            stateOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-                    
-                    if (clickedValue === 'All States') {
-                        stateOptions.forEach(opt => opt.classList.remove('selected'));
-                        this.selectedStates.clear();
-                        this.selectedStates.add('All States');
-                        allStatesOption.classList.add('selected');
-                    } else {
-                        allStatesOption.classList.remove('selected');
-                        this.selectedStates.delete('All States');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            this.selectedStates.add(clickedValue);
-                        } else {
-                            this.selectedStates.delete(clickedValue);
-                        }
-                        
-                        if (this.selectedStates.size === 0) {
-                            allStatesOption.classList.add('selected');
-                            this.selectedStates.add('All States');
-                        }
-                    }
-                    
-                    updateStateButton(this.selectedStates);
-                    this.applyFilters();
-                });
-            });
-
-            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-            allStatesOption.classList.add('selected');
-
-            // Setup subcategory multi-select
-            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
-            
-            const updateSubcategoryButton = (selectedSubcategories) => {
-                const btn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedSubcategories.has('All Subcategories')) {
-                    btn.textContent = 'All Subcategories';
-                } else {
-                    const selectedArray = Array.from(selectedSubcategories).sort();  // Sort alphabetically
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
-                    } else {
-                        btn.textContent = selectedArray.join(', ');
-                    }
-                }
-            };
-            
-            updateSubcategoryButton(this.selectedSubcategories);
-            
-            subcategoryOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-                    
-                    if (clickedValue === 'All Subcategories') {
-                        subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        this.selectedSubcategories.clear();
-                        this.selectedSubcategories.add('All Subcategories');
-                        allSubcategoriesOption.classList.add('selected');
-                    } else {
-                        allSubcategoriesOption.classList.remove('selected');
-                        this.selectedSubcategories.delete('All Subcategories');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            this.selectedSubcategories.add(clickedValue);
-                        } else {
-                            this.selectedSubcategories.delete(clickedValue);
-                        }
-                        
-                        if (this.selectedSubcategories.size === 0) {
-                            allSubcategoriesOption.classList.add('selected');
-                            this.selectedSubcategories.add('All Subcategories');
-                        }
-                    }
-                    
-                    updateSubcategoryButton(this.selectedSubcategories);
-                    this.applyFilters();
-                });
-            });
-
-            // Initialize with "All Subcategories" selected
-            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-            allSubcategoriesOption.classList.add('selected');
         }
 
         setupRangeSlider() {
@@ -2073,6 +1854,183 @@ script = """
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
             fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
             fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
+        }
+
+        resetFilters() {
+            // Reset category selections
+            const categoryOptions = document.querySelectorAll('.category-option');
+            categoryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
+            document.querySelector('.multi-select-btn').textContent = 'All Categories';
+
+            // Reset country selections
+            const countryOptions = document.querySelectorAll('.country-option');
+            countryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+            allCountriesOption.classList.add('selected');
+            const countryButtons = document.querySelectorAll('.multi-select-btn');
+            countryButtons[1].textContent = 'All Countries';  // Second button is for countries
+
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => {
+                if (select.id === 'subcategoryFilter') {
+                    // Find and select "All Subcategories" option
+                    const allSubcatsOption = Array.from(select.options)
+                        .find(option => option.value === 'All Subcategories');
+                    if (allSubcatsOption) {
+                        select.value = 'All Subcategories';
+                    } else {
+                        select.selectedIndex = 0;
+                    }
+                } else {
+                    select.selectedIndex = 0;
+                }
+            });
+
+            // Reset range slider values using stored references
+            if (this.rangeSliderElements) {
+                const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
+                fromSlider.value = fromSlider.min;
+                toSlider.value = toSlider.max;
+                fromInput.value = fromSlider.min;
+                toInput.value = toSlider.max;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            }
+
+            this.searchInput.value = '';
+            this.currentSearchTerm = '';
+            this.currentFilters = null;
+            this.currentSort = 'popularity';
+            this.visibleRows = this.allRows;
+            this.applyAllFilters();
+        }
+
+        updateTable() {
+            // Hide all rows first
+            this.allRows.forEach(row => row.style.display = 'none');
+            
+            // Calculate visible range
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = Math.min(start + this.pageSize, this.visibleRows.length);
+            
+            // Show only rows for current page
+            this.visibleRows.slice(start, end).forEach(row => {
+                row.style.display = '';
+            });
+
+            this.updatePagination();
+            this.adjustHeight();
+        }
+
+        updatePagination() {
+            const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
+            const pageNumbers = this.generatePageNumbers(totalPages);
+            const container = document.getElementById('page-numbers');
+            
+            container.innerHTML = pageNumbers.map(page => {
+                if (page === '...') {
+                    return '<span class="page-ellipsis">...</span>';
+                }
+                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
+                    ${page === this.currentPage ? 'disabled' : ''} 
+                    onclick="handlePageClick(${page})">${page}</button>`;
+            }).join('');
+
+            document.getElementById('prev-page').disabled = this.currentPage <= 1;
+            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
+        }
+
+        generatePageNumbers(totalPages) {
+            let pages = [];
+            if (totalPages <= 10) {
+                pages = Array.from({length: totalPages}, (_, i) => i + 1);
+            } else {
+                if (this.currentPage <= 7) {
+                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+                } else if (this.currentPage >= totalPages - 6) {
+                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+                } else {
+                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
+                }
+            }
+            return pages;
+        }
+
+        previousPage() {
+            if (this.currentPage > 1) {
+                this.currentPage--;
+                this.updateTable();
+            }
+        }
+
+        nextPage() {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (this.currentPage < totalPages) {
+                this.currentPage++;
+                this.updateTable();
+            }
+        }
+
+        goToPage(page) {
+            const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
+            if (page >= 1 && page <= totalPages) {
+                this.currentPage = page;
+                this.updateTable();
+            }
+        }
+
+        adjustHeight() {
+            requestAnimationFrame(() => {
+                const elements = {
+                    titleWrapper: document.querySelector('.title-wrapper'),
+                    filterWrapper: document.querySelector('.filter-wrapper'),
+                    tableWrapper: document.querySelector('.table-wrapper'),
+                    tableContainer: document.querySelector('.table-container'),
+                    table: document.querySelector('#data-table'),
+                    controls: document.querySelector('.table-controls'),
+                    pagination: document.querySelector('.pagination-controls')
+                };
+
+                if (!Object.values(elements).every(el => el)) return;
+
+                // Count visible rows in current page
+                const visibleRowCount = this.visibleRows.slice(
+                    (this.currentPage - 1) * this.pageSize,
+                    this.currentPage * this.pageSize
+                ).length;
+
+                // Constants
+                const rowHeight = 52;        // Height per row including padding
+                const headerHeight = 60;     // Table header height
+                const controlsHeight = elements.controls.offsetHeight;
+                const paginationHeight = elements.pagination.offsetHeight;
+                const padding = 40;
+                const minTableHeight = 400;  // Minimum table content height
+
+                // Calculate table content height
+                const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
+                const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
+
+                // Set dimensions
+                elements.tableContainer.style.height = `${actualTableHeight}px`;
+                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
+
+                // Calculate final component height
+                const finalHeight = 
+                    elements.titleWrapper.offsetHeight +
+                    elements.filterWrapper.offsetHeight +
+                    actualTableHeight +
+                    controlsHeight +
+                    paginationHeight +
+                    padding;
+
+                // Update Streamlit frame height if changed significantly
+                if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
+                    this.lastHeight = finalHeight;
+                    Streamlit.setFrameHeight(finalHeight);
+                }
+            });
         }
     }
 
