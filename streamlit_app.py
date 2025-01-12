@@ -1204,7 +1204,6 @@ script = """
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
             const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
                 .map(option => option.dataset.value);
-            const country = row.querySelector('td:nth-child(5)').textContent.trim();
             
             if (selectedCountries.length > 0) {
                 if (!selectedCountries.includes('All Countries') && !selectedCountries.includes(country)) {
