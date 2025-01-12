@@ -1139,11 +1139,15 @@ script = """
             const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
                 .map(option => option.dataset.value);
 
+            // Get all selected countries
+            const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
+                .map(option => option.dataset.value);
+
             // Collect all current filter values
             this.currentFilters = {
                 categories: selectedCategories,
                 subcategory: document.getElementById('subcategoryFilter').value,
-                country: document.getElementById('countryFilter').value,
+                countries: selectedCountries,
                 state: document.getElementById('stateFilter').value,
                 date: document.getElementById('dateFilter').value
             };
@@ -1181,14 +1185,15 @@ script = """
 
         matchesFilters(row, filters) {
             // Category filter
-            const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
-                .map(option => option.dataset.value);
             const category = row.dataset.category;
-            
-            if (selectedCategories.length > 0) {
-                if (!selectedCategories.includes('All Categories') && !selectedCategories.includes(category)) {
-                    return false;
-                }
+            if (!filters.categories.includes('All Categories') && !filters.categories.includes(category)) {
+                return false;
+            }
+
+            // Country filter
+            const country = row.querySelector('td:nth-child(5)').textContent.trim();
+            if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
+                return false;
             }
 
             // Get all other values
@@ -1198,11 +1203,9 @@ script = """
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
             const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
-            const country = row.querySelector('td:nth-child(5)').textContent.trim();
 
             // Rest of filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-            if (filters.country !== 'All Countries' && country !== filters.country) return false;
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
             // Check pledged range
@@ -1241,6 +1244,21 @@ script = """
         }
 
         resetFilters() {
+            // Reset category selections
+            const categoryOptions = document.querySelectorAll('.category-option');
+            categoryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
+            document.querySelector('.multi-select-btn').textContent = 'All Categories';
+
+            // Reset country selections
+            const countryOptions = document.querySelectorAll('.country-option');
+            countryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+            allCountriesOption.classList.add('selected');
+            const countryButton = document.querySelector('.country-option').closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            countryButton.textContent = 'All Countries';
+
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
                 if (select.id === 'subcategoryFilter') {
