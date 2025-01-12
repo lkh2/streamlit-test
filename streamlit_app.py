@@ -1053,7 +1053,6 @@ script = """
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
-                pledged: document.getElementById('pledgedFilter').value,
                 goal: document.getElementById('goalFilter').value,
                 raised: document.getElementById('raisedFilter').value,
                 date: document.getElementById('dateFilter').value
@@ -1095,7 +1094,6 @@ script = """
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
-                pledged: document.getElementById('pledgedFilter').value,
                 goal: document.getElementById('goalFilter').value,
                 raised: document.getElementById('raisedFilter').value,
                 date: document.getElementById('dateFilter').value
@@ -1121,17 +1119,10 @@ script = """
             if (filters.country !== 'All Countries' && country !== filters.country) return false;
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
-            // Numeric range filters
-            if (filters.pledged !== 'All Amounts') {
-                if (filters.pledged.startsWith('>')) {
-                    const min = parseFloat(filters.pledged.replace(/[^0-9.-]+/g,""));
-                    if (pledged <= min) return false;
-                } else {
-                    const [min, max] = filters.pledged.split('-')
-                        .map(v => parseFloat(v.replace(/[^0-9.-]+/g,"")));
-                    if (pledged < min || pledged > max) return false;
-                }
-            }
+            // Check pledged range
+            const minPledged = parseInt(document.getElementById('fromInput').value);
+            const maxPledged = parseInt(document.getElementById('toInput').value);
+            if (pledged < minPledged || pledged > maxPledged) return false;
 
             if (filters.goal !== 'All Goals') {
                 if (filters.goal.startsWith('>')) {
@@ -1190,6 +1181,23 @@ script = """
                     select.selectedIndex = 0;
                 }
             });
+
+            // Reset range slider values
+            const fromSlider = document.getElementById('fromSlider');
+            const toSlider = document.getElementById('toSlider');
+            const fromInput = document.getElementById('fromInput');
+            const toInput = document.getElementById('toInput');
+
+            if (fromSlider && toSlider && fromInput && toInput) {
+                fromSlider.value = fromSlider.min;
+                toSlider.value = toSlider.max;
+                fromInput.value = fromSlider.min;
+                toInput.value = toSlider.max;
+                
+                // Update slider appearance
+                this.fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            }
+
             this.searchInput.value = '';
             this.currentSearchTerm = '';
             this.currentFilters = null;
@@ -1313,17 +1321,24 @@ script = """
         setupFilters() {
             const filterIds = [
                 'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
-                'pledgedFilter', 'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter'
+                'goalFilter', 'raisedFilter', 'dateFilter', 'sortFilter'
             ];
             
             filterIds.forEach(id => {
-                document.getElementById(id).addEventListener('change', () => {
-                    // No need to update subcategories when category changes
-                    this.applyFilters();
-                });
+                const element = document.getElementById(id);
+                if (element) {
+                    element.addEventListener('change', () => this.applyFilters());
+                }
             });
 
-            document.getElementById('resetFilters').addEventListener('click', () => this.resetFilters());
+            // Add reset button handler
+            const resetButton = document.getElementById('resetFilters');
+            if (resetButton) {
+                resetButton.addEventListener('click', () => this.resetFilters());
+            }
+
+            // Add range slider initialization
+            this.setupRangeSlider();
         }
 
         setupRangeSlider() {
