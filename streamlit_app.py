@@ -1348,7 +1348,7 @@ script = """
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
-            const categoryBtn = document.querySelector('.filter-controls .filter-row:first-child .multi-select-dropdown:first-child .multi-select-btn');
+            const categoryBtn = document.querySelector('.multi-select-btn');
             categoryBtn.textContent = 'All Categories';
 
             // Reset country selections
@@ -1356,7 +1356,7 @@ script = """
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            const countryBtn = document.querySelector('.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(3) .multi-select-btn');
+            const countryBtn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             countryBtn.textContent = 'All Countries';
 
             // Reset state selections
@@ -1364,7 +1364,7 @@ script = """
             stateOptions.forEach(opt => opt.classList.remove('selected'));
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
             allStatesOption.classList.add('selected');
-            const stateBtn = document.querySelector('.filter-controls .filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn');
+            const stateBtn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             stateBtn.textContent = 'All States';
 
             // Reset subcategory selections
@@ -1372,7 +1372,7 @@ script = """
             subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
             allSubcategoriesOption.classList.add('selected');
-            const subcategoryBtn = document.querySelector('.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
+            const subcategoryBtn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             subcategoryBtn.textContent = 'All Subcategories';
 
             // Reset the stored selections in the Sets
@@ -1544,17 +1544,16 @@ script = """
             
             const updateMultiSelectButton = (selectedItems, btnSelector) => {
                 const btn = document.querySelector(btnSelector);
-                if (!btn) return; // Guard against null
+                const firstValue = Array.from(selectedItems)[0];
                 
-                const selectedArray = Array.from(selectedItems);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
+                if (firstValue.startsWith('All')) {
+                    btn.textContent = firstValue;
                 } else {
-                    const sortedArray = selectedArray.sort();
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                    const selectedArray = Array.from(selectedItems);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
-                        btn.textContent = sortedArray.join(', ');
+                        btn.textContent = selectedArray.join(', ');
                     }
                 }
             };
@@ -1621,19 +1620,15 @@ script = """
             const countryOptions = document.querySelectorAll('.country-option');
             
             const updateCountryButton = (selectedCountries) => {
-                // Target first multi-select-btn within the Countries dropdown
-                const btn = document.querySelector('.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(3) .multi-select-btn');
-                if (!btn) return; // Guard against null
-
-                const selectedArray = Array.from(selectedCountries);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
+                const btn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+                if (selectedCountries.has('All Countries')) {
+                    btn.textContent = 'All Countries';
                 } else {
-                    const sortedArray = selectedArray.sort();
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                    const selectedArray = Array.from(selectedCountries);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
-                        btn.textContent = sortedArray.join(', ');
+                        btn.textContent = selectedArray.join(', ');
                     }
                 }
             };
@@ -1676,19 +1671,15 @@ script = """
             const stateOptions = document.querySelectorAll('.state-option');
             
             const updateStateButton = (selectedStates) => {
-                // Target first multi-select-btn within the States dropdown
-                const btn = document.querySelector('.filter-controls .filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn');
-                if (!btn) return; // Guard against null
-
-                const selectedArray = Array.from(selectedStates);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
+                const btn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+                if (selectedStates.has('All States')) {
+                    btn.textContent = 'All States';
                 } else {
-                    const sortedArray = selectedArray.sort();
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                    const selectedArray = Array.from(selectedStates);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
-                        btn.textContent = sortedArray.join(', ');
+                        btn.textContent = selectedArray.join(', ');
                     }
                 }
             };
@@ -1731,19 +1722,15 @@ script = """
             const subcategoryOptions = document.querySelectorAll('.subcategory-option');
             
             const updateSubcategoryButton = (selectedSubcategories) => {
-                // Target second multi-select-btn in first row
-                const btn = document.querySelector('.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
-                if (!btn) return; // Guard against null
-
-                const selectedArray = Array.from(selectedSubcategories);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
+                const btn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+                if (selectedSubcategories.has('All Subcategories')) {
+                    btn.textContent = 'All Subcategories';
                 } else {
-                    const sortedArray = selectedArray.sort();
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                    const selectedArray = Array.from(selectedSubcategories);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
-                        btn.textContent = sortedArray.join(', ');
+                        btn.textContent = selectedArray.join(', ');
                     }
                 }
             };
@@ -2037,3 +2024,5 @@ script = """
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
+
+# st.dataframe(df)
