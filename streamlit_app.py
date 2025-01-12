@@ -202,12 +202,11 @@ loc = get_geolocation()
 user_location = None
 
 if loc and 'coords' in loc:
-    user_location = {
-        'latitude': loc['coords']['latitude'], 
-        'longitude': loc['coords']['longitude']
-    }
     with st.spinner('Updating table with your location...'):
-        time.sleep(1)
+        user_location = {
+            'latitude': loc['coords']['latitude'], 
+            'longitude': loc['coords']['longitude']
+        }
     loading_success = st.success("Location received successfully!")
     time.sleep(1.5)
     loading_success.empty()
