@@ -1544,10 +1544,22 @@ script = """
                 if (!buttonElement) return;
                 
                 const selectedArray = Array.from(selectedItems);
+                const convertStateText = (text) => {
+                    // For state options, extract text from div if necessary
+                    if (text.includes('state_cell')) {
+                        const div = document.createElement('div');
+                        div.innerHTML = text;
+                        return div.textContent;
+                    }
+                    return text;
+                };
+                
                 if (selectedArray[0] && selectedArray[0].startsWith('All')) {
                     buttonElement.textContent = selectedArray[0];
                 } else {
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
+                    const sortedArray = selectedArray
+                        .map(item => convertStateText(item))
+                        .sort((a, b) => a.localeCompare(b));
                     if (sortedArray.length > 2) {
                         buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
                     } else {
