@@ -129,7 +129,7 @@ df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 df = df[[ 
     'data.name', 
     'data.creator.name',
-    'Pledged Amount',  # Use formatted columns in visible part
+    'Pledged Amount',  
     'data.urls.web.project', 
     'data.location.expanded_country', 
     'data.state',
@@ -142,7 +142,8 @@ df = df[[
     'Raw Goal',
     'Raw Pledged',
     'Raw Raised',
-    'Raw Date'
+    'Raw Date',
+    'data.location.country' 
 ]].rename(columns={ 
     'data.name': 'Project Name', 
     'data.creator.name': 'Creator', 
@@ -152,9 +153,10 @@ df = df[[
     # Hidden columns
     'data.category.parent_name': 'Category',
     'data.category.name': 'Subcategory',
+    'data.location.country': 'Country Code' 
 })
 
-# Convert remaining object columns to string
+# Convert remaining object columns to string  
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
@@ -166,14 +168,13 @@ def style_state(state):
 # Apply styling to State column
 df['State'] = df['State'].apply(style_state)
 
-# Add country data import
+# After creating the initial DataFrame, add country coordinates
 @st.cache_data
 def load_country_data():
     country_df = pd.read_csv('country.csv')
     return country_df
 
-# After creating the initial DataFrame, add country code and merge with country data
-df['Country Code'] = df['data.location.country']  # Add Country Code column
+# Add latitude/longitude from country data
 country_data = load_country_data()
 df = df.merge(country_data[['country', 'latitude', 'longitude']], 
               left_on='Country Code', 
