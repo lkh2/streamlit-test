@@ -1281,8 +1281,8 @@ script = """
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            const countryButton = document.querySelector('.country-option').closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            countryButton.textContent = 'All Countries';
+            const countryButtons = document.querySelectorAll('.multi-select-btn');
+            countryButtons[1].textContent = 'All Countries';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
@@ -1863,6 +1863,14 @@ script = """
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
             document.querySelector('.multi-select-btn').textContent = 'All Categories';
+
+            // Reset country selections
+            const countryOptions = document.querySelectorAll('.country-option');
+            countryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+            allCountriesOption.classList.add('selected');
+            const countryButtons = document.querySelectorAll('.multi-select-btn');
+            countryButtons[1].textContent = 'All Countries';  // Second button is for countries
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
