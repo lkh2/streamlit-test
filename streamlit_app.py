@@ -363,9 +363,12 @@ template = f"""
     <div class="filter-controls">
         <div class="filter-row">
             <span class="filter-label">Explore</span>
-            <select id="categoryFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['categories'])}
-            </select>
+            <div class="multi-select-dropdown">
+                <button class="filter-select multi-select-btn">Categories</button>
+                <div class="multi-select-content">
+                    {' '.join(f'<div class="category-option" data-value="{opt}">{opt}</div>' for opt in filter_options['categories'])}
+                </div>
+            </div>
             <span class="filter-label">&</span>
             <select id="subcategoryFilter" class="filter-select">
                 {' '.join(f'<option value="{opt}" {"selected" if opt == "All Subcategories" else ""}>{opt}</option>' for opt in filter_options['subcategories'])}
@@ -896,6 +899,57 @@ css = """
         height: 0;
         z-index: 1;
     }
+
+    .multi-select-dropdown {
+        position: relative;
+        display: inline-block;
+    }
+
+    .multi-select-content {
+        display: none;
+        position: absolute;
+        background-color: #fff;
+        min-width: 200px;
+        box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+        padding: 8px;
+        border-radius: 8px;
+        z-index: 1000;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    .multi-select-dropdown:hover .multi-select-content {
+        display: block;
+    }
+
+    .multi-select-btn {
+        min-width: 150px;
+    }
+
+    .category-option {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        margin: 2px 0;
+        font-family: 'Poppins';
+        font-size: 12px;
+        transition: all 0.2s ease;
+    }
+
+    .category-option:hover {
+        background-color: #f0f0f0;
+    }
+
+    .category-option.selected {
+        background-color: #5932EA;
+        color: white;
+    }
+
+    .category-option[data-value="All Categories"] {
+        border-bottom: 1px solid #eee;
+        margin-bottom: 8px;
+        padding-bottom: 12px;
+    }
 </style>
 """
 
@@ -1131,6 +1185,16 @@ script = """
 
         matchesFilters(row, filters) {
             const category = row.dataset.category;
+            
+            // Update category filter check for multiple selections
+            if (filters.categories && filters.categories.length > 0) {
+                if (filters.categories.includes('All Categories')) {
+                    // "All Categories" is selected, no filtering needed
+                } else if (!filters.categories.includes(category)) {
+                    return false;
+                }
+            }
+
             const subcategory = row.dataset.subcategory;
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
@@ -1379,8 +1443,70 @@ script = """
         }
 
         setupFilters() {
+            // Setup category multi-select
+            const categoryOptions = document.querySelectorAll('.category-option');
+            const selectedCategories = new Set();
+            
+            categoryOptions.forEach(option => {
+                option.addEventListener('click', (e) => {
+                    const value = e.target.dataset.value;
+                    
+                    if (value === 'All Categories') {
+                        // Clear all selections if "All Categories" is clicked
+                        categoryOptions.forEach(opt => opt.classList.remove('selected'));
+                        selectedCategories.clear();
+                        
+                        if (!e.target.classList.contains('selected')) {
+                            e.target.classList.add('selected');
+                            selectedCategories.add(value);
+                        }
+                    } else {
+                        // Remove "All Categories" selection
+                        const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+                        allCategoriesOption.classList.remove('selected');
+                        selectedCategories.delete('All Categories');
+                        
+                        // Toggle current selection
+                        e.target.classList.toggle('selected');
+                        if (e.target.classList.contains('selected')) {
+                            selectedCategories.add(value);
+                        } else {
+                            selectedCategories.delete(value);
+                        }
+                        
+                        // If nothing is selected, select "All Categories"
+                        if (selectedCategories.size === 0) {
+                            allCategoriesOption.classList.add('selected');
+                            selectedCategories.add('All Categories');
+                        }
+                    }
+                    
+                    // Update button text
+                    const btn = document.querySelector('.multi-select-btn');
+                    if (selectedCategories.has('All Categories')) {
+                        btn.textContent = 'Categories';
+                    } else {
+                        btn.textContent = Array.from(selectedCategories).join(', ');
+                    }
+                    
+                    // Store selected categories in filters
+                    this.currentFilters = {
+                        ...this.currentFilters,
+                        categories: Array.from(selectedCategories)
+                    };
+                    
+                    this.applyFilters();
+                });
+            });
+
+            // Initialize with "All Categories" selected
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
+            selectedCategories.add('All Categories');
+
+            // Setup other filters
             const filterIds = [
-                'categoryFilter', 'subcategoryFilter', 'countryFilter', 'stateFilter',
+                'subcategoryFilter', 'countryFilter', 'stateFilter',
                 'dateFilter', 'sortFilter'
             ];
             
@@ -1631,6 +1757,13 @@ script = """
         }
 
         resetFilters() {
+            // Reset category selections
+            const categoryOptions = document.querySelectorAll('.category-option');
+            categoryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
+            document.querySelector('.multi-select-btn').textContent = 'Categories';
+
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
                 if (select.id === 'subcategoryFilter') {
