@@ -891,7 +891,7 @@ css = """
         cursor: pointer;
     }
 
-    #fromSlider, #goalFromSlider {
+    #fromSlider, #goalFromSlider, #raisedFromSlider {
         height: 0;
         z-index: 1;
     }
