@@ -781,7 +781,7 @@ css = """
         background-color: #fff;
         min-width: 300px;
         box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-        padding: 12px;
+        padding: 20px;
         border-radius: 8px;
         z-index: 1000;
     }
@@ -794,7 +794,6 @@ css = """
         display: flex;
         flex-direction: column;
         width: 100%;
-        padding: 10px;
     }
 
     .sliders-control {
@@ -809,6 +808,7 @@ css = """
         align-items: center;
         margin-top: 10px;
         font-family: 'Poppins';
+        column-gap: 10px;
     }
 
     .form-control-container {
