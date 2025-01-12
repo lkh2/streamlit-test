@@ -9,8 +9,10 @@ from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
 
+# Configure page layout and styling
 st.set_page_config(layout="wide")
 
+# Set gradient background style
 st.markdown(
     """
     <style>
@@ -25,8 +27,9 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Component Generation Function
+# Creates HTML components with necessary Streamlit event handlers and messaging
 def gensimplecomponent(name, template="", script=""):
-    """Generate a simple Streamlit component."""
     def html():
         return f"""
             <!DOCTYPE html>
@@ -37,6 +40,7 @@ def gensimplecomponent(name, template="", script=""):
                     <meta charset="UTF-8" />
                     <title>{name}</title>
                     <script>
+                        // Streamlit message handlers for component communication
                         function sendMessageToStreamlitClient(type, data) {{
                             const outData = Object.assign({{
                                 isStreamlitMessage: true,
@@ -45,6 +49,7 @@ def gensimplecomponent(name, template="", script=""):
                             window.parent.postMessage(outData, "*");
                         }}
 
+                        // Core Streamlit JavaScript API implementation
                         const Streamlit = {{
                             setComponentReady: function() {{
                                 sendMessageToStreamlitClient("streamlit:componentReady", {{apiVersion: 1}});
@@ -78,19 +83,21 @@ def gensimplecomponent(name, template="", script=""):
             </html>
         """
 
+    # Create temporary directory and HTML file for component
     dir = f"{tempfile.gettempdir()}/{name}"
     if not os.path.isdir(dir): os.mkdir(dir)
     fname = f'{dir}/index.html'
     with open(fname, 'w') as f:
         f.write(html())
     
+    # Declare and return the Streamlit component
     func = components.declare_component(name, path=str(dir))
     def f(**params):
         component_value = func(**params)
         return component_value
     return f
 
-# Initialize connection.
+# MongoDB Connection Management
 @st.cache_resource
 def init_connection():
     mongo_connection_string = (
@@ -102,33 +109,26 @@ def init_connection():
 
 client = init_connection()
 
-# Pull data from the collection.
+# Data Retrieval and Processing
 @st.cache_data(ttl=600)
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
     items = collection.find().limit(500)
-    
-    # Convert MongoDB cursor to list and handle ObjectId
     items = [{**item, '_id': str(item['_id'])} for item in items]
     return items
 
+# Fetch and transform data
 items = get_data()
-
-# Create DataFrame and restructure columns
 df = json_normalize(items)
 
-# Calculate and store raw values first
+# Calculate derived columns for analysis
 df['Raw Goal'] = df['data.goal'].astype(float) * df['data.usd_exchange_rate'].astype(float)
 df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
 df['Raw Raised'] = (df['Raw Pledged'] / df['Raw Goal']) * 100
 df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s')
-
-# After Raw Date calculation, add Raw Deadline calculation
 df['Raw Deadline'] = pd.to_datetime(df['data.deadline'], unit='s')
 df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
-
-# After Raw Deadline calculation, modify Backer Count (single column)
 df['Backer Count'] = df['data.backers_count'].astype(int)
 
 # Format display columns
@@ -137,6 +137,7 @@ df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${int(x):,}")
 df['%Raised'] = df['Raw Raised'].map(lambda x: f"{x:.1f}%")
 df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 
+# Select and rename columns for display
 df = df[[ 
     'data.name', 
     'data.creator.name',
@@ -144,7 +145,6 @@ df = df[[
     'data.urls.web.project', 
     'data.location.expanded_country', 
     'data.state',
-    # Hidden columns
     'data.category.parent_name',
     'data.category.name',
     'Date',
@@ -165,40 +165,37 @@ df = df[[
     'data.urls.web.project': 'Link', 
     'data.location.expanded_country': 'Country', 
     'data.state': 'State',
-    # Hidden columns
     'data.category.parent_name': 'Category',
     'data.category.name': 'Subcategory',
     'data.location.country': 'Country Code', 
     'data.staff_pick': 'Staff Pick'
 })
 
-# Convert remaining object columns to string  
+# Ensure consistent data types
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
-# Function to style state with colored span
+# State styling function
 def style_state(state):
     state = state.lower()
     return f'<div class="state_cell state-{state}">{state}</div>'
 
-# Apply styling to State column
 df['State'] = df['State'].apply(style_state)
 
-# After creating the initial DataFrame, add country coordinates
+# Load geographical data
 @st.cache_data
 def load_country_data():
-    # Downloaded from https://developers.google.com/public-data/docs/canonical/countries_csv
     country_df = pd.read_csv('country.csv')
     return country_df
 
-# Add latitude/longitude from country data
+# Merge country location data
 country_data = load_country_data()
 df = df.merge(country_data[['country', 'latitude', 'longitude']], 
               left_on='Country Code', 
               right_on='country', 
               how='left')
 
-# Add geolocation call before data processing
+# Get user location and handle loading state
 loc = get_geolocation()
 user_location = None
 
@@ -213,71 +210,64 @@ if (loc and 'coords' in loc):
     time.sleep(1.5)
     loading_success.empty()
 
-# Add function to calculate distances
+# Distance calculation function
 def calculate_distance(lat1, lon1, lat2, lon2):
-    """Calculate distance between two points using Haversine formula"""
-    R = 6371  # Earth's radius in kilometers
+    R = 6371
     
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
     
     dlat = lat2 - lat1
-    dlon = lon2 - lon1  # Fixed: Calculate dlon correctly
+    dlon = lon2 - lon1
     
     a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
     c = 2 * np.arcsin(np.sqrt(a))
     
     return R * c
 
-# After merging with country data, calculate distances if location is available
+# Calculate distances if user location is available
 if user_location:
     df['Distance'] = df.apply(
         lambda row: calculate_distance(
             user_location['latitude'],
             user_location['longitude'],
-            float(row['latitude']) if pd.notna(row['latitude']) else 0,  # Handle NaN values
-            float(row['longitude']) if pd.notna(row['longitude']) else 0  # Handle NaN values
+            float(row['latitude']) if pd.notna(row['latitude']) else 0,
+            float(row['longitude']) if pd.notna(row['longitude']) else 0
         ) if pd.notna(row['latitude']) and pd.notna(row['longitude']) else float('inf'),
         axis=1
-    ).astype(float)  # Ensure Distance is float type
+    ).astype(float)
 else:
-    df['Distance'] = float('inf')  # Set as float infinity
+    df['Distance'] = float('inf')
 
-# Sort DataFrame by Distance initially to verify values
+# Sort by distance and calculate popularity scores
 df = df.sort_values('Distance')
 
-# Calculate popularity score components
 now = pd.Timestamp.now()
 max_days = (now - df['Raw Date']).dt.total_seconds().max() / (24*60*60)
 time_factor = 1 - ((now - df['Raw Date']).dt.total_seconds() / (24*60*60) / max_days)
 
-# Cap percentage raised at 500% to prevent extreme outliers
 capped_percentage = df['Raw Raised'].clip(upper=500)
 
-# Normalize components to 0-1 scale
 normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
-normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())  # Fixed this line
+normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())
 normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
 
-# Calculate popularity score
+# Calculate popularity score based on multiple factors
 df['Popularity Score'] = (
-    normalized_backers * 0.35 +      # Backer count (35% weight)
-    normalized_pledged * 0.25 +      # Pledged amount (25% weight)
-    normalized_percentage * 0.20 +    # Percentage raised (20% weight)
-    time_factor * 0.10 +             # Time factor (10% weight)
-    df['Staff Pick'].astype(int) * 0.10  # Staff pick (10% weight)
+    normalized_backers * 0.35 +
+    normalized_pledged * 0.25 +
+    normalized_percentage * 0.20 +
+    time_factor * 0.10 +
+    df['Staff Pick'].astype(int) * 0.10
 )
 
+# Generate HTML table content
 def generate_table_html(df):
-    # Define visible and hidden columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
     
-    # Generate header for visible columns only
     header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
     
-    # Generate table rows with raw values in data attributes
     rows_html = ''
     for _, row in df.iterrows():
-        # Add data attributes to each row for filtering
         data_attrs = f'''
             data-category="{row['Category']}"
             data-subcategory="{row['Subcategory']}"
@@ -295,7 +285,6 @@ def generate_table_html(df):
             data-popularity="{row['Popularity Score']:.6f}"
         '''
         
-        # Create visible cells with special handling for Link column
         visible_cells = ''
         for col in visible_columns:
             if (col == 'Link'):
@@ -304,15 +293,12 @@ def generate_table_html(df):
             else:
                 visible_cells += f'<td>{row[col]}</td>'
         
-        # Add the row with data attributes
         rows_html += f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>'
     
     return header_html, rows_html
 
-# Generate table HTML
 header_html, rows_html = generate_table_html(df)
 
-# Calculate min/max values from the DataFrame
 min_pledged = int(df['Raw Pledged'].min())
 max_pledged = int(df['Raw Pledged'].max())
 min_goal = int(df['Raw Goal'].min())
@@ -320,15 +306,12 @@ max_goal = int(df['Raw Goal'].max())
 min_raised = int(df['Raw Raised'].min())
 max_raised = int(df['Raw Raised'].max())
 
-# After loading data and before generating table, prepare filter options
 def get_filter_options(df):
-    # Make sure 'All Subcategories' is first, then sort the rest
     subcategories = df['Subcategory'].unique().tolist()
     sorted_subcategories = sorted(subcategories)
     
-    # Extract states without HTML formatting
     states = df['State'].str.extract(r'state-(\w+)')[0].unique().tolist()
-    states = [state.title() for state in states]  # Capitalize first letter
+    states = [state.title() for state in states]
     
     return {
         'categories': sorted(['All Categories'] + df['Category'].unique().tolist()),
@@ -347,10 +330,8 @@ def get_filter_options(df):
 
 filter_options = get_filter_options(df)
 
-# Update template to include filter controls with default subcategory
 template = f"""
 <script>
-    // Make user location available to JavaScript
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
     window.hasLocation = {json.dumps(bool(user_location))};
 </script>
@@ -496,12 +477,10 @@ template = f"""
     </div>
 </div>
 <script>
-    // Make user location available to JavaScript
     window.userLocation = {user_location if user_location else 'null'};
 </script>
 """
 
-# Add new CSS styles
 css = """
 <style> 
     .title-wrapper {
@@ -549,13 +528,12 @@ css = """
         table-layout: fixed; 
     }
 
-    /* Column width specifications */
-    th[scope="col"]:nth-child(1) { width: 25%; }  /* Project Name - 2 parts */
-    th[scope="col"]:nth-child(2) { width: 12.5%; }  /* Creator - 1 part */
-    th[scope="col"]:nth-child(3) { width: 120px; }  /* Pledged Amount - fixed */
-    th[scope="col"]:nth-child(4) { width: 25%; }  /* Link - 2 parts */
-    th[scope="col"]:nth-child(5) { width: 12.5%; }  /* Country - 1 part */
-    th[scope="col"]:nth-child(6) { width: 120px; }  /* State - fixed */
+    th[scope="col"]:nth-child(1) { width: 25%; }
+    th[scope="col"]:nth-child(2) { width: 12.5%; }
+    th[scope="col"]:nth-child(3) { width: 120px; }
+    th[scope="col"]:nth-child(4) { width: 25%; }
+    th[scope="col"]:nth-child(5) { width: 12.5%; }
+    th[scope="col"]:nth-child(6) { width: 120px; }
 
     th { 
         background: #ffffff; 
@@ -588,7 +566,7 @@ css = """
     }
     
     td::-webkit-scrollbar {
-        display: none;  /* Safari and Chrome */
+        display: none;
     }
 
     td:last-child { 
@@ -814,7 +792,6 @@ css = """
         color: grey
     }
 
-    /* Range Slider Styles */
     .range-dropdown {
         position: relative;
         display: inline-block;
@@ -1040,9 +1017,7 @@ css = """
 </style>
 """
 
-# Create table component script with improved search and pagination
 script = """
-    // Helper functions
     function debounce(func, wait) {
         let timeout;
         return function(...args) {
@@ -1069,9 +1044,8 @@ script = """
         });
     }
 
-    // Add Haversine distance calculation function
     function calculateDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371; // Earth's radius in kilometers
+        const R = 6371;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
         const a = 
@@ -1082,7 +1056,6 @@ script = """
         return R * c;
     }
 
-    // Optimize distance calculations with a cache
     class DistanceCache {
         constructor() {
             this.userLocation = window.userLocation;
@@ -1113,21 +1086,15 @@ script = """
             this.resetFilters();
         }
 
-        // Remove getUserLocation method as we don't need it anymore
-
-        // Update sortRows to handle missing location
         async sortRows(sortType) {
             if (sortType === 'popularity') {
-                // Sort by popularity score
                 this.visibleRows.sort((a, b) => {
                     const scoreA = parseFloat(a.dataset.popularity);
                     const scoreB = parseFloat(b.dataset.popularity);
                     
-                    // Handle invalid values
                     if (isNaN(scoreA)) return 1;
                     if (isNaN(scoreB)) return -1;
                     
-                    // Sort in descending order
                     return scoreB - scoreA;
                 });
             } else if (sortType === 'nearme') {
@@ -1138,40 +1105,34 @@ script = """
                     return;
                 }
                 
-                // Sort only by distance
                 this.visibleRows.sort((a, b) => {
                     const distA = parseFloat(a.dataset.distance);
                     const distB = parseFloat(b.dataset.distance);
                     
-                    // Handle invalid values
                     if (isNaN(distA)) return 1;
                     if (isNaN(distB)) return -1;
                     
                     return distA - distB;
                 });
             } else if (sortType === 'enddate') {
-                // Sort by deadline
                 this.visibleRows.sort((a, b) => {
                     const deadlineA = new Date(a.dataset.deadline);
                     const deadlineB = new Date(b.dataset.deadline);
                     return deadlineB - deadlineA; 
                 });
             } else if (sortType === 'mostfunded') {
-                // Sort by pledged amount
                 this.visibleRows.sort((a, b) => {
                     const pledgedA = parseFloat(a.dataset.pledged);
                     const pledgedB = parseFloat(b.dataset.pledged);
-                    return pledgedB - pledgedA;  // Descending order (most funded first)
+                    return pledgedB - pledgedA;
                 });
             } else if (sortType === 'mostbacked') {
-                // Sort by backer count
                 this.visibleRows.sort((a, b) => {
                     const backersA = parseInt(a.dataset.backers);
                     const backersB = parseInt(b.dataset.backers);
-                    return backersB - backersA;  // Descending order (most backers first)
+                    return backersB - backersA;
                 });
             } else {
-                // Date-based sorting only
                 this.visibleRows.sort((a, b) => {
                     const dateA = new Date(a.dataset.date);
                     const dateB = new Date(b.dataset.date);
@@ -1179,24 +1140,17 @@ script = """
                 });
             }
 
-            // Update the table display after sorting without cloning nodes
             const tbody = document.querySelector('#data-table tbody');
-            // Remove all rows from their current position
             this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
-            // Add them back in the new order
             this.visibleRows.forEach(row => tbody.appendChild(row));
             
-            // Update current page and pagination
             this.currentPage = 1;
             this.updateTable();
         }
 
-        // Modify applyAllFilters to handle async sorting
         async applyAllFilters() {
-            // Start with all rows
             let filteredRows = this.allRows;
 
-            // Apply search if exists
             if (this.currentSearchTerm) {
                 const pattern = createRegexPattern(this.currentSearchTerm);
                 filteredRows = filteredRows.filter(row => {
@@ -1205,43 +1159,33 @@ script = """
                 });
             }
 
-            // Apply filters if they exist
             if (this.currentFilters) {
                 filteredRows = filteredRows.filter(row => {
                     return this.matchesFilters(row, this.currentFilters);
                 });
             }
 
-            // Store filtered results
             this.visibleRows = filteredRows;
 
-            // Apply current sort
             await this.sortRows(this.currentSort);
 
-            // Reset to first page and update display
             this.currentPage = 1;
             this.updateTable();
         }
 
-        // Update applyFilters to handle async
         async applyFilters() {
-            // Get all selected categories
             const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Get all selected countries
             const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Get all selected states
             const selectedStates = Array.from(document.querySelectorAll('.state-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Get all selected subcategories
             const selectedSubcategories = Array.from(document.querySelectorAll('.subcategory-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Collect all current filter values
             this.currentFilters = {
                 categories: selectedCategories,
                 subcategories: selectedSubcategories,
@@ -1260,13 +1204,12 @@ script = """
             this.setupSearchAndPagination();
             this.setupFilters();
             this.setupRangeSlider();
-            this.currentSort = 'popularity';  // Set default sort to popularity
+            this.currentSort = 'popularity';
             this.applyAllFilters();
             this.updateTable();
         }
 
         setupSearchAndPagination() {
-            // Setup search
             const debouncedSearch = debounce((searchTerm) => {
                 this.currentSearchTerm = searchTerm;
                 this.applyAllFilters();
@@ -1276,32 +1219,27 @@ script = """
                 debouncedSearch(e.target.value.trim().toLowerCase());
             });
 
-            // Setup pagination controls
             document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
             document.getElementById('next-page').addEventListener('click', () => this.nextPage());
             window.handlePageClick = (page) => this.goToPage(page);
         }
 
         matchesFilters(row, filters) {
-            // Category filter
             const category = row.dataset.category;
             if (!filters.categories.includes('All Categories') && !filters.categories.includes(category)) {
                 return false;
             }
 
-            // Subcategory filter
             const subcategory = row.dataset.subcategory;
             if (!filters.subcategories.includes('All Subcategories') && !filters.subcategories.includes(subcategory)) {
                 return false;
             }
 
-            // Country filter
             const country = row.querySelector('td:nth-child(5)').textContent.trim();
             if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
                 return false;
             }
 
-            // State filter - Extract state from class name instead of text content
             const stateCell = row.querySelector('.state_cell');
             const stateMatch = stateCell ? stateCell.className.match(/state-(\w+)/) : null;
             const state = stateMatch ? stateMatch[1] : '';
@@ -1313,29 +1251,23 @@ script = """
                 if (!matchingState) return false;
             }
 
-            // Get all other values
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
 
-            // Rest of filter checks
-            // Check pledged range
             const minPledged = parseFloat(document.getElementById('fromInput').value);
             const maxPledged = parseFloat(document.getElementById('toInput').value);
             if (pledged < minPledged || pledged > maxPledged) return false;
 
-            // Check goal range
             const minGoal = parseFloat(document.getElementById('goalFromInput').value);
             const maxGoal = parseFloat(document.getElementById('goalToInput').value);
             if (goal < minGoal || goal > maxGoal) return false;
 
-            // Check raised range
             const minRaised = parseFloat(document.getElementById('raisedFromInput').value);
             const maxRaised = parseFloat(document.getElementById('raisedToInput').value);
             if (raised < minRaised || raised > maxRaised) return false;
 
-            // Date filter
             if (filters.date !== 'All Time') {
                 const now = new Date();
                 let compareDate = new Date();
@@ -1355,7 +1287,6 @@ script = """
         }
 
         resetFilters() {
-            // Reset category selections
             const categoryOptions = document.querySelectorAll('.category-option');
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
@@ -1363,7 +1294,6 @@ script = """
             const categoryBtn = document.querySelector('.multi-select-btn');
             categoryBtn.textContent = 'All Categories';
 
-            // Reset country selections
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
@@ -1371,7 +1301,6 @@ script = """
             const countryBtn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             countryBtn.textContent = 'All Countries';
 
-            // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
             stateOptions.forEach(opt => opt.classList.remove('selected'));
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
@@ -1379,7 +1308,6 @@ script = """
             const stateBtn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             stateBtn.textContent = 'All States';
 
-            // Reset subcategory selections
             const subcategoryOptions = document.querySelectorAll('.subcategory-option');
             subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
@@ -1387,19 +1315,16 @@ script = """
             const subcategoryBtn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             subcategoryBtn.textContent = 'All Subcategories';
 
-            // Reset the stored selections in the Sets
             if (window.selectedCategories) window.selectedCategories.clear();
             if (window.selectedCountries) window.selectedCountries.clear();
             if (window.selectedStates) window.selectedStates.clear();
             if (window.selectedSubcategories) window.selectedSubcategories.clear();
 
-            // Re-add "All" options to the Sets
             if (window.selectedCategories) window.selectedCategories.add('All Categories');
             if (window.selectedCountries) window.selectedCountries.add('All Countries');
             if (window.selectedStates) window.selectedStates.add('All States');
             if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
 
-            // Reset range slider values using stored references
             if (this.rangeSliderElements) {
                 const { fromSlider, toSlider, fromInput, toInput, fillSlider } = this.rangeSliderElements;
                 fromSlider.value = fromSlider.min;
@@ -1418,14 +1343,11 @@ script = """
         }
 
         updateTable() {
-            // Hide all rows first
             this.allRows.forEach(row => row.style.display = 'none');
             
-            // Calculate visible range
             const start = (this.currentPage - 1) * this.pageSize;
             const end = Math.min(start + this.pageSize, this.visibleRows.length);
             
-            // Show only rows for current page
             this.visibleRows.slice(start, end).forEach(row => {
                 row.style.display = '';
             });
@@ -1505,29 +1427,24 @@ script = """
 
                 if (!Object.values(elements).every(el => el)) return;
 
-                // Count visible rows in current page
                 const visibleRowCount = this.visibleRows.slice(
                     (this.currentPage - 1) * this.pageSize,
                     this.currentPage * this.pageSize
                 ).length;
 
-                // Constants
-                const rowHeight = 52;        // Height per row including padding
-                const headerHeight = 60;     // Table header height
+                const rowHeight = 52;
+                const headerHeight = 60;
                 const controlsHeight = elements.controls.offsetHeight;
                 const paginationHeight = elements.pagination.offsetHeight;
                 const padding = 40;
-                const minTableHeight = 400;  // Minimum table content height
+                const minTableHeight = 400;
 
-                // Calculate table content height
                 const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
                 const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
 
-                // Set dimensions
                 elements.tableContainer.style.height = `${actualTableHeight}px`;
                 elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
 
-                // Calculate final component height
                 const finalHeight = 
                     elements.titleWrapper.offsetHeight +
                     elements.filterWrapper.offsetHeight +
@@ -1536,7 +1453,6 @@ script = """
                     paginationHeight +
                     padding;
 
-                // Update Streamlit frame height if changed significantly
                 if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
                     this.lastHeight = finalHeight;
                     Streamlit.setFrameHeight(finalHeight);
@@ -1545,19 +1461,16 @@ script = """
         }
 
         setupFilters() {
-            // Initialize global Sets to track selections
             window.selectedCategories = new Set(['All Categories']);
             window.selectedCountries = new Set(['All Countries']);
             window.selectedStates = new Set(['All States']);
             window.selectedSubcategories = new Set(['All Subcategories']);
 
-            // Get button elements by ID
             const categoryBtn = document.getElementById('categoryFilterBtn');
             const countryBtn = document.getElementById('countryFilterBtn');
             const stateBtn = document.getElementById('stateFilterBtn');
             const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
 
-            // Create a single update function for all buttons
             const updateButtonText = (selectedItems, buttonElement) => {
                 if (!buttonElement) return;
                 
@@ -1574,7 +1487,6 @@ script = """
                 }
             };
 
-            // Setup multi-select handlers
             const setupMultiSelect = (options, selectedSet, allValue, buttonElement) => {
                 const allOption = document.querySelector(`[data-value="${allValue}"]`);
                 
@@ -1609,11 +1521,9 @@ script = """
                     });
                 });
 
-                // Initialize button text
                 updateButtonText(selectedSet, buttonElement);
             };
 
-            // Setup each multi-select with the correct button element
             setupMultiSelect(
                 document.querySelectorAll('.category-option'),
                 window.selectedCategories,
@@ -1642,7 +1552,6 @@ script = """
                 subcategoryBtn
             );
 
-            // Setup other filters
             const filterIds = ['dateFilter', 'sortFilter'];
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
@@ -1651,30 +1560,25 @@ script = """
                 }
             });
 
-            // Add reset button handler
             const resetButton = document.getElementById('resetFilters');
             if (resetButton) {
                 resetButton.addEventListener('click', () => this.resetFilters());
             }
 
-            // Add range slider initialization
             this.setupRangeSlider();
         }
 
         setupRangeSlider() {
-            // Setup for pledged amount slider
             const fromSlider = document.getElementById('fromSlider');
             const toSlider = document.getElementById('toSlider');
             const fromInput = document.getElementById('fromInput');
             const toInput = document.getElementById('toInput');
 
-            // Setup for goal amount slider
             const goalFromSlider = document.getElementById('goalFromSlider');
             const goalToSlider = document.getElementById('goalToSlider');
             const goalFromInput = document.getElementById('goalFromInput');
             const goalToInput = document.getElementById('goalToInput');
 
-            // Setup for percentage raised slider
             const raisedFromSlider = document.getElementById('raisedFromSlider');
             const raisedToSlider = document.getElementById('raisedToSlider');
             const raisedFromInput = document.getElementById('raisedFromInput');
@@ -1726,6 +1630,123 @@ script = """
                 const to = parseInt(toSlider.value);
                 return [from, to];
             };
+
+            const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
+                const updateValues = () => {
+                    let value = parseInt(input.value);
+                    const minAllowed = parseInt(input.min);
+                    const maxAllowed = parseInt(input.max);
+                    const isGoalInput = input.id.startsWith('goal');
+                    
+                    if (isNaN(value)) {
+                        value = isMin ? minAllowed : maxAllowed;
+                    }
+                    
+                    const fromSlider = isGoalInput ? goalFromSlider : this.rangeSliderElements.fromSlider;
+                    const toSlider = isGoalInput ? goalToSlider : this.rangeSliderElements.toSlider;
+                    
+                    if (isMin) {
+                        const maxValue = parseInt(toSlider.value);
+                        value = Math.max(minAllowed, Math.min(maxValue, value));
+                        fromSlider.value = value;
+                        input.value = value;
+                    } else {
+                        const minValue = parseInt(fromSlider.value);
+                        value = Math.max(minValue, Math.min(maxAllowed, value));
+                        toSlider.value = value;
+                        input.value = value;
+                    }
+                    
+                    fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                    debouncedApplyFilters();
+                };
+
+                if (immediate) {
+                    clearTimeout(inputTimeout);
+                    updateValues();
+                } else {
+                    clearTimeout(inputTimeout);
+                    inputTimeout = setTimeout(updateValues, 1000);
+                }
+            };
+
+            fromSlider.addEventListener('input', (e) => {
+                controlFromSlider(fromSlider, toSlider, fromInput);
+                debouncedApplyFilters();
+            });
+
+            toSlider.addEventListener('input', (e) => {
+                controlToSlider(fromSlider, toSlider, toInput);
+                debouncedApplyFilters();
+            });
+
+            goalFromSlider.addEventListener('input', (e) => {
+                controlFromSlider(goalFromSlider, goalToSlider, goalFromInput);
+                debouncedApplyFilters();
+            });
+
+            goalToSlider.addEventListener('input', (e) => {
+                controlToSlider(goalFromSlider, goalToSlider, goalToInput);
+                debouncedApplyFilters();
+            });
+
+            raisedFromSlider.addEventListener('input', (e) => {
+                controlFromSlider(raisedFromSlider, raisedToSlider, raisedFromInput);
+                debouncedApplyFilters();
+            });
+
+            raisedToSlider.addEventListener('input', (e) => {
+                controlToSlider(raisedFromSlider, raisedToSlider, raisedToInput);
+                debouncedApplyFilters();
+            });
+
+            [fromInput, goalFromInput, raisedFromInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    validateAndUpdateRange(input, true, false);
+                });
+            });
+
+            [toInput, goalToInput, raisedToInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    validateAndUpdateRange(input, false, false);
+                });
+            });
+
+            fromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(fromInput, true, true);
+                }
+            });
+
+            toInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(toInput, false, true);
+                }
+            });
+
+            goalFromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(goalFromInput, true, true);
+                }
+            });
+
+            goalToInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(goalToInput, false, true);
+                }
+            });
+
+            raisedFromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(raisedFromInput, true, true);
+                }
+            });
+
+            raisedToInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(raisedToInput, false, true);
+                }
+            });
 
             const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
                 const updateValues = () => {
