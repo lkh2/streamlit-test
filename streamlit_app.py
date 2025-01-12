@@ -107,7 +107,7 @@ client = init_connection()
 def get_data():
     db = client[st.secrets["mongo"]["database"]]
     collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(500)
+    items = collection.find().limit(10000)
     
     # Convert MongoDB cursor to list and handle ObjectId
     items = [{**item, '_id': str(item['_id'])} for item in items]
@@ -119,8 +119,8 @@ items = get_data()
 df = json_normalize(items)
 
 # Calculate and store raw values first
-df['Raw Goal'] = df['data.goal'].astype(float) * df['data.usd_exchange_rate'].astype(float)
-df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
+df['Raw Goal'] = df['data.goal'].fillna(0).astype(float) * df['data.usd_exchange_rate'].fillna(0).astype(float)
+df['Raw Pledged'] = df['data.converted_pledged_amount'].fillna(0).astype(float)
 df['Raw Raised'] = (df['Raw Pledged'] / df['Raw Goal']) * 100
 df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s')
 
@@ -129,12 +129,12 @@ df['Raw Deadline'] = pd.to_datetime(df['data.deadline'], unit='s')
 df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
 
 # After Raw Deadline calculation, modify Backer Count (single column)
-df['Backer Count'] = df['data.backers_count'].astype(int)
+df['Backer Count'] = df['data.backers_count'].fillna(0).astype(int)
 
-# Format display columns
-df['Goal'] = df['Raw Goal'].map(lambda x: f"${x:,.2f}")
-df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${int(x):,}")
-df['%Raised'] = df['Raw Raised'].map(lambda x: f"{x:.1f}%")
+# Format display columns - Add null handling
+df['Goal'] = df['Raw Goal'].fillna(0).map(lambda x: f"${x:,.2f}")
+df['Pledged Amount'] = df['Raw Pledged'].fillna(0).map(lambda x: f"${int(x):,}")
+df['%Raised'] = df['Raw Raised'].fillna(0).map(lambda x: f"{x:.1f}%")
 df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 
 df = df[[ 
