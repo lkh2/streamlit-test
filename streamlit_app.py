@@ -1539,124 +1539,94 @@ script = """
             window.selectedStates = new Set(['All States']);
             window.selectedSubcategories = new Set(['All Subcategories']);
 
-            // Setup category multi-select
-            const categoryOptions = document.querySelectorAll('.category-option');
-            
-            const updateMultiSelectButton = (selectedItems, btnSelector) => {
-                const btn = document.querySelector(btnSelector);
+            // Create a single update function for all buttons
+            const updateButtonText = (selectedItems, buttonSelector) => {
+                const btn = document.querySelector(buttonSelector);
                 if (!btn) return;
                 
                 const selectedArray = Array.from(selectedItems);
+                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
+                    btn.textContent = selectedArray[0];
+                } else {
+                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
+                    if (sortedArray.length > 2) {
+                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                    } else {
+                        btn.textContent = sortedArray.join(', ');
+                    }
+                }
+            };
+
+            // Setup all multi-select handlers
+            const setupMultiSelect = (options, selectedSet, allValue, buttonSelector) => {
+                const allOption = document.querySelector(`[data-value="${allValue}"]`);
                 
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
-                } else {
-                    // Sort the array alphabetically
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
-                    } else {
-                        btn.textContent = sortedArray.join(', ');
-                    }
-                }
-            };
-
-            const updateCountryButton = (selectedCountries) => {
-                const btn = document.querySelector('.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(3) .multi-select-btn');
-                if (!btn) return;
-
-                const selectedArray = Array.from(selectedCountries);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
-                } else {
-                    // Sort the array alphabetically
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
-                    } else {
-                        btn.textContent = sortedArray.join(', ');
-                    }
-                }
-            };
-
-            const updateStateButton = (selectedStates) => {
-                const btn = document.querySelector('.filter-controls .filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn');
-                if (!btn) return;
-
-                const selectedArray = Array.from(selectedStates);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
-                } else {
-                    // Sort the array alphabetically
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
-                    } else {
-                        btn.textContent = sortedArray.join(', ');
-                    }
-                }
-            };
-
-            const updateSubcategoryButton = (selectedSubcategories) => {
-                const btn = document.querySelector('.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
-                if (!btn) return;
-
-                const selectedArray = Array.from(selectedSubcategories);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    btn.textContent = selectedArray[0];
-                } else {
-                    // Sort the array alphabetically
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
-                    if (sortedArray.length > 2) {
-                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
-                    } else {
-                        btn.textContent = sortedArray.join(', ');
-                    }
-                }
-            };
-            
-            categoryOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-                    
-                    if (clickedValue === 'All Categories') {
-                        categoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        window.selectedCategories.clear();
-                        window.selectedCategories.add('All Categories');
-                        allCategoriesOption.classList.add('selected');
-                    } else {
-                        allCategoriesOption.classList.remove('selected');
-                        window.selectedCategories.delete('All Categories');
+                options.forEach(option => {
+                    option.addEventListener('click', (e) => {
+                        const clickedValue = e.target.dataset.value;
                         
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            window.selectedCategories.add(clickedValue);
+                        if (clickedValue === allValue) {
+                            options.forEach(opt => opt.classList.remove('selected'));
+                            selectedSet.clear();
+                            selectedSet.add(allValue);
+                            allOption.classList.add('selected');
                         } else {
-                            window.selectedCategories.delete(clickedValue);
+                            allOption.classList.remove('selected');
+                            selectedSet.delete(allValue);
+                            
+                            e.target.classList.toggle('selected');
+                            if (e.target.classList.contains('selected')) {
+                                selectedSet.add(clickedValue);
+                            } else {
+                                selectedSet.delete(clickedValue);
+                            }
+                            
+                            if (selectedSet.size === 0) {
+                                allOption.classList.add('selected');
+                                selectedSet.add(allValue);
+                            }
                         }
                         
-                        if (window.selectedCategories.size === 0) {
-                            allCategoriesOption.classList.add('selected');
-                            window.selectedCategories.add('All Categories');
-                        }
-                    }
-                    
-                    updateMultiSelectButton(window.selectedCategories, '.multi-select-btn');
-                    this.applyFilters();
+                        updateButtonText(selectedSet, buttonSelector);
+                        this.applyFilters();
+                    });
                 });
-            });
 
-            // Similar modifications for country, state, and subcategory options...
-            // (Update their event listeners to use window.selectedCountries, 
-            // window.selectedStates, and window.selectedSubcategories respectively)
+                // Initialize button text
+                updateButtonText(selectedSet, buttonSelector);
+            };
+
+            // Setup each multi-select
+            setupMultiSelect(
+                document.querySelectorAll('.category-option'),
+                window.selectedCategories,
+                'All Categories',
+                '.filter-controls .filter-row:first-child .multi-select-dropdown:first-child .multi-select-btn'
+            );
+
+            setupMultiSelect(
+                document.querySelectorAll('.country-option'),
+                window.selectedCountries,
+                'All Countries',
+                '.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(3) .multi-select-btn'
+            );
+
+            setupMultiSelect(
+                document.querySelectorAll('.state-option'),
+                window.selectedStates,
+                'All States',
+                '.filter-controls .filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn'
+            );
+
+            setupMultiSelect(
+                document.querySelectorAll('.subcategory-option'),
+                window.selectedSubcategories,
+                'All Subcategories',
+                '.filter-controls .filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn'
+            );
 
             // Setup other filters
-            const filterIds = [
-                'subcategoryFilter', 'countryFilter', 'stateFilter',
-                'dateFilter', 'sortFilter'
-            ];
-            
+            const filterIds = ['dateFilter', 'sortFilter'];
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
@@ -1672,163 +1642,6 @@ script = """
 
             // Add range slider initialization
             this.setupRangeSlider();
-
-            // Setup country multi-select
-            const countryOptions = document.querySelectorAll('.country-option');
-            
-            const updateCountryButton = (selectedCountries) => {
-                const btn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedCountries.has('All Countries')) {
-                    btn.textContent = 'All Countries';
-                } else {
-                    const selectedArray = Array.from(selectedCountries);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
-                    } else {
-                        btn.textContent = selectedArray.join(', ');
-                    }
-                }
-            };
-            
-            updateCountryButton(window.selectedCountries);
-            
-            countryOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-                    
-                    if (clickedValue === 'All Countries') {
-                        countryOptions.forEach(opt => opt.classList.remove('selected'));
-                        window.selectedCountries.clear();
-                        window.selectedCountries.add('All Countries');
-                        allCountriesOption.classList.add('selected');
-                    } else {
-                        allCountriesOption.classList.remove('selected');
-                        window.selectedCountries.delete('All Countries');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            window.selectedCountries.add(clickedValue);
-                        } else {
-                            window.selectedCountries.delete(clickedValue);
-                        }
-                        
-                        if (window.selectedCountries.size === 0) {
-                            allCountriesOption.classList.add('selected');
-                            window.selectedCountries.add('All Countries');
-                        }
-                    }
-                    
-                    updateCountryButton(window.selectedCountries);
-                    this.applyFilters();
-                });
-            });
-
-            // Setup state multi-select
-            const stateOptions = document.querySelectorAll('.state-option');
-            
-            const updateStateButton = (selectedStates) => {
-                const btn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedStates.has('All States')) {
-                    btn.textContent = 'All States';
-                } else {
-                    const selectedArray = Array.from(selectedStates);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
-                    } else {
-                        btn.textContent = selectedArray.join(', ');
-                    }
-                }
-            };
-            
-            updateStateButton(window.selectedStates);
-            
-            stateOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-                    
-                    if (clickedValue === 'All States') {
-                        stateOptions.forEach(opt => opt.classList.remove('selected'));
-                        window.selectedStates.clear();
-                        window.selectedStates.add('All States');
-                        allStatesOption.classList.add('selected');
-                    } else {
-                        allStatesOption.classList.remove('selected');
-                        window.selectedStates.delete('All States');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            window.selectedStates.add(clickedValue);
-                        } else {
-                            window.selectedStates.delete(clickedValue);
-                        }
-                        
-                        if (window.selectedStates.size === 0) {
-                            allStatesOption.classList.add('selected');
-                            window.selectedStates.add('All States');
-                        }
-                    }
-                    
-                    updateStateButton(window.selectedStates);
-                    this.applyFilters();
-                });
-            });
-
-            // Setup subcategory multi-select
-            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
-            
-            const updateSubcategoryButton = (selectedSubcategories) => {
-                const btn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedSubcategories.has('All Subcategories')) {
-                    btn.textContent = 'All Subcategories';
-                } else {
-                    const selectedArray = Array.from(selectedSubcategories);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
-                    } else {
-                        btn.textContent = selectedArray.join(', ');
-                    }
-                }
-            };
-            
-            updateSubcategoryButton(window.selectedSubcategories);
-            
-            subcategoryOptions.forEach(option => {
-                option.addEventListener('click', (e) => {
-                    const clickedValue = e.target.dataset.value;
-                    const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-                    
-                    if (clickedValue === 'All Subcategories') {
-                        subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        window.selectedSubcategories.clear();
-                        window.selectedSubcategories.add('All Subcategories');
-                        allSubcategoriesOption.classList.add('selected');
-                    } else {
-                        allSubcategoriesOption.classList.remove('selected');
-                        window.selectedSubcategories.delete('All Subcategories');
-                        
-                        e.target.classList.toggle('selected');
-                        if (e.target.classList.contains('selected')) {
-                            window.selectedSubcategories.add(clickedValue);
-                        } else {
-                            window.selectedSubcategories.delete(clickedValue);
-                        }
-                        
-                        if (window.selectedSubcategories.size === 0) {
-                            allSubcategoriesOption.classList.add('selected');
-                            window.selectedSubcategories.add('All Subcategories');
-                        }
-                    }
-                    
-                    updateSubcategoryButton(window.selectedSubcategories);
-                    this.applyFilters();
-                });
-            });
-
-            // Initialize with "All Subcategories" selected
-            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-            allSubcategoriesOption.classList.add('selected');
         }
 
         setupRangeSlider() {
