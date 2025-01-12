@@ -1051,6 +1051,9 @@ script = """
             this.currentSort = 'popularity';
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
+            // Add these as class properties
+            this.selectedCategories = new Set(['All Categories']);
+            this.selectedCountries = new Set(['All Countries']);
             this.initialize();
             this.resetFilters();
         }
@@ -1206,13 +1209,18 @@ script = """
         }
 
         matchesFilters(row, filters) {
-            // Category filter
-            const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
-                .map(option => option.dataset.value);
+            // Category filter check using class property
             const category = row.dataset.category;
-            
-            if (selectedCategories.length > 0) {
-                if (!selectedCategories.includes('All Categories') && !selectedCategories.includes(category)) {
+            if (this.selectedCategories.size > 0) {
+                if (!this.selectedCategories.has('All Categories') && !this.selectedCategories.has(category)) {
+                    return false;
+                }
+            }
+
+            // Get country from row
+            const country = row.querySelector('td:nth-child(5)').textContent.trim();
+            if (this.selectedCountries.size > 0) {
+                if (!this.selectedCountries.has('All Countries') && !this.selectedCountries.has(country)) {
                     return false;
                 }
             }
@@ -1224,18 +1232,9 @@ script = """
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
             const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
-            const country = row.querySelector('td:nth-child(5)').textContent.trim();
 
             // Rest of filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-            const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
-                .map(option => option.dataset.value);
-            
-            if (selectedCountries.length > 0) {
-                if (!selectedCountries.includes('All Countries') && !selectedCountries.includes(country)) {
-                    return false;
-                }
-            }
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
             // Check pledged range
@@ -1490,13 +1489,12 @@ script = """
         setupFilters() {
             // Setup category multi-select
             const categoryOptions = document.querySelectorAll('.category-option');
-            
-            const updateMultiSelectButton = (selectedCategories) => {
+            const updateCategoryButton = () => {
                 const btn = document.querySelector('.multi-select-btn');
-                if (selectedCategories.has('All Categories')) {
+                if (this.selectedCategories.has('All Categories')) {
                     btn.textContent = 'All Categories';
                 } else {
-                    const selectedArray = Array.from(selectedCategories);
+                    const selectedArray = Array.from(this.selectedCategories);
                     if (selectedArray.length > 2) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
@@ -1505,8 +1503,7 @@ script = """
                 }
             };
             
-            const selectedCategories = new Set(['All Categories']);
-            updateMultiSelectButton(selectedCategories);
+            updateCategoryButton();
             
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1514,40 +1511,85 @@ script = """
                     const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
                     
                     if (clickedValue === 'All Categories') {
-                        // Deselect all other categories
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        selectedCategories.clear();
-                        selectedCategories.add('All Categories');
+                        this.selectedCategories.clear();
+                        this.selectedCategories.add('All Categories');
                         allCategoriesOption.classList.add('selected');
                     } else {
-                        // Remove "All Categories" selection
                         allCategoriesOption.classList.remove('selected');
-                        selectedCategories.delete('All Categories');
+                        this.selectedCategories.delete('All Categories');
                         
-                        // Toggle current selection
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            selectedCategories.add(clickedValue);
+                            this.selectedCategories.add(clickedValue);
                         } else {
-                            selectedCategories.delete(clickedValue);
+                            this.selectedCategories.delete(clickedValue);
                         }
                         
-                        // If no categories are selected, reselect "All Categories"
-                        if (selectedCategories.size === 0) {
+                        if (this.selectedCategories.size === 0) {
                             allCategoriesOption.classList.add('selected');
-                            selectedCategories.add('All Categories');
+                            this.selectedCategories.add('All Categories');
                         }
                     }
                     
-                    // Update button text and filters
-                    updateMultiSelectButton(selectedCategories);
+                    updateCategoryButton();
                     this.applyFilters();
                 });
             });
 
-            // Initialize with "All Categories" selected
-            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            allCategoriesOption.classList.add('selected');
+            // Setup country multi-select
+            const countryOptions = document.querySelectorAll('.country-option');
+            const updateCountryButton = () => {
+                const btn = document.getElementById('countryFilterBtn');
+                if (this.selectedCountries.has('All Countries')) {
+                    btn.textContent = 'All Countries';
+                } else {
+                    const selectedArray = Array.from(this.selectedCountries);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    } else {
+                        btn.textContent = selectedArray.join(', ');
+                    }
+                }
+            };
+            
+            updateCountryButton();
+            
+            countryOptions.forEach(option => {
+                option.addEventListener('click', (e) => {
+                    const clickedValue = e.target.dataset.value;
+                    const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+                    
+                    if (clickedValue === 'All Countries') {
+                        countryOptions.forEach(opt => opt.classList.remove('selected'));
+                        this.selectedCountries.clear();
+                        this.selectedCountries.add('All Countries');
+                        allCountriesOption.classList.add('selected');
+                    } else {
+                        allCountriesOption.classList.remove('selected');
+                        this.selectedCountries.delete('All Countries');
+                        
+                        e.target.classList.toggle('selected');
+                        if (e.target.classList.contains('selected')) {
+                            this.selectedCountries.add(clickedValue);
+                        } else {
+                            this.selectedCountries.delete(clickedValue);
+                        }
+                        
+                        if (this.selectedCountries.size === 0) {
+                            allCountriesOption.classList.add('selected');
+                            this.selectedCountries.add('All Countries');
+                        }
+                    }
+                    
+                    updateCountryButton();
+                    this.applyFilters();
+                });
+            });
+
+            // Initialize selections
+            document.querySelector('.category-option[data-value="All Categories"]').classList.add('selected');
+            document.querySelector('.country-option[data-value="All Countries"]').classList.add('selected');
 
             // Setup other filters
             const filterIds = [
