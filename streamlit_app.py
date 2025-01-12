@@ -1564,13 +1564,13 @@ script = """
                 }
             };
 
-            // Get button elements first
+            // Fix: Update button element selectors to be more specific and reliable
             const categoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(2) .multi-select-btn');
             const countryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(6) .multi-select-btn');
-            const stateBtn = document.querySelector('.filter-row:last-child .multi-select-dropdown:first-child .multi-select-btn');
+            const stateBtn = document.querySelector('.filter-row:nth-child(2) .multi-select-dropdown:first-child .multi-select-btn');
             const subcategoryBtn = document.querySelector('.filter-row:first-child .multi-select-dropdown:nth-child(4) .multi-select-btn');
 
-            // Setup all multi-select handlers
+            // Setup multi-select handlers
             const setupMultiSelect = (options, selectedSet, allValue, buttonElement) => {
                 const allOption = document.querySelector(`[data-value="${allValue}"]`);
                 
