@@ -794,7 +794,6 @@ script = """
                     return distA - distB;
                 });
 
-                // Debug log sorted distances
                 console.log("First 5 rows after distance sort:");
                 this.visibleRows.slice(0, 5).forEach(row => {
                     console.log(`Distance: ${row.dataset.distance} km, Country: ${row.dataset.countryCode}`);
@@ -808,12 +807,16 @@ script = """
                 });
             }
 
-            // Update the table display after sorting
+            // Update the table display after sorting without cloning nodes
             const tbody = document.querySelector('#data-table tbody');
-            tbody.innerHTML = ''; // Clear the table body
-            const fragment = document.createDocumentFragment();
-            this.visibleRows.forEach(row => fragment.appendChild(row.cloneNode(true)));
-            tbody.appendChild(fragment);
+            // Remove all rows from their current position
+            this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
+            // Add them back in the new order
+            this.visibleRows.forEach(row => tbody.appendChild(row));
+            
+            // Update current page and pagination
+            this.currentPage = 1;
+            this.updateTable();
         }
 
         // Modify applyAllFilters to handle async sorting
@@ -1001,9 +1004,11 @@ script = """
             // Hide all rows first
             this.allRows.forEach(row => row.style.display = 'none');
             
-            // Show only visible rows for current page
+            // Calculate visible range
             const start = (this.currentPage - 1) * this.pageSize;
-            const end = start + this.pageSize;
+            const end = Math.min(start + this.pageSize, this.visibleRows.length);
+            
+            // Show only rows for current page
             this.visibleRows.slice(start, end).forEach(row => {
                 row.style.display = '';
             });
