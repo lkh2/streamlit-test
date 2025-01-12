@@ -324,7 +324,7 @@ header_html, rows_html = generate_table_html(df)
 min_pledged = int(df['Raw Pledged'].min())
 max_pledged = int(df['Raw Pledged'].max())
 min_goal = int(df['Raw Goal'].min())
-max_goal = int(df['Raw Goal'].max())
+max_goal = int(df['Raw Goal'].max()) + 1
 min_raised = int(df['Raw Raised'].min())
 max_raised = int(df['Raw Raised'].max())
 
