@@ -1544,16 +1544,17 @@ script = """
             
             const updateMultiSelectButton = (selectedItems, btnSelector) => {
                 const btn = document.querySelector(btnSelector);
-                const firstValue = Array.from(selectedItems)[0];
+                const selectedArray = Array.from(selectedItems);
                 
-                if (firstValue.startsWith('All')) {
-                    btn.textContent = firstValue;
+                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
+                    btn.textContent = selectedArray[0];
                 } else {
-                    const selectedArray = Array.from(selectedItems);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    // Sort the array alphabetically
+                    const sortedArray = selectedArray.sort();
+                    if (sortedArray.length > 2) {
+                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
                     } else {
-                        btn.textContent = selectedArray.join(', ');
+                        btn.textContent = sortedArray.join(', ');
                     }
                 }
             };
@@ -1620,15 +1621,17 @@ script = """
             const countryOptions = document.querySelectorAll('.country-option');
             
             const updateCountryButton = (selectedCountries) => {
-                const btn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedCountries.has('All Countries')) {
-                    btn.textContent = 'All Countries';
+                const btn = document.querySelector('.multi-select-dropdown:nth-child(3) .multi-select-btn');
+                const selectedArray = Array.from(selectedCountries);
+                
+                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
+                    btn.textContent = selectedArray[0];
                 } else {
-                    const selectedArray = Array.from(selectedCountries);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    const sortedArray = selectedArray.sort();
+                    if (sortedArray.length > 2) {
+                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
                     } else {
-                        btn.textContent = selectedArray.join(', ');
+                        btn.textContent = sortedArray.join(', ');
                     }
                 }
             };
@@ -1671,15 +1674,17 @@ script = """
             const stateOptions = document.querySelectorAll('.state-option');
             
             const updateStateButton = (selectedStates) => {
-                const btn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedStates.has('All States')) {
-                    btn.textContent = 'All States';
+                const btn = document.querySelector('.multi-select-dropdown:nth-child(1) .multi-select-btn');
+                const selectedArray = Array.from(selectedStates);
+                
+                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
+                    btn.textContent = selectedArray[0];
                 } else {
-                    const selectedArray = Array.from(selectedStates);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    const sortedArray = selectedArray.sort();
+                    if (sortedArray.length > 2) {
+                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
                     } else {
-                        btn.textContent = selectedArray.join(', ');
+                        btn.textContent = sortedArray.join(', ');
                     }
                 }
             };
@@ -1722,15 +1727,17 @@ script = """
             const subcategoryOptions = document.querySelectorAll('.subcategory-option');
             
             const updateSubcategoryButton = (selectedSubcategories) => {
-                const btn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-                if (selectedSubcategories.has('All Subcategories')) {
-                    btn.textContent = 'All Subcategories';
+                const btn = document.querySelector('.multi-select-dropdown:nth-child(2) .multi-select-btn');
+                const selectedArray = Array.from(selectedSubcategories);
+                
+                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
+                    btn.textContent = selectedArray[0];
                 } else {
-                    const selectedArray = Array.from(selectedSubcategories);
-                    if (selectedArray.length > 2) {
-                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    const sortedArray = selectedArray.sort();
+                    if (sortedArray.length > 2) {
+                        btn.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
                     } else {
-                        btn.textContent = selectedArray.join(', ');
+                        btn.textContent = sortedArray.join(', ');
                     }
                 }
             };
@@ -2024,5 +2031,3 @@ script = """
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
-
-# st.dataframe(df)
