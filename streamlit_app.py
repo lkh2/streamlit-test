@@ -123,6 +123,10 @@ df['Raw Pledged'] = df['data.converted_pledged_amount'].astype(float)
 df['Raw Raised'] = (df['Raw Pledged'] / df['Raw Goal']) * 100
 df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s')
 
+# After Raw Date calculation, add Raw Deadline calculation
+df['Raw Deadline'] = pd.to_datetime(df['data.deadline'], unit='s')
+df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
+
 # Format display columns
 df['Goal'] = df['Raw Goal'].map(lambda x: f"${x:,.2f}")
 df['Pledged Amount'] = df['Raw Pledged'].map(lambda x: f"${x:,.2f}")
@@ -140,12 +144,14 @@ df = df[[
     'data.category.parent_name',
     'data.category.name',
     'Date',
+    'Deadline',  # Add visible deadline
     'Goal',
     '%Raised',
     'Raw Goal',
     'Raw Pledged',
     'Raw Raised',
     'Raw Date',
+    'Raw Deadline',  # Add raw deadline
     'data.location.country' 
 ]].rename(columns={ 
     'data.name': 'Project Name', 
@@ -244,6 +250,7 @@ def generate_table_html(df):
             data-goal="{row['Raw Goal']}"
             data-raised="{row['Raw Raised']}"
             data-date="{row['Raw Date'].strftime('%Y-%m-%d')}"
+            data-deadline="{row['Raw Deadline'].strftime('%Y-%m-%d')}"  # Add deadline
             data-latitude="{row['latitude']}"
             data-longitude="{row['longitude']}"
             data-country-code="{row['Country Code']}"
@@ -336,6 +343,7 @@ template = f"""
             <select id="sortFilter" class="filter-select">
                 <option value="newest">Newest First</option>
                 <option value="oldest">Oldest First</option>
+                <option value="enddate">End Date</option>
                 <option value="nearme">Near Me</option>
             </select>
         </div>
@@ -789,6 +797,13 @@ script = """
                     if (isNaN(distB)) return -1;
                     
                     return distA - distB;
+                });
+            } else if (sortType === 'enddate') {
+                // Sort by deadline
+                this.visibleRows.sort((a, b) => {
+                    const deadlineA = new Date(a.dataset.deadline);
+                    const deadlineB = new Date(b.dataset.deadline);
+                    return deadlineA - deadlineB;  // Ascending order (closest deadline first)
                 });
             } else {
                 // Date-based sorting only
