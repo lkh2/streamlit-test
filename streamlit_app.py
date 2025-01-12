@@ -1633,8 +1633,7 @@ script = """
                 }
             };
             
-            const selectedCountries = new Set(['All Countries']);
-            updateCountryButton(selectedCountries);
+            updateCountryButton(window.selectedCountries);
             
             countryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1642,40 +1641,31 @@ script = """
                     const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
                     
                     if (clickedValue === 'All Countries') {
-                        // Deselect all other countries
                         countryOptions.forEach(opt => opt.classList.remove('selected'));
-                        selectedCountries.clear();
-                        selectedCountries.add('All Countries');
+                        window.selectedCountries.clear();
+                        window.selectedCountries.add('All Countries');
                         allCountriesOption.classList.add('selected');
                     } else {
-                        // Remove "All Countries" selection
                         allCountriesOption.classList.remove('selected');
-                        selectedCountries.delete('All Countries');
+                        window.selectedCountries.delete('All Countries');
                         
-                        // Toggle current selection
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            selectedCountries.add(clickedValue);
+                            window.selectedCountries.add(clickedValue);
                         } else {
-                            selectedCountries.delete(clickedValue);
+                            window.selectedCountries.delete(clickedValue);
                         }
                         
-                        // If no countries are selected, reselect "All Countries"
-                        if (selectedCountries.size === 0) {
+                        if (window.selectedCountries.size === 0) {
                             allCountriesOption.classList.add('selected');
-                            selectedCountries.add('All Countries');
+                            window.selectedCountries.add('All Countries');
                         }
                     }
                     
-                    // Update button text and filters
-                    updateCountryButton(selectedCountries);
+                    updateCountryButton(window.selectedCountries);
                     this.applyFilters();
                 });
             });
-
-            // Initialize with "All Countries" selected
-            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-            allCountriesOption.classList.add('selected');
 
             // Setup state multi-select
             const stateOptions = document.querySelectorAll('.state-option');
@@ -1694,8 +1684,7 @@ script = """
                 }
             };
             
-            const selectedStates = new Set(['All States']);
-            updateStateButton(selectedStates);
+            updateStateButton(window.selectedStates);
             
             stateOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1704,33 +1693,30 @@ script = """
                     
                     if (clickedValue === 'All States') {
                         stateOptions.forEach(opt => opt.classList.remove('selected'));
-                        selectedStates.clear();
-                        selectedStates.add('All States');
+                        window.selectedStates.clear();
+                        window.selectedStates.add('All States');
                         allStatesOption.classList.add('selected');
                     } else {
                         allStatesOption.classList.remove('selected');
-                        selectedStates.delete('All States');
+                        window.selectedStates.delete('All States');
                         
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            selectedStates.add(clickedValue);
+                            window.selectedStates.add(clickedValue);
                         } else {
-                            selectedStates.delete(clickedValue);
+                            window.selectedStates.delete(clickedValue);
                         }
                         
-                        if (selectedStates.size === 0) {
+                        if (window.selectedStates.size === 0) {
                             allStatesOption.classList.add('selected');
-                            selectedStates.add('All States');
+                            window.selectedStates.add('All States');
                         }
                     }
                     
-                    updateStateButton(selectedStates);
+                    updateStateButton(window.selectedStates);
                     this.applyFilters();
                 });
             });
-
-            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-            allStatesOption.classList.add('selected');
 
             // Setup subcategory multi-select
             const subcategoryOptions = document.querySelectorAll('.subcategory-option');
@@ -1749,8 +1735,7 @@ script = """
                 }
             };
             
-            const selectedSubcategories = new Set(['All Subcategories']);
-            updateSubcategoryButton(selectedSubcategories);
+            updateSubcategoryButton(window.selectedSubcategories);
             
             subcategoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1759,27 +1744,27 @@ script = """
                     
                     if (clickedValue === 'All Subcategories') {
                         subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
-                        selectedSubcategories.clear();
-                        selectedSubcategories.add('All Subcategories');
+                        window.selectedSubcategories.clear();
+                        window.selectedSubcategories.add('All Subcategories');
                         allSubcategoriesOption.classList.add('selected');
                     } else {
                         allSubcategoriesOption.classList.remove('selected');
-                        selectedSubcategories.delete('All Subcategories');
+                        window.selectedSubcategories.delete('All Subcategories');
                         
                         e.target.classList.toggle('selected');
                         if (e.target.classList.contains('selected')) {
-                            selectedSubcategories.add(clickedValue);
+                            window.selectedSubcategories.add(clickedValue);
                         } else {
-                            selectedSubcategories.delete(clickedValue);
+                            window.selectedSubcategories.delete(clickedValue);
                         }
                         
-                        if (selectedSubcategories.size === 0) {
+                        if (window.selectedSubcategories.size === 0) {
                             allSubcategoriesOption.classList.add('selected');
-                            selectedSubcategories.add('All Subcategories');
+                            window.selectedSubcategories.add('All Subcategories');
                         }
                     }
                     
-                    updateSubcategoryButton(selectedSubcategories);
+                    updateSubcategoryButton(window.selectedSubcategories);
                     this.applyFilters();
                 });
             });
