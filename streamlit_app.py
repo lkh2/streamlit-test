@@ -1165,3 +1165,5 @@ script = """
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 table_component()
+
+st.dataframe(df)
