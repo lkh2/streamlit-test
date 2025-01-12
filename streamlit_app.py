@@ -1282,51 +1282,50 @@ script = """
 
         adjustHeight() {
             requestAnimationFrame(() => {
-                const titleWrapper = document.querySelector('.title-wrapper');
-                const filterWrapper = document.querySelector('.filter-wrapper');
-                const tableWrapper = document.querySelector('.table-wrapper');
-                const tableContainer = document.querySelector('.table-container');
-                const table = document.querySelector('#data-table');
-                const controls = document.querySelector('.table-controls');
-                const pagination = document.querySelector('.pagination-controls');
-                
-                if (titleWrapper && filterWrapper && tableWrapper && tableContainer && table) {
-                    const titleHeight = titleWrapper.offsetHeight;
-                    const filterHeight = filterWrapper.offsetHeight;
-                    const tableHeight = table.offsetHeight;
-                    const controlsHeight = controls.offsetHeight;
-                    const paginationHeight = pagination.offsetHeight;
-                    const padding = 40;
-                    
-                    // Calculate content height
-                    const contentHeight = tableHeight + controlsHeight + paginationHeight + padding;
-                    
-                    // Calculate total component height including title
-                const headerHeight = 60; // Height of the table header
+                const elements = {
+                    titleWrapper: document.querySelector('.title-wrapper'),
+                    filterWrapper: document.querySelector('.filter-wrapper'),
+                    tableWrapper: document.querySelector('.table-wrapper'),
+                    tableContainer: document.querySelector('.table-container'),
+                    table: document.querySelector('#data-table'),
+                    controls: document.querySelector('.table-controls'),
+                    pagination: document.querySelector('.pagination-controls')
+                };
+
+                if (!Object.values(elements).every(el => el)) return;
+
+                // Count visible rows in current page
+                const visibleRowCount = this.visibleRows.slice(
+                    (this.currentPage - 1) * this.pageSize,
+                    this.currentPage * this.pageSize
+                ).length;
+
+                // Constants
+                const rowHeight = 52;        // Height per row including padding
+                const headerHeight = 60;     // Table header height
                 const controlsHeight = elements.controls.offsetHeight;
                 const paginationHeight = elements.pagination.offsetHeight;
                 const padding = 40;
+                const minTableHeight = 400;  // Minimum table content height
 
-                // Calculate dynamic table height
+                // Calculate table content height
                 const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
-                const minTableHeight = 400; // Minimum height for table content
                 const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
 
-                // Set table container height
+                // Set dimensions
                 elements.tableContainer.style.height = `${actualTableHeight}px`;
+                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
 
-                // Calculate wrapper height based on content
-                const wrapperHeight = actualTableHeight + controlsHeight + paginationHeight;
-                elements.tableWrapper.style.height = `${wrapperHeight}px`;
-
-                // Calculate final height including all components
+                // Calculate final component height
                 const finalHeight = 
                     elements.titleWrapper.offsetHeight +
                     elements.filterWrapper.offsetHeight +
-                    wrapperHeight +
+                    actualTableHeight +
+                    controlsHeight +
+                    paginationHeight +
                     padding;
 
-                // Update Streamlit frame height only if significant change
+                // Update Streamlit frame height if changed significantly
                 if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
                     this.lastHeight = finalHeight;
                     Streamlit.setFrameHeight(finalHeight);
@@ -1628,33 +1627,32 @@ script = """
                     this.currentPage * this.pageSize
                 ).length;
 
-                // Calculate base heights
-                const rowHeight = 52; // Height per row including padding
-                const headerHeight = 60; // Height of the table header
+                // Constants
+                const rowHeight = 52;        // Height per row including padding
+                const headerHeight = 60;     // Table header height
                 const controlsHeight = elements.controls.offsetHeight;
                 const paginationHeight = elements.pagination.offsetHeight;
                 const padding = 40;
+                const minTableHeight = 400;  // Minimum table content height
 
-                // Calculate dynamic table height
+                // Calculate table content height
                 const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
-                const minTableHeight = 400; // Minimum height for table content
                 const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
 
-                // Set table container height
+                // Set dimensions
                 elements.tableContainer.style.height = `${actualTableHeight}px`;
+                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
 
-                // Calculate wrapper height based on content
-                const wrapperHeight = actualTableHeight + controlsHeight + paginationHeight;
-                elements.tableWrapper.style.height = `${wrapperHeight}px`;
-
-                // Calculate final height including all components
+                // Calculate final component height
                 const finalHeight = 
                     elements.titleWrapper.offsetHeight +
                     elements.filterWrapper.offsetHeight +
-                    wrapperHeight +
+                    actualTableHeight +
+                    controlsHeight +
+                    paginationHeight +
                     padding;
 
-                // Update Streamlit frame height only if significant change
+                // Update Streamlit frame height if changed significantly
                 if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
                     this.lastHeight = finalHeight;
                     Streamlit.setFrameHeight(finalHeight);
