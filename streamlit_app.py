@@ -374,9 +374,12 @@ template = f"""
                 {' '.join(f'<option value="{opt}" {"selected" if opt == "All Subcategories" else ""}>{opt}</option>' for opt in filter_options['subcategories'])}
             </select>
             <span class="filter-label">Projects On</span>
-            <select id="countryFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['countries'])}
-            </select>
+            <div class="multi-select-dropdown">
+                <button class="filter-select multi-select-btn" id="countryFilterBtn">Countries</button>
+                <div class="multi-select-content">
+                    {' '.join(f'<div class="country-option" data-value="{opt}">{opt}</div>' for opt in filter_options['countries'])}
+                </div>
+            </div>
             <span class="filter-label">Sorted By</span>
             <select id="sortFilter" class="filter-select">
                 <option value="popularity" selected>Most Popular</option>
@@ -1199,7 +1202,15 @@ script = """
 
             // Rest of filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-            if (filters.country !== 'All Countries' && country !== filters.country) return false;
+            const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
+                .map(option => option.dataset.value);
+            const country = row.querySelector('td:nth-child(5)').textContent.trim();
+            
+            if (selectedCountries.length > 0) {
+                if (!selectedCountries.includes('All Countries') && !selectedCountries.includes(country)) {
+                    return false;
+                }
+            }
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
 
             // Check pledged range
@@ -1518,6 +1529,62 @@ script = """
 
             // Add range slider initialization
             this.setupRangeSlider();
+
+            // Setup country multi-select
+            const countryOptions = document.querySelectorAll('.country-option');
+            const selectedCountries = new Set(['All Countries']);
+            
+            const updateCountryButton = (selectedCountries) => {
+                const btn = document.getElementById('countryFilterBtn');
+                if (selectedCountries.has('All Countries')) {
+                    btn.textContent = 'All Countries';
+                } else {
+                    const selectedArray = Array.from(selectedCountries);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    } else {
+                        btn.textContent = selectedArray.join(', ');
+                    }
+                }
+            };
+            
+            updateCountryButton(selectedCountries);
+            
+            countryOptions.forEach(option => {
+                option.addEventListener('click', (e) => {
+                    const clickedValue = e.target.dataset.value;
+                    const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+                    
+                    if (clickedValue === 'All Countries') {
+                        countryOptions.forEach(opt => opt.classList.remove('selected'));
+                        selectedCountries.clear();
+                        selectedCountries.add('All Countries');
+                        allCountriesOption.classList.add('selected');
+                    } else {
+                        allCountriesOption.classList.remove('selected');
+                        selectedCountries.delete('All Countries');
+                        
+                        e.target.classList.toggle('selected');
+                        if (e.target.classList.contains('selected')) {
+                            selectedCountries.add(clickedValue);
+                        } else {
+                            selectedCountries.delete(clickedValue);
+                        }
+                        
+                        if (selectedCountries.size === 0) {
+                            allCountriesOption.classList.add('selected');
+                            selectedCountries.add('All Countries');
+                        }
+                    }
+                    
+                    updateCountryButton(selectedCountries);
+                    this.applyFilters();
+                });
+            });
+
+            // Initialize with "All Countries" selected
+            const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
+            allCountriesOption.classList.add('selected');
         }
 
         setupRangeSlider() {
