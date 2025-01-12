@@ -7,6 +7,7 @@ from pandas import json_normalize
 from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
+import time
 
 st.set_page_config(layout="wide")
 
@@ -196,15 +197,32 @@ df = df.merge(country_data[['country', 'latitude', 'longitude']],
               right_on='country', 
               how='left')
 
+# Add state management for warnings
+if 'show_location_warning' not in st.session_state:
+    st.session_state.show_location_warning = False
+if 'show_loading_spinner' not in st.session_state:
+    st.session_state.show_loading_spinner = False
+
 # Add geolocation call before data processing
 loc = get_geolocation()
 user_location = None
 if (loc and 'coords' in loc):
-    user_location = {
-        'latitude': loc['coords']['latitude'],
-        'longitude': loc['coords']['longitude']
-    }
-    st.write("")
+    # Show loading spinner when location is received
+    with st.spinner('Updating table with your location...'):
+        user_location = {
+            'latitude': loc['coords']['latitude'],
+            'longitude': loc['coords']['longitude']
+        }
+        time.sleep(1)  # Give time for visual feedback
+    st.success("Location received successfully!")
+    st.session_state.show_location_warning = False
+else:
+    # Set flag to show warning if needed
+    st.session_state.show_location_warning = True
+
+# Show warning if needed
+if st.session_state.show_location_warning:
+    st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️")
 
 # Add function to calculate distances
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -824,6 +842,13 @@ script = """
                 if (!this.userLocation) {
                     this.currentSort = 'popularity';
                     document.getElementById('sortFilter').value = 'popularity';
+                    
+                    // Use Streamlit's postMessage to trigger warning
+                    window.parent.postMessage({
+                        type: 'streamlit:setComponentValue',
+                        value: { showLocationWarning: true }
+                    }, '*');
+                    
                     this.sortRows('popularity');
                     return;
                 }
@@ -1212,7 +1237,8 @@ script = """
 
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
-table_component()
+table_value = table_component()
+if table_value and isinstance(table_value, dict) and table_value.get('showLocationWarning'):
+    st.warning('Please enable location services to use the "Near Me" sorting option.', icon="⚠️")
 
 st.dataframe(df)
-st.warning('This is a warning', icon="⚠️")
