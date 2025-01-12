@@ -355,6 +355,8 @@ filter_options = get_filter_options(df)
 # Update template to include filter controls with default subcategory
 template = f"""
 <script>
+    // Define global variable first
+    window.locationAlertTriggered = false;
     // Make user location available to JavaScript
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
     window.hasLocation = {json.dumps(bool(user_location))};
@@ -837,11 +839,8 @@ script = """
                     this.currentSort = 'popularity';
                     document.getElementById('sortFilter').value = 'popularity';
                     
-                    // Use Streamlit's postMessage to call location_alert
-                    window.parent.postMessage({
-                        type: 'streamlit:setComponentValue',
-                        value: { runLocationAlert: true }
-                    }, '*');
+                    // Set the global variable
+                    window.locationAlertTriggered = true;
                     
                     this.sortRows('popularity');
                     return;
@@ -1233,14 +1232,15 @@ script = """
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
 result = table_component()
 
-# Listen for location alert trigger using st_javascript
+# Check for location alert in a more robust way
 alert_triggered = st_javascript("""
-    window.locationAlertTriggered || false;
+    // Get current value and reset immediately
+    let triggered = window.locationAlertTriggered;
+    window.locationAlertTriggered = false;
+    triggered;
 """)
 
 if alert_triggered:
     location_alert()
-    # Reset the flag
-    st_javascript("window.locationAlertTriggered = false;")
 
 st.dataframe(df)
