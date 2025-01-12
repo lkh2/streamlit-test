@@ -1355,14 +1355,8 @@ script = """
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            // Fix: Get all multi-select buttons and update the correct one for countries
-            const multiSelectBtns = document.querySelectorAll('.multi-select-btn');
-            multiSelectBtns.forEach((btn, index) => {
-                if (index === 0) btn.textContent = 'All Categories';
-                if (index === 1) btn.textContent = 'All Subcategories';
-                if (index === 2) btn.textContent = 'All Countries';
-                if (index === 3) btn.textContent = 'All States';
-            });
+            const countryButtons = document.querySelectorAll('.multi-select-btn');
+            countryButtons[1].textContent = 'All Countries';
 
             // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
@@ -2076,14 +2070,8 @@ script = """
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
-            // Fix: Get all multi-select buttons and update the correct one for countries
-            const multiSelectBtns = document.querySelectorAll('.multi-select-btn');
-            multiSelectBtns.forEach((btn, index) => {
-                if (index === 0) btn.textContent = 'All Categories';
-                if (index === 1) btn.textContent = 'All Subcategories';
-                if (index === 2) btn.textContent = 'All Countries';
-                if (index === 3) btn.textContent = 'All States';
-            });
+            const countryButtons = document.querySelectorAll('.multi-select-btn');
+            countryButtons[1].textContent = 'All Countries';  // Second button is for countries
 
             // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
