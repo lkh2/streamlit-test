@@ -1364,10 +1364,19 @@ script = """
 
             const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
 
-            const validateAndUpdateRange = (input, isMin = true) => {
-                clearTimeout(inputTimeout);
-                inputTimeout = setTimeout(() => {
-                    const value = parseInt(input.value) || (isMin ? parseInt(fromSlider.min) : parseInt(toSlider.max));
+            const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
+                const updateValues = () => {
+                    let value = parseInt(input.value);
+                    const minAllowed = parseInt(fromSlider.min);
+                    const maxAllowed = parseInt(toSlider.max);
+
+                    // Ensure value is within allowed range
+                    if (isNaN(value)) {
+                        value = isMin ? minAllowed : maxAllowed;
+                    } else {
+                        value = Math.max(minAllowed, Math.min(maxAllowed, value));
+                    }
+
                     if (isMin) {
                         // Min value validation
                         const maxValue = parseInt(toInput.value);
@@ -1383,7 +1392,15 @@ script = """
                     }
                     fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
                     debouncedApplyFilters();
-                }, 1000); // Wait 1 second before validating
+                };
+
+                if (immediate) {
+                    clearTimeout(inputTimeout);
+                    updateValues();
+                } else {
+                    clearTimeout(inputTimeout);
+                    inputTimeout = setTimeout(updateValues, 1000);
+                }
             };
 
             // Slider event handlers
@@ -1403,22 +1420,33 @@ script = """
 
             // Input event handlers
             fromInput.addEventListener('input', (e) => {
-                validateAndUpdateRange(fromInput, true);
+                validateAndUpdateRange(fromInput, true, false);
             });
 
             toInput.addEventListener('input', (e) => {
-                validateAndUpdateRange(toInput, false);
+                validateAndUpdateRange(toInput, false, false);
+            });
+
+            // Handle key events for immediate validation on Enter
+            fromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(fromInput, true, true);
+                }
+            });
+
+            toInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(toInput, false, true);
+                }
             });
 
             // Handle blur events for immediate validation
             fromInput.addEventListener('blur', () => {
-                clearTimeout(inputTimeout);
-                validateAndUpdateRange(fromInput, true);
+                validateAndUpdateRange(fromInput, true, true);
             });
 
             toInput.addEventListener('blur', () => {
-                clearTimeout(inputTimeout);
-                validateAndUpdateRange(toInput, false);
+                validateAndUpdateRange(toInput, false, true);
             });
 
             // Store references for reset function
