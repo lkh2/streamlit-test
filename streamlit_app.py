@@ -4,7 +4,8 @@ import tempfile, os
 from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
-from streamlit_geolocation import streamlit_geolocation
+from streamlit_js_eval import get_geolocation
+import json
 
 st.set_page_config(layout="wide")
 
@@ -258,16 +259,22 @@ def get_filter_options(df):
 filter_options = get_filter_options(df)
 
 # Add geolocation call before data processing
-location = streamlit_geolocation()
+loc = get_geolocation()
 user_location = None
-if location:
+if loc and 'coords' in loc:
     user_location = {
-        'latitude': location.get('latitude'),
-        'longitude': location.get('longitude')
+        'latitude': loc['coords']['latitude'],
+        'longitude': loc['coords']['longitude']
     }
+    st.write("Your location has been detected")
 
 # Update template to include filter controls with default subcategory
 template = f"""
+<script>
+    // Make user location available to JavaScript
+    window.userLocation = {json.dumps(user_location) if user_location else 'null'};
+    window.hasLocation = {json.dumps(bool(user_location))};
+</script>
 <div class="title-wrapper">
     <span>Explore Successful Projects</span>
 </div>
@@ -704,8 +711,8 @@ script = """
 
         async initialize() {
             try {
-                if (!this.userLocation) {
-                    throw new Error("User location not available");
+                if (!window.hasLocation) {
+                    throw new Error("Location not available");
                 }
                 this.calculateCountryDistances();
                 return true;

@@ -1,5 +1,5 @@
 pandas
 pymongo[tls,srv]==3.11.1
 streamlit
-streamlit-geolocation
+streamlit-js-eval
 # streamlit-shadcn-ui
