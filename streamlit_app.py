@@ -120,10 +120,8 @@ df = json_normalize(items)
 
 # Calculate and store raw values first
 df['Raw Goal'] = df['data.goal'].fillna(0).astype(float) * df['data.usd_exchange_rate'].fillna(0).astype(float)
-df['Raw Pledged'] = df['data.converted_pledged_amount'].fillna(0).astype(float)
-
-# Modify Raw Goal to treat anything less than $1 as $1
 df['Raw Goal'] = df['Raw Goal'].apply(lambda x: max(1.0, x))
+df['Raw Pledged'] = df['data.converted_pledged_amount'].fillna(0).astype(float)
 
 # Calculate Raw Raised with special handling for zero pledged amount
 df['Raw Raised'] = df.apply(
@@ -142,7 +140,7 @@ df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
 df['Backer Count'] = df['data.backers_count'].fillna(0).astype(int)
 
 # Format display columns - Add null handling
-df['Goal'] = df['Raw Goal'].fillna(0).map(lambda x: f"${x:,.2f}")
+df['Goal'] = df['Raw Goal'].fillna(0).round(2).map(lambda x: f"${x:,.2f}")
 df['Pledged Amount'] = df['Raw Pledged'].fillna(0).map(lambda x: f"${int(x):,}")
 df['%Raised'] = df['Raw Raised'].fillna(0).map(lambda x: f"{x:.1f}%")
 df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
