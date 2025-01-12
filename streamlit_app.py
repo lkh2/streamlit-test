@@ -206,7 +206,7 @@ def location_alert():
 loc = get_geolocation()
 user_location = None
 
-if loc and 'coords' in loc:
+if (loc and 'coords' in loc):
     with st.spinner('Updating table with your location...'):
         user_location = {
             'latitude': loc['coords']['latitude'], 
@@ -216,8 +216,6 @@ if loc and 'coords' in loc:
     loading_success = st.success("Location received successfully!")
     time.sleep(1.5)
     loading_success.empty()
-else:
-    location_alert()
 
 # Add function to calculate distances
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -837,6 +835,13 @@ script = """
                 if (!this.userLocation) {
                     this.currentSort = 'popularity';
                     document.getElementById('sortFilter').value = 'popularity';
+                    
+                    // Use Streamlit's postMessage to call location_alert
+                    window.parent.postMessage({
+                        type: 'streamlit:setComponentValue',
+                        value: { runLocationAlert: true }
+                    }, '*');
+                    
                     this.sortRows('popularity');
                     return;
                 }
@@ -1225,6 +1230,10 @@ script = """
 
 # Create and use the component
 table_component = gensimplecomponent('searchable_table', template=css + template, script=script)
-table_component()
+table_value = table_component()
+
+# Handle the location alert trigger
+if table_value and isinstance(table_value, dict) and table_value.get('runLocationAlert'):
+    location_alert()
 
 st.dataframe(df)
