@@ -476,7 +476,7 @@ css = """
     .table-controls { 
         position: sticky; 
         top: 0; 
-        background: linear-gradient(180deg, #ffffff 50%, transparent 100%); 
+        background: #ffffff; 
         z-index: 2; 
         padding: 0 20px; 
         border-bottom: 1px solid #eee; 
@@ -586,7 +586,7 @@ css = """
         display: flex;
         flex-direction: column;
         max-width: 100%; 
-        background: #ffffff; 
+        background: linear-gradient(180deg, #ffffff 50%, transparent 100%); 
         border-radius: 20px; 
         overflow: visible;
         transition: height 0.3s ease;
