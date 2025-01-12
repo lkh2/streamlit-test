@@ -1280,6 +1280,12 @@ script = """
                 return false;
             }
 
+            // Subcategory filter
+            const subcategory = row.dataset.subcategory;
+            if (!filters.subcategories.includes('All Subcategories') && !filters.subcategories.includes(subcategory)) {
+                return false;
+            }
+
             // Country filter
             const country = row.querySelector('td:nth-child(5)').textContent.trim();
             if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
@@ -1295,19 +1301,12 @@ script = """
             }
 
             // Get all other values
-            const subcategory = row.dataset.subcategory;
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
 
             // Rest of filter checks
-            if (!filters.subcategories.includes('All Subcategories') && !filters.subcategories.includes(subcategory)) {
-                return false;
-            }
-
-            if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-
             // Check pledged range
             const minPledged = parseFloat(document.getElementById('fromInput').value);
             const maxPledged = parseFloat(document.getElementById('toInput').value);
@@ -1824,6 +1823,7 @@ script = """
                 });
             });
 
+            // Initialize with "All Subcategories" selected
             const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
             allSubcategoriesOption.classList.add('selected');
         }
