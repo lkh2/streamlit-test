@@ -953,6 +953,32 @@ css = """
         margin-bottom: 8px;
         padding-bottom: 12px;
     }
+
+    /* Add country option styles to match category option styles */
+    .country-option {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        margin: 2px 0;
+        font-family: 'Poppins';
+        font-size: 12px;
+        transition: all 0.2s ease;
+    }
+
+    .country-option:hover {
+        background-color: #f0f0f0;
+    }
+
+    .country-option.selected {
+        background-color: #5932EA;
+        color: white;
+    }
+
+    .country-option[data-value="All Countries"] {
+        border-bottom: 1px solid #eee;
+        margin-bottom: 8px;
+        padding-bottom: 12px;
+    }
 </style>
 """
 
