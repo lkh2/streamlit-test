@@ -221,7 +221,7 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
     
     dlat = lat2 - lat1
-    dlon = lon2 - lon1
+    dlon = dlon - lon1
     
     a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
     c = 2 * np.arcsin(np.sqrt(a))
@@ -1346,6 +1346,7 @@ script = """
             const toSlider = document.getElementById('toSlider');
             const fromInput = document.getElementById('fromInput');
             const toInput = document.getElementById('toInput');
+            let inputTimeout;
 
             const fillSlider = (from, to, sliderColor, rangeColor, controlSlider) => {
                 const rangeDistance = controlSlider.max - controlSlider.min;
@@ -1361,49 +1362,63 @@ script = """
                     ${sliderColor} 100%)`;
             }
 
-            // Debounce the filter application
             const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
 
-            const updateFromValue = (value) => {
-                // Ensure the value doesn't exceed the maximum
-                value = Math.min(value, parseInt(toSlider.value));
-                value = Math.max(value, parseInt(fromSlider.min));
-                fromSlider.value = value;
-                fromInput.value = value;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-            };
-
-            const updateToValue = (value) => {
-                // Ensure the value doesn't go below the minimum
-                value = Math.max(value, parseInt(fromSlider.value));
-                value = Math.min(value, parseInt(toSlider.max));
-                toSlider.value = value;
-                toInput.value = value;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            const validateAndUpdateRange = (input, isMin = true) => {
+                clearTimeout(inputTimeout);
+                inputTimeout = setTimeout(() => {
+                    const value = parseInt(input.value) || (isMin ? parseInt(fromSlider.min) : parseInt(toSlider.max));
+                    if (isMin) {
+                        // Min value validation
+                        const maxValue = parseInt(toInput.value);
+                        const finalValue = value > maxValue ? maxValue : value;
+                        fromSlider.value = finalValue;
+                        fromInput.value = finalValue;
+                    } else {
+                        // Max value validation
+                        const minValue = parseInt(fromInput.value);
+                        const finalValue = value < minValue ? minValue : value;
+                        toSlider.value = finalValue;
+                        toInput.value = finalValue;
+                    }
+                    fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                    debouncedApplyFilters();
+                }, 1000); // Wait 1 second before validating
             };
 
             // Slider event handlers
             fromSlider.addEventListener('input', (e) => {
-                updateFromValue(parseInt(e.target.value));
+                const value = parseInt(e.target.value);
+                fromInput.value = value;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
                 debouncedApplyFilters();
             });
 
             toSlider.addEventListener('input', (e) => {
-                updateToValue(parseInt(e.target.value));
+                const value = parseInt(e.target.value);
+                toInput.value = value;
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
                 debouncedApplyFilters();
             });
 
             // Input event handlers
             fromInput.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value) || parseInt(fromSlider.min);
-                updateFromValue(value);
-                debouncedApplyFilters();
+                validateAndUpdateRange(fromInput, true);
             });
 
             toInput.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value) || parseInt(toSlider.max);
-                updateToValue(value);
-                debouncedApplyFilters();
+                validateAndUpdateRange(toInput, false);
+            });
+
+            // Handle blur events for immediate validation
+            fromInput.addEventListener('blur', () => {
+                clearTimeout(inputTimeout);
+                validateAndUpdateRange(fromInput, true);
+            });
+
+            toInput.addEventListener('blur', () => {
+                clearTimeout(inputTimeout);
+                validateAndUpdateRange(toInput, false);
             });
 
             // Store references for reset function
