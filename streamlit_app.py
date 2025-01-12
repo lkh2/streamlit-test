@@ -155,8 +155,9 @@ df = df[[
     'Raw Raised',
     'Raw Date',
     'Raw Deadline',
-    'Backer Count',  # Single backer count column
-    'data.location.country' 
+    'Backer Count', 
+    'data.location.country'
+    'data.staff_pick' 
 ]].rename(columns={ 
     'data.name': 'Project Name', 
     'data.creator.name': 'Creator', 
@@ -166,7 +167,8 @@ df = df[[
     # Hidden columns
     'data.category.parent_name': 'Category',
     'data.category.name': 'Subcategory',
-    'data.location.country': 'Country Code' 
+    'data.location.country': 'Country Code', 
+    'data.staff_pick': 'Staff Pick'
 })
 
 # Convert remaining object columns to string  
@@ -235,9 +237,6 @@ else:
 
 # Sort DataFrame by Distance initially to verify values
 df = df.sort_values('Distance')
-
-# Add Staff Pick column
-df['Staff Pick'] = df['data.staff_pick'].astype(bool)
 
 # Calculate popularity score components
 now = pd.Timestamp.now()
