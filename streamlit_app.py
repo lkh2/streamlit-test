@@ -1132,12 +1132,8 @@ script = """
 
         // Update applyFilters to handle async
         async applyFilters() {
-            // Get all selected categories
-            const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
-                .map(option => option.dataset.value);
-            
             this.currentFilters = {
-                categories: selectedCategories,
+                category: document.getElementById('categoryFilter').value,
                 subcategory: document.getElementById('subcategoryFilter').value,
                 country: document.getElementById('countryFilter').value,
                 state: document.getElementById('stateFilter').value,
@@ -1146,64 +1142,6 @@ script = """
             this.currentSort = document.getElementById('sortFilter').value;
             
             await this.applyAllFilters();
-        }
-
-        matchesFilters(row, filters) {
-            const category = row.dataset.category;
-            
-            // Category filter check
-            if (filters.categories && filters.categories.length > 0) {
-                if (!filters.categories.includes('All Categories') && !filters.categories.includes(category)) {
-                    return false;
-                }
-            }
-
-            const subcategory = row.dataset.subcategory;
-            const pledged = parseFloat(row.dataset.pledged);
-            const goal = parseFloat(row.dataset.goal);
-            const raised = parseFloat(row.dataset.raised);
-            const date = new Date(row.dataset.date);
-            const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
-            const country = row.querySelector('td:nth-child(5)').textContent.trim();
-
-            // Other filter checks
-            if (filters.subcategory && filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-            if (filters.country && filters.country !== 'All Countries' && country !== filters.country) return false;
-            if (filters.state && filters.state !== 'All States' && state !== filters.state.toLowerCase()) return false;
-
-            // Check pledged range
-            const minPledged = parseFloat(document.getElementById('fromInput').value);
-            const maxPledged = parseFloat(document.getElementById('toInput').value);
-            if (pledged < minPledged || pledged > maxPledged) return false;
-
-            // Check goal range
-            const minGoal = parseFloat(document.getElementById('goalFromInput').value);
-            const maxGoal = parseFloat(document.getElementById('goalToInput').value);
-            if (goal < minGoal || goal > maxGoal) return false;
-
-            // Check raised range
-            const minRaised = parseFloat(document.getElementById('raisedFromInput').value);
-            const maxRaised = parseFloat(document.getElementById('raisedToInput').value);
-            if (raised < minRaised || raised > maxRaised) return false;
-
-            // Date filter
-            if (filters.date !== 'All Time') {
-                const now = new Date();
-                let compareDate = new Date();
-                
-                switch(filters.date) {
-                    case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
-                    case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
-                    case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
-                    case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
-                    case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
-                    case 'Last 20 Years': compareDate.setFullYear(now.getFullYear() - 20); break;
-                }
-                
-                if (date < compareDate) return false;
-            }
-
-            return true;
         }
 
         initialize() {
@@ -1246,24 +1184,31 @@ script = """
         }
 
         matchesFilters(row, filters) {
+            // Get category directly from dataset
             const category = row.dataset.category;
             
-            // Check selected categories
+            // Category filter check - must be first
             if (filters.categories && filters.categories.length > 0) {
-                if (!filters.categories.includes('All Categories') && !filters.categories.includes(category)) {
-                    return false;
+                // If All Categories is not selected and category doesn't match any selected
+                if (!filters.categories.includes('All Categories')) {
+                    if (!filters.categories.includes(category)) {
+                        return false;
+                    }
                 }
             }
 
+            // Get all other values
             const subcategory = row.dataset.subcategory;
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
-            const state = row.querySelector('td:nth-child(6)').textContent.toLowerCase();
-            const country = row.querySelector('td:nth-child(5)').textContent;
+            
+            // Get text content properly from cells
+            const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
+            const country = row.querySelector('td:nth-child(5)').textContent.trim();
 
-            // Continue with other filter checks
+            // Rest of filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
             if (filters.country !== 'All Countries' && country !== filters.country) return false;
             if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
@@ -1504,7 +1449,24 @@ script = """
         setupFilters() {
             // Setup category multi-select
             const categoryOptions = document.querySelectorAll('.category-option');
-            const selectedCategories = new Set();
+            const selectedCategories = new Set(['All Categories']); // Initialize with All Categories
+            
+            const updateFilters = () => {
+                // Update button text
+                const btn = document.querySelector('.multi-select-btn');
+                btn.textContent = selectedCategories.has('All Categories') ? 
+                    'Categories' : 
+                    Array.from(selectedCategories).join(', ');
+
+                // Immediately update filters and apply
+                this.currentFilters = {
+                    ...this.currentFilters,
+                    categories: Array.from(selectedCategories)
+                };
+                
+                // Force synchronous filter application
+                this.applyAllFilters();
+            };
             
             categoryOptions.forEach(option => {
                 option.addEventListener('click', (e) => {
@@ -1514,11 +1476,8 @@ script = """
                         // Clear all selections if "All Categories" is clicked
                         categoryOptions.forEach(opt => opt.classList.remove('selected'));
                         selectedCategories.clear();
-                        
-                        if (!e.target.classList.contains('selected')) {
-                            e.target.classList.add('selected');
-                            selectedCategories.add(value);
-                        }
+                        selectedCategories.add('All Categories');
+                        e.target.classList.add('selected');
                     } else {
                         // Remove "All Categories" selection
                         const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
@@ -1540,28 +1499,14 @@ script = """
                         }
                     }
                     
-                    // Update button text
-                    const btn = document.querySelector('.multi-select-btn');
-                    if (selectedCategories.has('All Categories')) {
-                        btn.textContent = 'Categories';
-                    } else {
-                        btn.textContent = Array.from(selectedCategories).join(', ');
-                    }
-                    
-                    // Store selected categories in filters
-                    this.currentFilters = {
-                        ...this.currentFilters,
-                        categories: Array.from(selectedCategories)
-                    };
-                    
-                    this.applyFilters();
+                    updateFilters();
                 });
             });
 
             // Initialize with "All Categories" selected
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
-            selectedCategories.add('All Categories');
+            updateFilters();
 
             // Setup other filters
             const filterIds = [
