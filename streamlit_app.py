@@ -1364,32 +1364,57 @@ script = """
 
             const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
 
+            const controlFromSlider = (fromSlider, toSlider, fromInput) => {
+                const [from, to] = getParsedValue(fromSlider, toSlider);
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                if (from > to) {
+                    fromSlider.value = to;
+                    fromInput.value = to;
+                } else {
+                    fromInput.value = from;
+                }
+            };
+
+            const controlToSlider = (fromSlider, toSlider, toInput) => {
+                const [from, to] = getParsedValue(fromSlider, toSlider);
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                if (from <= to) {
+                    toSlider.value = to;
+                    toInput.value = to;
+                } else {
+                    toInput.value = from;
+                    toSlider.value = from;
+                }
+            };
+
+            const getParsedValue = (fromSlider, toSlider) => {
+                const from = parseInt(fromSlider.value);
+                const to = parseInt(toSlider.value);
+                return [from, to];
+            };
+
             const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
                 const updateValues = () => {
                     let value = parseInt(input.value);
                     const minAllowed = parseInt(fromSlider.min);
                     const maxAllowed = parseInt(toSlider.max);
-
-                    // Ensure value is within allowed range
+                    
                     if (isNaN(value)) {
                         value = isMin ? minAllowed : maxAllowed;
-                    } else {
-                        value = Math.max(minAllowed, Math.min(maxAllowed, value));
                     }
-
+                    
                     if (isMin) {
-                        // Min value validation
-                        const maxValue = parseInt(toInput.value);
-                        const finalValue = value > maxValue ? maxValue : value;
-                        fromSlider.value = finalValue;
-                        fromInput.value = finalValue;
+                        const maxValue = parseInt(toSlider.value);
+                        value = Math.max(minAllowed, Math.min(maxValue, value));
+                        fromSlider.value = value;
+                        fromInput.value = value;
                     } else {
-                        // Max value validation
-                        const minValue = parseInt(fromInput.value);
-                        const finalValue = value < minValue ? minValue : value;
-                        toSlider.value = finalValue;
-                        toInput.value = finalValue;
+                        const minValue = parseInt(fromSlider.value);
+                        value = Math.max(minValue, Math.min(maxAllowed, value));
+                        toSlider.value = value;
+                        toInput.value = value;
                     }
+                    
                     fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
                     debouncedApplyFilters();
                 };
@@ -1405,25 +1430,21 @@ script = """
 
             // Slider event handlers
             fromSlider.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value);
-                fromInput.value = value;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                controlFromSlider(fromSlider, toSlider, fromInput);
                 debouncedApplyFilters();
             });
 
             toSlider.addEventListener('input', (e) => {
-                const value = parseInt(e.target.value);
-                toInput.value = value;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                controlToSlider(fromSlider, toSlider, toInput);
                 debouncedApplyFilters();
             });
 
             // Input event handlers
-            fromInput.addEventListener('input', (e) => {
+            fromInput.addEventListener('input', () => {
                 validateAndUpdateRange(fromInput, true, false);
             });
 
-            toInput.addEventListener('input', (e) => {
+            toInput.addEventListener('input', () => {
                 validateAndUpdateRange(toInput, false, false);
             });
 
