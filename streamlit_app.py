@@ -1240,6 +1240,13 @@ script = """
         resetFilters() {
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
+            categoryOptions.forEach(opt => opt.classList.remove('selected'));
+            const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
+            allCategoriesOption.classList.add('selected');
+            document.querySelector('.multi-select-btn').textContent = 'All Categories';  // Updated this line
+
+            const selects = document.querySelectorAll('.filter-select');
+            selects.forEach(select => {
                 if (select.id === 'subcategoryFilter') {
                     // Find and select "All Subcategories" option
                     const allSubcatsOption = Array.from(select.options)
@@ -1442,10 +1449,10 @@ script = """
             const updateMultiSelectButton = (selectedCategories) => {
                 const btn = document.querySelector('.multi-select-btn');
                 if (selectedCategories.has('All Categories')) {
-                    btn.textContent = 'Categories';
+                    btn.textContent = 'All Categories';
                 } else {
                     const selectedArray = Array.from(selectedCategories);
-                    if (selectedArray.length > 3) {
+                    if (selectedArray.length >= 3) {
                         btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
                     } else {
                         btn.textContent = selectedArray.join(', ');
@@ -1755,7 +1762,7 @@ script = """
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
             allCategoriesOption.classList.add('selected');
-            document.querySelector('.multi-select-btn').textContent = 'Categories';
+            document.querySelector('.multi-select-btn').textContent = 'All Categories';  // Updated this line
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
