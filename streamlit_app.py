@@ -393,9 +393,12 @@ template = f"""
         </div>
         <div class="filter-row">
             <span class="filter-label">More Flexible, Dynamic Search:</span>
-            <select id="stateFilter" class="filter-select">
-                {' '.join(f'<option value="{opt}">{opt}</option>' for opt in filter_options['states'])}
-            </select>
+            <div class="multi-select-dropdown">
+                <button class="filter-select multi-select-btn">States</button>
+                <div class="multi-select-content">
+                    {' '.join(f'<div class="state-option" data-value="{opt}">{opt}</div>' for opt in filter_options['states'])}
+                </div>
+            </div>
             <div class="range-dropdown">
                 <button class="filter-select">Pledged Amount Range</button>
                 <div class="range-content">
@@ -978,6 +981,31 @@ css = """
         margin-bottom: 8px;
         padding-bottom: 12px;
     }
+
+    .state-option {
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        margin: 2px 0;
+        font-family: 'Poppins';
+        font-size: 12px;
+        transition: all 0.2s ease;
+    }
+
+    .state-option:hover {
+        background-color: #f0f0f0;
+    }
+
+    .state-option.selected {
+        background-color: #5932EA;
+        color: white;
+    }
+
+    .state-option[data-value="All States"] {
+        border-bottom: 1px solid #eee;
+        margin-bottom: 8px;
+        padding-bottom: 12px;
+    }
 </style>
 """
 
@@ -1168,12 +1196,16 @@ script = """
             const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
                 .map(option => option.dataset.value);
 
+            // Get all selected states
+            const selectedStates = Array.from(document.querySelectorAll('.state-option.selected'))
+                .map(option => option.dataset.value);
+
             // Collect all current filter values
             this.currentFilters = {
                 categories: selectedCategories,
                 subcategory: document.getElementById('subcategoryFilter').value,
                 countries: selectedCountries,
-                state: document.getElementById('stateFilter').value,
+                states: selectedStates,
                 date: document.getElementById('dateFilter').value
             };
 
@@ -1221,17 +1253,23 @@ script = """
                 return false;
             }
 
+            // State filter
+            const state = row.querySelector('.state_cell').textContent.trim();
+            if (!filters.states.includes('All States') && !filters.states.includes(state)) {
+                return false;
+            }
+
             // Get all other values
             const subcategory = row.dataset.subcategory;
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
-            const state = row.querySelector('.state_cell').textContent.trim().toLowerCase();
+            const stateText = row.querySelector('.state_cell').textContent.trim().toLowerCase();
 
             // Rest of filter checks
             if (filters.subcategory !== 'All Subcategories' && subcategory !== filters.subcategory) return false;
-            if (filters.state !== 'All States' && !state.includes(filters.state.toLowerCase())) return false;
+            if (filters.state !== 'All States' && !stateText.includes(filters.state.toLowerCase())) return false;
 
             // Check pledged range
             const minPledged = parseFloat(document.getElementById('fromInput').value);
@@ -1283,6 +1321,14 @@ script = """
             allCountriesOption.classList.add('selected');
             const countryButtons = document.querySelectorAll('.multi-select-btn');
             countryButtons[1].textContent = 'All Countries';
+
+            // Reset state selections
+            const stateOptions = document.querySelectorAll('.state-option');
+            stateOptions.forEach(opt => opt.classList.remove('selected'));
+            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
+            allStatesOption.classList.add('selected');
+            const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            stateButton.textContent = 'All States';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
@@ -1625,6 +1671,61 @@ script = """
             // Initialize with "All Countries" selected
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
             allCountriesOption.classList.add('selected');
+
+            // Setup state multi-select
+            const stateOptions = document.querySelectorAll('.state-option');
+            
+            const updateStateButton = (selectedStates) => {
+                const btn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+                if (selectedStates.has('All States')) {
+                    btn.textContent = 'All States';
+                } else {
+                    const selectedArray = Array.from(selectedStates);
+                    if (selectedArray.length > 2) {
+                        btn.textContent = `${selectedArray[0]}, ${selectedArray[1]} +${selectedArray.length - 2}`;
+                    } else {
+                        btn.textContent = selectedArray.join(', ');
+                    }
+                }
+            };
+            
+            const selectedStates = new Set(['All States']);
+            updateStateButton(selectedStates);
+            
+            stateOptions.forEach(option => {
+                option.addEventListener('click', (e) => {
+                    const clickedValue = e.target.dataset.value;
+                    const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
+                    
+                    if (clickedValue === 'All States') {
+                        stateOptions.forEach(opt => opt.classList.remove('selected'));
+                        selectedStates.clear();
+                        selectedStates.add('All States');
+                        allStatesOption.classList.add('selected');
+                    } else {
+                        allStatesOption.classList.remove('selected');
+                        selectedStates.delete('All States');
+                        
+                        e.target.classList.toggle('selected');
+                        if (e.target.classList.contains('selected')) {
+                            selectedStates.add(clickedValue);
+                        } else {
+                            selectedStates.delete(clickedValue);
+                        }
+                        
+                        if (selectedStates.size === 0) {
+                            allStatesOption.classList.add('selected');
+                            selectedStates.add('All States');
+                        }
+                    }
+                    
+                    updateStateButton(selectedStates);
+                    this.applyFilters();
+                });
+            });
+
+            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
+            allStatesOption.classList.add('selected');
         }
 
         setupRangeSlider() {
@@ -1871,6 +1972,14 @@ script = """
             allCountriesOption.classList.add('selected');
             const countryButtons = document.querySelectorAll('.multi-select-btn');
             countryButtons[1].textContent = 'All Countries';  // Second button is for countries
+
+            // Reset state selections
+            const stateOptions = document.querySelectorAll('.state-option');
+            stateOptions.forEach(opt => opt.classList.remove('selected'));
+            const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
+            allStatesOption.classList.add('selected');
+            const stateButton = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            stateButton.textContent = 'All States';
 
             const selects = document.querySelectorAll('.filter-select');
             selects.forEach(select => {
