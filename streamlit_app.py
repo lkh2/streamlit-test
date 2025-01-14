@@ -327,6 +327,22 @@ max_goal = int(df['Raw Goal'].max())
 min_raised = int(df['Raw Raised'].min())
 max_raised = int(df['Raw Raised'].max())
 
+# Add exponential steps calculation for goal filter
+def calculate_exponential_steps(min_val, max_val, num_steps=100):
+
+    min_val = max(1, min_val)
+
+    log_min = np.log(min_val)
+    log_max = np.log(max_val)
+    log_steps = np.linspace(log_min, log_max, num_steps)
+
+    steps = np.exp(log_steps).astype(int)
+
+    return sorted(list(set(steps)))
+
+goal_steps = calculate_exponential_steps(min_goal, max_goal)
+goal_steps_json = json.dumps(goal_steps)
+
 # After loading data and before generating table, prepare filter options
 def get_filter_options(df):
     # Make sure 'All Subcategories' is first, then sort the rest
@@ -438,8 +454,8 @@ template = f"""
                 <div class="range-content">
                     <div class="range-container">
                         <div class="sliders-control">
-                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal + 1}"/>
-                            <input id="goalToSlider" type="range" value="{max_goal + 1}" min="{min_goal}" max="{max_goal + 1}"/>
+                            <input id="goalFromSlider" type="range" value="0" min="0" max="{len(goal_steps) - 1}" step="1" data-steps='{goal_steps_json}'/>
+                            <input id="goalToSlider" type="range" value="{len(goal_steps) - 1}" min="0" max="{len(goal_steps) - 1}" step="1" data-steps='{goal_steps_json}'/>
                         </div>
                         <div class="form-control">
                             <div class="form-control-container">
@@ -1725,6 +1741,14 @@ script = """
 
             const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
 
+            const getStepValue = (slider) => {
+                if (slider.id.startsWith('goal')) {
+                    const steps = JSON.parse(slider.dataset.steps);
+                    return steps[parseInt(slider.value)];
+                }
+                return parseInt(slider.value);
+            };
+
             const controlFromSlider = (fromSlider, toSlider, fromInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
@@ -1749,8 +1773,8 @@ script = """
             };
 
             const getParsedValue = (fromSlider, toSlider) => {
-                const from = parseInt(fromSlider.value);
-                const to = parseInt(toSlider.value);
+                const from = getStepValue(fromSlider);
+                const to = getStepValue(toSlider);
                 return [from, to];
             };
 
