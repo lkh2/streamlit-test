@@ -329,15 +329,16 @@ max_raised = int(df['Raw Raised'].max())
 
 # Add exponential steps calculation for goal filter
 def calculate_exponential_steps(min_val, max_val, num_steps=100):
-
+    """Calculate exponential steps between min and max values"""
     min_val = max(1, min_val)
-
+    
     log_min = np.log(min_val)
     log_max = np.log(max_val)
     log_steps = np.linspace(log_min, log_max, num_steps)
-
-    steps = np.exp(log_steps).astype(int)
-
+    
+    # Convert numpy int64 to Python int
+    steps = [int(x) for x in np.exp(log_steps).astype(int)]
+    
     return sorted(list(set(steps)))
 
 goal_steps = calculate_exponential_steps(min_goal, max_goal)
