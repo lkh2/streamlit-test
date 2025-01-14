@@ -331,15 +331,21 @@ max_raised = int(df['Raw Raised'].max())
 def calculate_exponential_steps(min_val, max_val, num_steps=100):
     """Calculate exponential steps between min and max values"""
     min_val = max(1, min_val)
+    max_val = max(max_val, min_val * 10) 
     
-    log_min = np.log(min_val)
-    log_max = np.log(max_val)
+    log_min = np.log10(min_val)
+    log_max = np.log10(max_val)
     log_steps = np.linspace(log_min, log_max, num_steps)
     
-    # Convert numpy int64 to Python int
-    steps = [int(x) for x in np.exp(log_steps).astype(int)]
+    steps = []
+    for log_val in log_steps:
+        val = 10 ** log_val
+        magnitude = 10 ** int(np.log10(val))
+        rounded_val = int(round(val / magnitude) * magnitude)
+        steps.append(rounded_val)
     
-    return sorted(list(set(steps)))
+    steps = sorted(list(set(steps)))
+    return steps
 
 goal_steps = calculate_exponential_steps(min_goal, max_goal)
 goal_steps_json = json.dumps(goal_steps)
@@ -461,11 +467,11 @@ template = f"""
                         <div class="form-control">
                             <div class="form-control-container">
                                 <span class="form-control-label">Min $</span>
-                                <input class="form-control-input" type="number" id="goalFromInput" value="{min_goal}" min="{min_goal}" max="{max_goal + 1}"/>
+                                <input class="form-control-input" type="number" id="goalFromInput" value="{min_goal}" min="{min_goal}" max="{goal_steps[-1]}"/>
                             </div>
                             <div class="form-control-container">
                                 <span class="form-control-label">Max $</span>
-                                <input class="form-control-input" type="number" id="goalToInput" value="{max_goal + 1}" min="{min_goal}" max="{max_goal + 1}"/>
+                                <input class="form-control-input" type="number" id="goalToInput" value="{goal_steps[-1]}" min="{min_goal}" max="{goal_steps[-1]}"/>
                             </div>
                         </div>
                     </div>
