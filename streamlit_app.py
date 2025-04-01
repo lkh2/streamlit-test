@@ -9,8 +9,18 @@ import json
 import numpy as np
 import gzip
 import glob
+import duckdb
+import gc
+import psutil
 
 st.set_page_config(layout="wide")
+
+# Add a memory usage tracker for debugging
+def get_memory_usage():
+    process = psutil.Process(os.getpid())
+    memory_info = process.memory_info()
+    memory_mb = memory_info.rss / 1024 / 1024  # Convert to MB
+    return f"{memory_mb:.2f} MB"
 
 st.markdown(
     """
@@ -90,11 +100,11 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# Replace MongoDB connection with proper Parquet chunk handling
+# Replace MongoDB connection with optimized Parquet handling using DuckDB
 @st.cache_data(ttl=600)
 def load_data_from_parquet_chunks():
     """
-    Load data from compressed parquet chunks by first combining them into a complete file
+    Load data from compressed parquet chunks more efficiently using DuckDB
     """
     # Find all parquet chunk files
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
@@ -105,6 +115,8 @@ def load_data_from_parquet_chunks():
     
     progress_bar = st.progress(0)
     status_text = st.empty()
+    memory_text = st.empty()
+    memory_text.text(f"Current memory usage: {get_memory_usage()}")
     status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
     
     # Create a temporary file to store the combined chunks
@@ -121,6 +133,9 @@ def load_data_from_parquet_chunks():
                     combined_file.write(f.read())
                 progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
                 status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
+                # Update memory usage
+                if i % 5 == 0:  # Update every 5 chunks to avoid too many UI updates
+                    memory_text.text(f"Current memory usage: {get_memory_usage()}")
             except Exception as e:
                 st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
     
@@ -129,6 +144,7 @@ def load_data_from_parquet_chunks():
     
     try:
         status_text.text("Decompressing combined file...")
+        memory_text.text(f"Current memory usage: {get_memory_usage()}")
         
         # Create a temporary file for the decompressed parquet
         with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as decompressed_file:
@@ -138,34 +154,77 @@ def load_data_from_parquet_chunks():
             with gzip.open(combined_filename, 'rb') as gz_file:
                 decompressed_file.write(gz_file.read())
         
-        # Read the decompressed parquet file
-        status_text.text("Reading parquet data...")
+        # Read the decompressed parquet file using DuckDB for efficient processing
+        status_text.text("Reading parquet data with DuckDB...")
         progress_bar.progress(0.75)  # 75% progress after decompression
+        memory_text.text(f"Current memory usage: {get_memory_usage()}")
         
-        # Read the parquet file
-        df = pd.read_parquet(decompressed_filename, engine='pyarrow')
+        # Define required columns to minimize memory usage
+        required_columns = [
+            'data.name', 'data.creator.name', 'data.converted_pledged_amount', 
+            'data.urls.web.project', 'data.location.expanded_country', 'data.state',
+            'data.category.parent_name', 'data.category.name', 'data.created_at',
+            'data.deadline', 'data.goal', 'data.usd_exchange_rate', 'data.backers_count',
+            'data.location.country', 'data.staff_pick'
+        ]
         
-        # Filter for successful projects
-        if 'data.state' in df.columns:
-            df = df[df['data.state'] == 'successful']
+        # Create DuckDB connection and query only the columns we need
+        con = duckdb.connect(database=':memory:')
+        con.execute("PRAGMA memory_limit='500MB'")  # Set a memory limit for DuckDB
         
-        # Limit the number of rows if needed
-        limit = 999999
-        if len(df) > limit:
-            df = df.iloc[:limit]
+        # First count total rows and filter for successful only
+        total_count = con.execute(f"""
+            SELECT COUNT(*) 
+            FROM '{decompressed_filename}'
+            WHERE "data.state" = 'successful'
+        """).fetchone()[0]
+        
+        # Set a reasonable limit if there are too many rows
+        limit = 10000  # Adjust this based on your memory constraints
+        
+        if total_count > limit:
+            st.warning(f"Dataset contains {total_count} successful items. Processing with a limit of {limit} to conserve memory.")
+            
+            # Use DuckDB to efficiently fetch only what we need
+            query = f"""
+                SELECT {', '.join([f'"{col}"' for col in required_columns])}
+                FROM '{decompressed_filename}'
+                WHERE "data.state" = 'successful'
+                LIMIT {limit}
+            """
+        else:
+            query = f"""
+                SELECT {', '.join([f'"{col}"' for col in required_columns])}
+                FROM '{decompressed_filename}'
+                WHERE "data.state" = 'successful'
+            """
+        
+        # Execute the filtered query and load as pandas DataFrame
+        # This is more memory efficient as we're only loading the columns we need
+        filtered_df = con.execute(query).fetchdf()
+        
+        # Force garbage collection after query
+        con.close()
+        del con
+        gc.collect()
+        
+        progress_bar.progress(0.9)
+        memory_text.text(f"Current memory usage after loading data: {get_memory_usage()}")
+        
+        # Convert to the expected format (list of dictionaries)
+        items = filtered_df.to_dict(orient='records')
         
         progress_bar.progress(1.0)
         status_text.empty()
         progress_bar.empty()
         
-        st.success(f"Successfully loaded {len(df)} items")
+        st.success(f"Successfully loaded {len(items)} items")
+        memory_text.text(f"Final memory usage: {get_memory_usage()}")
         
-        # Convert to the expected format (list of dictionaries)
-        items = df.to_dict(orient='records')
         return items
         
     except Exception as e:
-        st.error(f"Error processing combined parquet file: {str(e)}")
+        st.error(f"Error processing parquet file: {str(e)}")
         return []
     finally:
         # Clean up temporary files
@@ -177,7 +236,7 @@ def load_data_from_parquet_chunks():
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
-# Load data from parquet chunks instead of MongoDB
+# Load data from parquet chunks with optimized approach
 items = load_data_from_parquet_chunks()
 
 # Create DataFrame and restructure columns
