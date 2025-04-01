@@ -126,7 +126,7 @@ def load_data_from_gz_chunks():
     
     # Now process the combined file
     all_items = []
-    limit = 500  # Same as the MongoDB query limit
+    limit = 999999  # Same as the MongoDB query limit
     processed_count = 0
     
     try:
