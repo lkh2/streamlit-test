@@ -139,53 +139,87 @@ def load_data_from_parquet_chunks():
         
         progress_bar.progress(0.7)  # 70% progress after decompression
         
+        # Check if the decompressed file contains valid data
+        if os.path.getsize(decompressed_file_path) < 100:
+            st.error("Decompressed parquet file appears to be empty or invalid")
+            # Use pandas as a fallback for small files
+            try:
+                df = pd.read_parquet(decompressed_file_path)
+                return df.to_dict(orient='records')
+            except Exception as e:
+                st.error(f"Failed to read with pandas fallback: {str(e)}")
+                return create_dummy_data()  # Create some dummy data for testing
+        
         # Process the decompressed parquet file with Polars
         status_text.text("Processing with Polars...")
         
+        try:
+            # Try to read file info first
+            file_info = pl.read_parquet_schema(decompressed_file_path)
+            st.write("Parquet schema:", file_info)
+        except Exception as e:
+            st.warning(f"Could not read parquet schema: {str(e)}")
+        
         # Use Polars lazy execution to efficiently process the parquet file
-        # Only load successful projects
-        lazy_df = pl.scan_parquet(decompressed_file_path)
-
-        
-        # Limit rows if needed
-        limited_lazy = lazy_df.limit(999999)
-        
-        # Execute the query plan
-        status_text.text("Processing query results...")
-        progress_bar.progress(0.8)
-        
-        # Collect results - this is where memory optimization happens with Polars
-        result_df = limited_lazy.collect()
-        progress_bar.progress(0.9)
-        
-        # Convert to pandas for compatibility with rest of the app
-        # Process in chunks to avoid memory issues
-        chunk_size = 10000
-        total_rows = result_df.height
-        items = []
-        
-        for i in range(0, total_rows, chunk_size):
-            end_idx = min(i + chunk_size, total_rows)
-            # Convert chunk to pandas then to dict
-            chunk_pandas = result_df.slice(i, end_idx - i).to_pandas()
-            items.extend(chunk_pandas.to_dict(orient='records'))
+        try:
+            lazy_df = pl.scan_parquet(decompressed_file_path)
             
-            # Update progress
-            progress = 0.9 + 0.1 * (end_idx / total_rows)
-            progress_bar.progress(progress)
-            status_text.text(f"Converting results: {end_idx}/{total_rows}")
-        
-        progress_bar.progress(1.0)
-        status_text.empty()
-        progress_bar.empty()
-        
-        st.success(f"Successfully loaded {len(items)} items using Polars")
-        
-        return items
+            # Show schema
+            st.write("Polars schema:", lazy_df.schema)
+            
+            # Limit rows if needed
+            limited_lazy = lazy_df.limit(999999)
+            
+            # Execute the query plan with detailed error handling
+            status_text.text("Processing query results...")
+            progress_bar.progress(0.8)
+            
+            try:
+                # Collect results - this is where memory optimization happens with Polars
+                result_df = limited_lazy.collect()
+                
+                # Debug output - check if we got data
+                st.write(f"Rows in Polars DataFrame: {result_df.height}")
+                st.write(f"Columns in Polars DataFrame: {result_df.width}")
+                if result_df.height > 0:
+                    st.write("First row sample:", result_df.slice(0, 1))
+                
+                progress_bar.progress(0.9)
+                
+                # Use simpler conversion to pandas
+                pandas_df = result_df.to_pandas()
+                
+                # Debug - check pandas conversion
+                st.write(f"Rows in Pandas DataFrame: {len(pandas_df)}")
+                st.write(f"Columns in Pandas DataFrame: {len(pandas_df.columns)}")
+                
+                # Return as list of dictionaries
+                return pandas_df.to_dict(orient='records')
+                
+            except Exception as e:
+                st.error(f"Error collecting Polars results: {str(e)}")
+                # Try direct pandas approach as fallback
+                try:
+                    pandas_df = pd.read_parquet(decompressed_file_path)
+                    st.write(f"Fallback pandas read successful with {len(pandas_df)} rows")
+                    return pandas_df.to_dict(orient='records')
+                except Exception as e2:
+                    st.error(f"Pandas fallback also failed: {str(e2)}")
+                    return create_dummy_data()
+        except Exception as e:
+            st.error(f"Error scanning parquet with Polars: {str(e)}")
+            # Try direct pandas approach as fallback
+            try:
+                pandas_df = pd.read_parquet(decompressed_file_path)
+                st.write(f"Fallback pandas read successful with {len(pandas_df)} rows")
+                return pandas_df.to_dict(orient='records')
+            except Exception as e2:
+                st.error(f"Pandas fallback also failed: {str(e2)}")
+                return create_dummy_data()
         
     except Exception as e:
-        st.error(f"Error processing parquet files with Polars: {str(e)}")
-        return []
+        st.error(f"Error processing parquet files: {str(e)}")
+        return create_dummy_data()  # Return dummy data as last resort
     finally:
         # Clean up temporary files
         try:
@@ -201,11 +235,78 @@ def load_data_from_parquet_chunks():
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
+# Function to create dummy data if everything else fails
+def create_dummy_data():
+    """Create some dummy kickstarter data for testing"""
+    st.warning("Loading dummy data for testing")
+    dummy_items = []
+    
+    for i in range(100):
+        # Create a random date within last 5 years
+        created_at = int((pd.Timestamp.now() - pd.Timedelta(days=np.random.randint(1, 1825))).timestamp())
+        deadline = created_at + np.random.randint(15, 60) * 86400  # 15-60 days later
+        
+        goal = np.random.randint(1000, 50000)
+        pledged = np.random.randint(0, int(goal * 2))
+        backers = np.random.randint(0, 500)
+        
+        dummy_item = {
+            "data": {
+                "name": f"Test Project {i}",
+                "creator": {"name": f"Creator {i % 10}"},
+                "goal": float(goal),
+                "usd_exchange_rate": 1.0,
+                "converted_pledged_amount": float(pledged),
+                "backers_count": backers,
+                "created_at": created_at,
+                "deadline": deadline,
+                "state": "successful",
+                "urls": {"web": {"project": f"https://example.com/project{i}"}},
+                "location": {
+                    "country": "US",
+                    "expanded_country": "United States"
+                },
+                "category": {
+                    "parent_name": ["Technology", "Art", "Games", "Design", "Food"][i % 5],
+                    "name": f"Subcategory {i % 10}"
+                },
+                "staff_pick": bool(i % 5 == 0)
+            }
+        }
+        dummy_items.append(dummy_item)
+    
+    return dummy_items
+
 # Load data using the memory-efficient Polars function
 items = load_data_from_parquet_chunks()
 
-# Create DataFrame and restructure columns
-df = json_normalize(items)
+# Create DataFrame and inspect the structure of items
+if len(items) > 0:
+    st.write("First item structure:", json.dumps(items[0], indent=2)[:1000])
+
+# Create DataFrame with json_normalize and check keys
+try:
+    df = json_normalize(items)
+    st.write("DataFrame columns after json_normalize:", df.columns.tolist())
+except Exception as e:
+    st.error(f"Error in json_normalize: {str(e)}")
+    # Fallback: create dataframe directly 
+    df = pd.DataFrame(items)
+    st.write("DataFrame columns direct approach:", df.columns.tolist())
+
+# If we have nested 'data' dictionaries, handle them
+if 'data' in df.columns and len(df) > 0:
+    if isinstance(df['data'].iloc[0], dict):
+        st.write("Found nested data dictionaries, extracting...")
+        # Extract nested dictionaries
+        data_df = pd.json_normalize(df['data'].tolist())
+        # Combine with original df
+        for col in data_df.columns:
+            df[f'data.{col}'] = data_df[col]
+        # Drop the original nested column
+        df = df.drop(columns=['data'])
+
+# Now proceed with column normalization...
 
 # Inspect available columns and print for debugging
 st.write("Available columns:", df.columns.tolist())
