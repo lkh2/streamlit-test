@@ -1,6 +1,7 @@
 duckdb
 numpy
 pandas
+psutil
 pymongo[tls,srv]==3.11.1
 streamlit
 streamlit_js_eval
