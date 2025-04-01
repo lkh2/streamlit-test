@@ -162,13 +162,6 @@ def load_data_from_parquet_chunks():
                 df = df.rename(rename_map)
                 status_text.text("Added 'data.' prefix to column names")
         
-        # Filter for successful projects if not already filtered
-        if 'data.state' in df.columns and 'successful' in df['data.state'].unique():
-            original_len = len(df)
-            df = df.filter(pl.col('data.state') == 'successful')
-            if len(df) < original_len:
-                status_text.text(f"Filtered to {len(df)} successful projects")
-        
         # Limit the number of rows if needed
         limit = 999999
         if len(df) > limit:
