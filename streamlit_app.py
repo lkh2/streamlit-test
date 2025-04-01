@@ -169,6 +169,7 @@ items = load_data_from_gz_chunks()
 
 # Create DataFrame and restructure columns
 df = json_normalize(items)
+print(df.columns)
 
 # Define default country data in case file is not found
 @st.cache_data
