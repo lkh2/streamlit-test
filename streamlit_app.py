@@ -92,7 +92,7 @@ def generate_component(name, template="", script=""):
     return f
 
 # Replace MongoDB connection with Polars-powered Parquet processing
-@st.experimental_singleton
+@st.cache_data
 def load_data_from_parquet_chunks():
     """
     Load data from compressed parquet chunks by first combining them into a complete file
