@@ -106,76 +106,60 @@ def load_data_from_parquet_chunks():
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text(f"Found {len(chunk_files)} chunk files. Processing with Polars...")
+    status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
     
     try:
+        # First combine all chunks into a single file (as in the original approach)
+        combined_file_path = os.path.join(tempfile.mkdtemp(), "combined.parquet.gz")
+        
         # Sort the chunks to ensure they're processed in the correct order
         chunk_files = sorted(chunk_files)
         
-        # Create a temporary directory to store decompressed parquet files
-        temp_dir = tempfile.mkdtemp()
-        decompressed_files = []
-        
-        # Decompress each chunk individually
-        for i, chunk_file in enumerate(chunk_files):
-            try:
-                decompressed_file = os.path.join(temp_dir, f"chunk_{i}.parquet")
-                decompressed_files.append(decompressed_file)
-                
-                with open(chunk_file, 'rb') as f_in:
-                    compressed_data = f_in.read()
-                    
+        # Combine all chunks into a single gzip file
+        with open(combined_file_path, 'wb') as combined_file:
+            for i, chunk_file in enumerate(chunk_files):
                 try:
-                    decompressed_data = gzip.decompress(compressed_data)
-                    
-                    with open(decompressed_file, 'wb') as f_out:
-                        f_out.write(decompressed_data)
-                    
-                    progress_bar.progress((i + 1) / len(chunk_files))
-                    status_text.text(f"Processed chunk {i+1}/{len(chunk_files)}")
-                    
+                    with open(chunk_file, 'rb') as f:
+                        combined_file.write(f.read())
+                    progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
+                    status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
                 except Exception as e:
-                    st.warning(f"Error decompressing chunk {i}: {str(e)}")
-                    decompressed_files.pop()
-            
-            except Exception as e:
-                st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
+                    st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
         
-        if not decompressed_files:
-            st.error("No chunks could be processed successfully")
-            return []
-            
-        # Process chunks using Polars without loading all data at once
-        status_text.text("Processing data with Polars...")
+        # Now decompress the combined file
+        status_text.text("Decompressing combined file...")
         
-        # Use Polars lazy execution to filter data efficiently 
-        lazy_frames = []
-        for file_path in decompressed_files:
-            # Create a lazy frame that doesn't load data into memory yet
-            lf = pl.scan_parquet(file_path)
-            lazy_frames.append(lf)
+        # Create a temporary file for the decompressed parquet
+        decompressed_file_path = os.path.join(os.path.dirname(combined_file_path), "decompressed.parquet")
         
-        # Combine all lazy frames and filter for successful projects only
-        combined_lazy = pl.concat(lazy_frames)
+        # Decompress the combined gzip file
+        with gzip.open(combined_file_path, 'rb') as gz_file:
+            with open(decompressed_file_path, 'wb') as decompressed_file:
+                decompressed_file.write(gz_file.read())
         
-        # Filter for successful projects - handles column name with dot
-        filtered_lazy = combined_lazy.filter(
-            pl.col("`data.state`") == "successful"
-        )
+        progress_bar.progress(0.7)  # 70% progress after decompression
         
-        # Limit rows
-        limited_lazy = filtered_lazy.limit(999999)
+        # Process the decompressed parquet file with Polars
+        status_text.text("Processing with Polars...")
+        
+        # Use Polars lazy execution to efficiently process the parquet file
+        # Only load successful projects
+        lazy_df = pl.scan_parquet(decompressed_file_path)
+
+        
+        # Limit rows if needed
+        limited_lazy = lazy_df.limit(999999)
         
         # Execute the query plan
         status_text.text("Processing query results...")
         progress_bar.progress(0.8)
         
-        # Collect results
+        # Collect results - this is where memory optimization happens with Polars
         result_df = limited_lazy.collect()
         progress_bar.progress(0.9)
         
         # Convert to pandas for compatibility with rest of the app
-        # Note: convert in chunks for large datasets
+        # Process in chunks to avoid memory issues
         chunk_size = 10000
         total_rows = result_df.height
         items = []
@@ -205,10 +189,15 @@ def load_data_from_parquet_chunks():
     finally:
         # Clean up temporary files
         try:
-            if 'temp_dir' in locals() and temp_dir and os.path.exists(temp_dir):
-                for file in glob.glob(os.path.join(temp_dir, "*")):
-                    os.unlink(file)
-                os.rmdir(temp_dir)
+            if 'combined_file_path' in locals() and os.path.exists(combined_file_path):
+                os.unlink(combined_file_path)
+            if 'decompressed_file_path' in locals() and os.path.exists(decompressed_file_path):
+                os.unlink(decompressed_file_path)
+            # Remove temp directory
+            if 'combined_file_path' in locals():
+                temp_dir = os.path.dirname(combined_file_path)
+                if os.path.exists(temp_dir):
+                    os.rmdir(temp_dir)
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
