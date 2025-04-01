@@ -94,10 +94,10 @@ def generate_component(name, template="", script=""):
 @st.cache_data(ttl=600)
 def load_data_from_parquet_chunks():
     """
-    Load data from parquet chunks in the parquet_gz_chunks folder
+    Load data from compressed parquet chunks by first combining them into a complete file
     """
     # Find all parquet chunk files
-    chunk_files = glob.glob("parquet_gz_chunks/*.parquet*")
+    chunk_files = glob.glob("parquet_gz_chunks/*.part")
     
     if not chunk_files:
         st.error("No parquet chunks found in parquet_gz_chunks folder")
@@ -105,65 +105,77 @@ def load_data_from_parquet_chunks():
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text(f"Found {len(chunk_files)} parquet chunk files. Loading data...")
+    status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
     
-    all_dfs = []
-    limit = 999999  # Same as the MongoDB query limit
+    # Create a temporary file to store the combined chunks
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet.gz') as combined_file:
+        combined_filename = combined_file.name
+        
+        # Sort the chunks to ensure they're processed in the correct order
+        chunk_files = sorted(chunk_files)
+        
+        # First combine all chunks into a single file
+        for i, chunk_file in enumerate(chunk_files):
+            try:
+                with open(chunk_file, 'rb') as f:
+                    combined_file.write(f.read())
+                progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
+                status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
+            except Exception as e:
+                st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
     
-    # Process each parquet file
-    for i, chunk_file in enumerate(chunk_files):
+    # Create another temporary file for the decompressed parquet
+    decompressed_filename = None
+    
+    try:
+        status_text.text("Decompressing combined file...")
+        
+        # Create a temporary file for the decompressed parquet
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as decompressed_file:
+            decompressed_filename = decompressed_file.name
+            
+            # Decompress the combined gzip file
+            with gzip.open(combined_filename, 'rb') as gz_file:
+                decompressed_file.write(gz_file.read())
+        
+        # Read the decompressed parquet file
+        status_text.text("Reading parquet data...")
+        progress_bar.progress(0.75)  # 75% progress after decompression
+        
+        # Read the parquet file
+        df = pd.read_parquet(decompressed_filename, engine='pyarrow')
+        
+        # Filter for successful projects
+        if 'data.state' in df.columns:
+            df = df[df['data.state'] == 'successful']
+        
+        # Limit the number of rows if needed
+        limit = 999999
+        if len(df) > limit:
+            df = df.iloc[:limit]
+        
+        progress_bar.progress(1.0)
+        status_text.empty()
+        progress_bar.empty()
+        
+        st.success(f"Successfully loaded {len(df)} items")
+        
+        # Convert to the expected format (list of dictionaries)
+        items = df.to_dict(orient='records')
+        return items
+        
+    except Exception as e:
+        st.error(f"Error processing combined parquet file: {str(e)}")
+        return []
+    finally:
+        # Clean up temporary files
         try:
-            status_text.text(f"Reading chunk {i+1}/{len(chunk_files)}: {os.path.basename(chunk_file)}")
-            
-            # Read the parquet file
-            chunk_df = pd.read_parquet(chunk_file, engine='pyarrow')
-            
-            # Filter successful projects
-            if 'data.state' in chunk_df.columns:
-                chunk_df = chunk_df[chunk_df['data.state'] == 'successful']
-            
-            all_dfs.append(chunk_df)
-            
-            # Update progress
-            progress_bar.progress((i + 1) / len(chunk_files))
-            
-            # Check if we've reached the limit
-            total_rows = sum(len(df) for df in all_dfs)
-            if total_rows >= limit:
-                status_text.text(f"Reached limit of {limit} rows. Truncating data.")
-                break
-                
+            if combined_filename:
+                os.unlink(combined_filename)
+            if decompressed_filename:
+                os.unlink(decompressed_filename)
         except Exception as e:
-            st.warning(f"Error reading parquet chunk {chunk_file}: {str(e)}")
-    
-    # Combine all dataframes
-    if not all_dfs:
-        st.warning("No valid data was found in the parquet chunks.")
-        # Provide sample data in case no data is found
-        return [{"data": {"name": "Sample Project", "creator": {"name": "Sample Creator"}, 
-                         "converted_pledged_amount": 1000, "goal": 500, "usd_exchange_rate": 1.0, 
-                         "urls": {"web": {"project": "https://example.com"}}, 
-                         "location": {"expanded_country": "United States", "country": "US"}, 
-                         "state": "successful", "category": {"parent_name": "Art", "name": "Digital Art"},
-                         "created_at": 1620000000, "deadline": 1630000000, "backers_count": 50,
-                         "staff_pick": False}}]
-    
-    # Combine all dataframes
-    status_text.text("Combining all data chunks...")
-    combined_df = pd.concat(all_dfs, ignore_index=True)
-    
-    # Truncate if needed
-    if len(combined_df) > limit:
-        combined_df = combined_df.iloc[:limit]
-    
-    progress_bar.empty()
-    status_text.empty()
-    
-    st.success(f"Successfully loaded {len(combined_df)} items")
-    
-    # Convert the dataframe to a list of dictionaries to match the original format
-    items = combined_df.to_dict(orient='records')
-    return items
+            st.warning(f"Error cleaning up temporary files: {str(e)}")
 
 # Load data from parquet chunks instead of MongoDB
 items = load_data_from_parquet_chunks()
