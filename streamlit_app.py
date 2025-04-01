@@ -207,27 +207,38 @@ items = load_data_from_parquet_chunks()
 # Create DataFrame and restructure columns
 df = json_normalize(items)
 
-# Define default country data in case file is not found
-@st.cache_data
-def load_country_data():
-    try:
-        # Try to load from file
-        country_df = pd.read_csv('country.csv')
-        return country_df
-    except Exception as e:
-        # Create fallback data if file doesn't exist
-        st.warning("Could not load country.csv, using fallback country data.")
-        fallback_data = {
-            'country': ['US', 'GB', 'CA', 'DE', 'FR', 'AU', 'NL', 'SE', 'JP', 'IT'],
-            'latitude': [37.09024, 55.378051, 56.130366, 51.165691, 46.227638, -25.274398, 52.132633, 60.128161, 36.204824, 41.871940],
-            'longitude': [-95.712891, -3.435973, -106.346771, 10.451526, 2.213749, 133.775136, 5.291266, 18.643501, 138.252924, 12.567380]
-        }
-        return pd.DataFrame(fallback_data)
+# Inspect available columns and print for debugging
+st.write("Available columns:", df.columns.tolist())
 
-# Calculate and store raw values first - with appropriate checks for the new data structure
-df['Raw Goal'] = df['data.goal'].fillna(0).astype(float) * df['data.usd_exchange_rate'].fillna(1.0).astype(float)
-df['Raw Goal'] = df['Raw Goal'].apply(lambda x: max(1.0, x))
-df['Raw Pledged'] = df['data.converted_pledged_amount'].fillna(0).astype(float)
+# Define a helper function to safely access columns that might have different naming
+def safe_column_access(df, possible_names):
+    """Try multiple possible column names and return the first one that exists"""
+    for col in possible_names:
+        if col in df.columns:
+            return col
+    # If no matching column found, return None
+    st.warning(f"Could not find any column matching: {possible_names}")
+    return None
+
+# Find the correct column names
+goal_col = safe_column_access(df, ['data.goal', 'data_goal', 'goal'])
+exchange_rate_col = safe_column_access(df, ['data.usd_exchange_rate', 'data_usd_exchange_rate', 'usd_exchange_rate'])
+pledged_col = safe_column_access(df, ['data.converted_pledged_amount', 'data_converted_pledged_amount', 'converted_pledged_amount'])
+created_col = safe_column_access(df, ['data.created_at', 'data_created_at', 'created_at'])
+deadline_col = safe_column_access(df, ['data.deadline', 'data_deadline', 'deadline'])
+backers_col = safe_column_access(df, ['data.backers_count', 'data_backers_count', 'backers_count'])
+
+# Calculate and store raw values - only if columns exist
+if goal_col and exchange_rate_col:
+    df['Raw Goal'] = df[goal_col].fillna(0).astype(float) * df[exchange_rate_col].fillna(1.0).astype(float)
+    df['Raw Goal'] = df['Raw Goal'].apply(lambda x: max(1.0, x))
+else:
+    df['Raw Goal'] = 1.0  # Default value if columns not found
+
+if pledged_col:
+    df['Raw Pledged'] = df[pledged_col].fillna(0).astype(float)
+else:
+    df['Raw Pledged'] = 0.0  # Default value if column not found
 
 # Calculate Raw Raised with special handling for zero pledged amount
 df['Raw Raised'] = df.apply(
@@ -236,14 +247,24 @@ df['Raw Raised'] = df.apply(
     axis=1
 )
 
-df['Raw Date'] = pd.to_datetime(df['data.created_at'], unit='s')
+if created_col:
+    df['Raw Date'] = pd.to_datetime(df[created_col], unit='s')
+else:
+    df['Raw Date'] = pd.to_datetime('2020-01-01')  # Default fallback date
 
 # Convert deadline to datetime and format display columns
-df['Raw Deadline'] = pd.to_datetime(df['data.deadline'], unit='s')
-df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
+if deadline_col:
+    df['Raw Deadline'] = pd.to_datetime(df[deadline_col], unit='s')
+    df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
+else:
+    df['Raw Deadline'] = pd.to_datetime('2020-12-31')  # Default fallback date
+    df['Deadline'] = '2020-12-31'
 
 # Backer count with null handling
-df['Backer Count'] = df['data.backers_count'].fillna(0).astype(int)
+if backers_col:
+    df['Backer Count'] = df[backers_col].fillna(0).astype(int)
+else:
+    df['Backer Count'] = 0  # Default value if column not found
 
 # Format display columns - Add null handling
 df['Goal'] = df['Raw Goal'].fillna(0).round(2).map(lambda x: f"${x:,.2f}")
@@ -251,43 +272,47 @@ df['Pledged Amount'] = df['Raw Pledged'].fillna(0).map(lambda x: f"${int(x):,}")
 df['%Raised'] = df['Raw Raised'].fillna(0).map(lambda x: f"{x:.1f}%")
 df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 
-# Continue with all the original column renaming and processing
-df = df[[ 
-    'data.name', 
-    'data.creator.name',
-    'Pledged Amount',  
-    'data.urls.web.project', 
-    'data.location.expanded_country', 
-    'data.state',
-    # Hidden columns
-    'data.category.parent_name',
-    'data.category.name',
-    'Date',
-    'Deadline',
-    'Goal',
-    '%Raised',
-    'Raw Goal',
-    'Raw Pledged',
-    'Raw Raised',
-    'Raw Date',
-    'Raw Deadline',
-    'Backer Count', 
-    'data.location.country',
-    'data.staff_pick' 
-]].rename(columns={ 
-    'data.name': 'Project Name', 
-    'data.creator.name': 'Creator', 
-    'data.urls.web.project': 'Link', 
-    'data.location.expanded_country': 'Country', 
-    'data.state': 'State',
-    # Hidden columns
-    'data.category.parent_name': 'Category',
-    'data.category.name': 'Subcategory',
-    'data.location.country': 'Country Code', 
-    'data.staff_pick': 'Staff Pick'
-})
+# Continue working with the remaining columns similarly
+# Find other required columns
+name_col = safe_column_access(df, ['data.name', 'data_name', 'name'])
+creator_col = safe_column_access(df, ['data.creator.name', 'data_creator_name', 'creator_name'])
+link_col = safe_column_access(df, ['data.urls.web.project', 'data_urls_web_project', 'urls_web_project'])
+country_expanded_col = safe_column_access(df, ['data.location.expanded_country', 'data_location_expanded_country', 'location_expanded_country'])
+state_col = safe_column_access(df, ['data.state', 'data_state', 'state'])
+category_col = safe_column_access(df, ['data.category.parent_name', 'data_category_parent_name', 'category_parent_name'])
+subcategory_col = safe_column_access(df, ['data.category.name', 'data_category_name', 'category_name'])
+country_code_col = safe_column_access(df, ['data.location.country', 'data_location_country', 'location_country'])
+staff_pick_col = safe_column_access(df, ['data.staff_pick', 'data_staff_pick', 'staff_pick'])
 
-# Convert remaining object columns to string  
+# Create a new DataFrame with only the columns we need
+new_columns = {}
+
+# Add columns with fallbacks
+new_columns['Project Name'] = df[name_col] if name_col else 'Unknown Project'
+new_columns['Creator'] = df[creator_col] if creator_col else 'Unknown Creator'
+new_columns['Pledged Amount'] = df['Pledged Amount']
+new_columns['Link'] = df[link_col] if link_col else '#'
+new_columns['Country'] = df[country_expanded_col] if country_expanded_col else 'Unknown'
+new_columns['State'] = df[state_col] if state_col else 'unknown'
+new_columns['Category'] = df[category_col] if category_col else 'Other'
+new_columns['Subcategory'] = df[subcategory_col] if subcategory_col else 'Other'
+new_columns['Date'] = df['Date']
+new_columns['Deadline'] = df['Deadline']
+new_columns['Goal'] = df['Goal']
+new_columns['%Raised'] = df['%Raised']
+new_columns['Raw Goal'] = df['Raw Goal']
+new_columns['Raw Pledged'] = df['Raw Pledged']
+new_columns['Raw Raised'] = df['Raw Raised']
+new_columns['Raw Date'] = df['Raw Date']
+new_columns['Raw Deadline'] = df['Raw Deadline']
+new_columns['Backer Count'] = df['Backer Count']
+new_columns['Country Code'] = df[country_code_col] if country_code_col else 'US'
+new_columns['Staff Pick'] = df[staff_pick_col] if staff_pick_col else False
+
+# Create new dataframe with the correct columns
+df = pd.DataFrame(new_columns)
+
+# Convert remaining object columns to string
 object_columns = df.select_dtypes(include=['object']).columns
 df[object_columns] = df[object_columns].astype(str)
 
