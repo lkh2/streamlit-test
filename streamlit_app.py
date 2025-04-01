@@ -245,22 +245,19 @@ items = load_data_from_parquet_chunks()
 
 # Create DataFrame and inspect the structure of items
 if len(items) > 0:
-    st.write("First item structure:", json.dumps(items[0], indent=2)[:1000])
+    pass
 
 # Create DataFrame with json_normalize and check keys
 try:
     df = json_normalize(items)
-    st.write("DataFrame columns after json_normalize:", df.columns.tolist())
 except Exception as e:
     st.error(f"Error in json_normalize: {str(e)}")
     # Fallback: create dataframe directly 
     df = pd.DataFrame(items)
-    st.write("DataFrame columns direct approach:", df.columns.tolist())
 
 # If we have nested 'data' dictionaries, handle them
 if 'data' in df.columns and len(df) > 0:
     if isinstance(df['data'].iloc[0], dict):
-        st.write("Found nested data dictionaries, extracting...")
         # Extract nested dictionaries
         data_df = pd.json_normalize(df['data'].tolist())
         # Combine with original df
@@ -272,7 +269,7 @@ if 'data' in df.columns and len(df) > 0:
 # Now proceed with column normalization...
 
 # Inspect available columns and print for debugging
-st.write("Available columns:", df.columns.tolist())
+# st.write("Available columns:", df.columns.tolist())
 
 # Define a helper function to safely access columns that might have different naming
 def safe_column_access(df, possible_names):
