@@ -2,12 +2,13 @@ import time
 import streamlit as st
 import streamlit.components.v1 as components
 import tempfile, os
-from pymongo import MongoClient
 import pandas as pd
 from pandas import json_normalize
 from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
+import gzip
+import glob
 
 st.set_page_config(layout="wide")
 
@@ -89,42 +90,111 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# Initialize connection.
-@st.cache_resource
-def init_connection():
-    mongo_connection_string = (
-        f"mongodb+srv://{st.secrets['mongo']['username']}:" 
-        f"{st.secrets['mongo']['password']}@{st.secrets['mongo']['host']}/" 
-        f"{st.secrets['mongo']['database']}?retryWrites=true&w=majority"
-    )
-    return MongoClient(mongo_connection_string)
-
-client = init_connection()
-
-# Pull data from the collection.
+# Replace MongoDB connection with GZ chunk loader
 @st.cache_data(ttl=600)
-def get_data():
-    db = client[st.secrets["mongo"]["database"]]
-    collection = db[st.secrets["mongo"]["collection"]]
-    items = collection.find().limit(500)
+def load_data_from_gz_chunks():
+    """
+    Load data from gzip chunks in the gzip_chunk folder
+    """
+    # Find all chunk files
+    chunk_files = glob.glob("gzip_chunk/*.part")
     
-    # Convert MongoDB cursor to list and handle ObjectId
-    items = [{**item, '_id': str(item['_id'])} for item in items]
-    return items
+    if not chunk_files:
+        st.error("No gzip chunks found in gzip_chunk folder")
+        return []
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    status_text.text("Found {} chunk files. Loading data...".format(len(chunk_files)))
+    
+    # List to store all items
+    all_items = []
+    processed_count = 0
+    limit = 500  # Same as the MongoDB query limit
+    
+    # Process each chunk
+    for i, chunk_file in enumerate(sorted(chunk_files)):
+        try:
+            # Open the gzip chunk
+            with gzip.open(chunk_file, 'rt', encoding='utf-8') as f:
+                # Read line by line (each line is a JSON object)
+                for line in f:
+                    try:
+                        # Parse the JSON line
+                        item = json.loads(line.strip())
+                        
+                        # We only want successful projects for this viz
+                        # Add the same structure MongoDB would have
+                        if item.get('data', {}).get('state') == 'successful':
+                            all_items.append(item)
+                        
+                        processed_count += 1
+                        # Update progress
+                        if processed_count % 100 == 0:
+                            status_text.text(f"Processed {processed_count} lines...")
+                    except json.JSONDecodeError:
+                        continue  # Skip invalid JSON lines
+            
+            # Update progress
+            progress_bar.progress((i + 1) / len(chunk_files))
+            
+            # If we've reached our limit, stop processing more chunks
+            if len(all_items) >= limit:
+                all_items = all_items[:limit]
+                break
+                
+        except Exception as e:
+            st.warning(f"Error processing chunk {chunk_file}: {str(e)}")
+            continue
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    if not all_items:
+        st.warning("No valid data was found in the chunks.")
+        # Provide sample data in case no data is found
+        return [{"data": {"name": "Sample Project", "creator": {"name": "Sample Creator"}, 
+                         "converted_pledged_amount": 1000, "goal": 500, "usd_exchange_rate": 1.0, 
+                         "urls": {"web": {"project": "https://example.com"}}, 
+                         "location": {"expanded_country": "United States", "country": "US"}, 
+                         "state": "successful", "category": {"parent_name": "Art", "name": "Digital Art"},
+                         "created_at": 1620000000, "deadline": 1630000000, "backers_count": 50,
+                         "staff_pick": False}}]
+    
+    st.success(f"Successfully loaded {len(all_items)} items")
+    return all_items
 
-items = get_data()
+# Load data from gzip chunks instead of MongoDB
+items = load_data_from_gz_chunks()
 
 # Create DataFrame and restructure columns
 df = json_normalize(items)
 
-# Calculate and store raw values first
-df['Raw Goal'] = df['data.goal'].fillna(0).astype(float) * df['data.usd_exchange_rate'].fillna(0).astype(float)
+# Define default country data in case file is not found
+@st.cache_data
+def load_country_data():
+    try:
+        # Try to load from file
+        country_df = pd.read_csv('country.csv')
+        return country_df
+    except Exception as e:
+        # Create fallback data if file doesn't exist
+        st.warning("Could not load country.csv, using fallback country data.")
+        fallback_data = {
+            'country': ['US', 'GB', 'CA', 'DE', 'FR', 'AU', 'NL', 'SE', 'JP', 'IT'],
+            'latitude': [37.09024, 55.378051, 56.130366, 51.165691, 46.227638, -25.274398, 52.132633, 60.128161, 36.204824, 41.871940],
+            'longitude': [-95.712891, -3.435973, -106.346771, 10.451526, 2.213749, 133.775136, 5.291266, 18.643501, 138.252924, 12.567380]
+        }
+        return pd.DataFrame(fallback_data)
+
+# Calculate and store raw values first - with appropriate checks for the new data structure
+df['Raw Goal'] = df['data.goal'].fillna(0).astype(float) * df['data.usd_exchange_rate'].fillna(1.0).astype(float)
 df['Raw Goal'] = df['Raw Goal'].apply(lambda x: max(1.0, x))
 df['Raw Pledged'] = df['data.converted_pledged_amount'].fillna(0).astype(float)
 
 # Calculate Raw Raised with special handling for zero pledged amount
 df['Raw Raised'] = df.apply(
-    lambda row: 0.0 if row['Raw Pledged'] == 0 
+    lambda row: 0.0 if row['Raw Pledged'] == 0 or row['Raw Goal'] == 0
     else (row['Raw Pledged'] / row['Raw Goal']) * 100, 
     axis=1
 )
@@ -144,6 +214,7 @@ df['Pledged Amount'] = df['Raw Pledged'].fillna(0).map(lambda x: f"${int(x):,}")
 df['%Raised'] = df['Raw Raised'].fillna(0).map(lambda x: f"{x:.1f}%")
 df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
 
+# Continue with all the original column renaming and processing
 df = df[[ 
     'data.name', 
     'data.creator.name',
