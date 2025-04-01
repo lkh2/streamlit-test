@@ -90,112 +90,55 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# Replace MongoDB connection with proper GZ chunk handling
+# Replace MongoDB connection with proper Parquet chunk handling
 @st.cache_data(ttl=600)
-def load_data_from_gz_chunks():
+def load_data_from_parquet_chunks():
     """
-    Load data from gzip chunks by first combining them into a complete file
+    Load data from parquet chunks in the parquet_gz_chunks folder
     """
-    # Find all chunk files
-    chunk_files = glob.glob("gzip_chunks/*.part")
+    # Find all parquet chunk files
+    chunk_files = glob.glob("parquet_gz_chunks/*.parquet*")
     
     if not chunk_files:
-        st.error("No gzip chunks found in gzip_chunks folder")
+        st.error("No parquet chunks found in parquet_gz_chunks folder")
         return []
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text("Found {} chunk files. Combining chunks...".format(len(chunk_files)))
+    status_text.text(f"Found {len(chunk_files)} parquet chunk files. Loading data...")
     
-    # Create a temporary file to store the combined chunks
-    with tempfile.NamedTemporaryFile(delete=False) as combined_file:
-        combined_filename = combined_file.name
-        
-        # Sort the chunks to ensure they're processed in the correct order
-        chunk_files = sorted(chunk_files)
-        
-        # First combine all chunks into a single file
-        for i, chunk_file in enumerate(chunk_files):
-            try:
-                with open(chunk_file, 'rb') as f:
-                    combined_file.write(f.read())
-                progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
-                status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
-            except Exception as e:
-                st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
-    
-    # Now process the combined file
-    all_items = []
+    all_dfs = []
     limit = 999999  # Same as the MongoDB query limit
-    processed_count = 0
     
-    try:
-        status_text.text("Processing combined file...")
-        
-        # Try to open as gzip
-        with gzip.open(combined_filename, 'rt', encoding='utf-8') as f:
-            # Read line by line (each line is a JSON object)
-            for line in f:
-                try:
-                    # Parse the JSON line
-                    item = json.loads(line.strip())
-                    
-                    # We only want successful projects for this viz
-                    if item.get('data', {}).get('state') == 'successful':
-                        all_items.append(item)
-                    
-                    processed_count += 1
-                    # Update progress
-                    if processed_count % 100 == 0:
-                        status_text.text(f"Processed {processed_count} lines...")
-                        # Update second half of progress based on items processed
-                        progress_percentage = 0.5 + min(0.5, (processed_count / (limit * 2)))
-                        progress_bar.progress(progress_percentage)
-                    
-                    # If we've reached our limit, stop processing more lines
-                    if len(all_items) >= limit:
-                        all_items = all_items[:limit]
-                        break
-                except json.JSONDecodeError:
-                    continue  # Skip invalid JSON lines
-    except gzip.BadGzipFile:
-        # If it's not a valid gzip file, try opening it as plain text
-        status_text.text("Not a valid gzip file. Trying as plain text...")
+    # Process each parquet file
+    for i, chunk_file in enumerate(chunk_files):
         try:
-            with open(combined_filename, 'r', encoding='utf-8') as f:
-                for line in f:
-                    try:
-                        item = json.loads(line.strip())
-                        if item.get('data', {}).get('state') == 'successful':
-                            all_items.append(item)
-                        
-                        processed_count += 1
-                        if processed_count % 100 == 0:
-                            status_text.text(f"Processed {processed_count} lines...")
-                            progress_percentage = 0.5 + min(0.5, (processed_count / (limit * 2)))
-                            progress_bar.progress(progress_percentage)
-                        
-                        if len(all_items) >= limit:
-                            all_items = all_items[:limit]
-                            break
-                    except json.JSONDecodeError:
-                        continue
+            status_text.text(f"Reading chunk {i+1}/{len(chunk_files)}: {os.path.basename(chunk_file)}")
+            
+            # Read the parquet file
+            chunk_df = pd.read_parquet(chunk_file, engine='pyarrow')
+            
+            # Filter successful projects
+            if 'data.state' in chunk_df.columns:
+                chunk_df = chunk_df[chunk_df['data.state'] == 'successful']
+            
+            all_dfs.append(chunk_df)
+            
+            # Update progress
+            progress_bar.progress((i + 1) / len(chunk_files))
+            
+            # Check if we've reached the limit
+            total_rows = sum(len(df) for df in all_dfs)
+            if total_rows >= limit:
+                status_text.text(f"Reached limit of {limit} rows. Truncating data.")
+                break
+                
         except Exception as e:
-            st.error(f"Error processing combined file as text: {str(e)}")
-    except Exception as e:
-        st.error(f"Error processing combined file: {str(e)}")
-    finally:
-        # Clean up the temporary file
-        try:
-            os.unlink(combined_filename)
-        except:
-            pass
+            st.warning(f"Error reading parquet chunk {chunk_file}: {str(e)}")
     
-    progress_bar.empty()
-    status_text.empty()
-    
-    if not all_items:
-        st.warning("No valid data was found in the chunks.")
+    # Combine all dataframes
+    if not all_dfs:
+        st.warning("No valid data was found in the parquet chunks.")
         # Provide sample data in case no data is found
         return [{"data": {"name": "Sample Project", "creator": {"name": "Sample Creator"}, 
                          "converted_pledged_amount": 1000, "goal": 500, "usd_exchange_rate": 1.0, 
@@ -205,11 +148,25 @@ def load_data_from_gz_chunks():
                          "created_at": 1620000000, "deadline": 1630000000, "backers_count": 50,
                          "staff_pick": False}}]
     
-    st.success(f"Successfully loaded {len(all_items)} items")
-    return all_items
+    # Combine all dataframes
+    status_text.text("Combining all data chunks...")
+    combined_df = pd.concat(all_dfs, ignore_index=True)
+    
+    # Truncate if needed
+    if len(combined_df) > limit:
+        combined_df = combined_df.iloc[:limit]
+    
+    progress_bar.empty()
+    status_text.empty()
+    
+    st.success(f"Successfully loaded {len(combined_df)} items")
+    
+    # Convert the dataframe to a list of dictionaries to match the original format
+    items = combined_df.to_dict(orient='records')
+    return items
 
-# Load data from gzip chunks instead of MongoDB
-items = load_data_from_gz_chunks()
+# Load data from parquet chunks instead of MongoDB
+items = load_data_from_parquet_chunks()
 
 # Create DataFrame and restructure columns
 df = json_normalize(items)
