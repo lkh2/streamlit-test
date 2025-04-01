@@ -9,18 +9,9 @@ import json
 import numpy as np
 import gzip
 import glob
-import duckdb
-import gc
-import psutil
+import polars as pl
 
 st.set_page_config(layout="wide")
-
-# Add a memory usage tracker for debugging
-def get_memory_usage():
-    process = psutil.Process(os.getpid())
-    memory_info = process.memory_info()
-    memory_mb = memory_info.rss / 1024 / 1024  # Convert to MB
-    return f"{memory_mb:.2f} MB"
 
 st.markdown(
     """
@@ -100,11 +91,11 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# Replace MongoDB connection with optimized Parquet handling using DuckDB
+# Replace MongoDB connection with Polars-powered Parquet processing
 @st.cache_data(ttl=600)
 def load_data_from_parquet_chunks():
     """
-    Load data from compressed parquet chunks more efficiently using DuckDB
+    Load data from compressed parquet chunks using Polars for memory efficiency
     """
     # Find all parquet chunk files
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
@@ -115,128 +106,113 @@ def load_data_from_parquet_chunks():
     
     progress_bar = st.progress(0)
     status_text = st.empty()
-    memory_text = st.empty()
-    memory_text.text(f"Current memory usage: {get_memory_usage()}")
-    status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
+    status_text.text(f"Found {len(chunk_files)} chunk files. Processing with Polars...")
     
-    # Create a temporary file to store the combined chunks
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet.gz') as combined_file:
-        combined_filename = combined_file.name
-        
+    try:
         # Sort the chunks to ensure they're processed in the correct order
         chunk_files = sorted(chunk_files)
         
-        # First combine all chunks into a single file
+        # Create a temporary directory to store decompressed parquet files
+        temp_dir = tempfile.mkdtemp()
+        decompressed_files = []
+        
+        # Decompress each chunk individually
         for i, chunk_file in enumerate(chunk_files):
             try:
-                with open(chunk_file, 'rb') as f:
-                    combined_file.write(f.read())
-                progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
-                status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
-                # Update memory usage
-                if i % 5 == 0:  # Update every 5 chunks to avoid too many UI updates
-                    memory_text.text(f"Current memory usage: {get_memory_usage()}")
+                decompressed_file = os.path.join(temp_dir, f"chunk_{i}.parquet")
+                decompressed_files.append(decompressed_file)
+                
+                with open(chunk_file, 'rb') as f_in:
+                    compressed_data = f_in.read()
+                    
+                try:
+                    decompressed_data = gzip.decompress(compressed_data)
+                    
+                    with open(decompressed_file, 'wb') as f_out:
+                        f_out.write(decompressed_data)
+                    
+                    progress_bar.progress((i + 1) / len(chunk_files))
+                    status_text.text(f"Processed chunk {i+1}/{len(chunk_files)}")
+                    
+                except Exception as e:
+                    st.warning(f"Error decompressing chunk {i}: {str(e)}")
+                    decompressed_files.pop()
+            
             except Exception as e:
                 st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
-    
-    # Create another temporary file for the decompressed parquet
-    decompressed_filename = None
-    
-    try:
-        status_text.text("Decompressing combined file...")
-        memory_text.text(f"Current memory usage: {get_memory_usage()}")
         
-        # Create a temporary file for the decompressed parquet
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as decompressed_file:
-            decompressed_filename = decompressed_file.name
+        if not decompressed_files:
+            st.error("No chunks could be processed successfully")
+            return []
             
-            # Decompress the combined gzip file
-            with gzip.open(combined_filename, 'rb') as gz_file:
-                decompressed_file.write(gz_file.read())
+        # Process chunks using Polars without loading all data at once
+        status_text.text("Processing data with Polars...")
         
-        # Read the decompressed parquet file using DuckDB for efficient processing
-        status_text.text("Reading parquet data with DuckDB...")
-        progress_bar.progress(0.75)  # 75% progress after decompression
-        memory_text.text(f"Current memory usage: {get_memory_usage()}")
+        # Use Polars lazy execution to filter data efficiently 
+        lazy_frames = []
+        for file_path in decompressed_files:
+            # Create a lazy frame that doesn't load data into memory yet
+            lf = pl.scan_parquet(file_path)
+            lazy_frames.append(lf)
         
-        # Define required columns to minimize memory usage
-        required_columns = [
-            'data.name', 'data.creator.name', 'data.converted_pledged_amount', 
-            'data.urls.web.project', 'data.location.expanded_country', 'data.state',
-            'data.category.parent_name', 'data.category.name', 'data.created_at',
-            'data.deadline', 'data.goal', 'data.usd_exchange_rate', 'data.backers_count',
-            'data.location.country', 'data.staff_pick'
-        ]
+        # Combine all lazy frames and filter for successful projects only
+        combined_lazy = pl.concat(lazy_frames)
         
-        # Create DuckDB connection and query only the columns we need
-        con = duckdb.connect(database=':memory:')
-        con.execute("PRAGMA memory_limit='500MB'")  # Set a memory limit for DuckDB
+        # Filter for successful projects - handles column name with dot
+        filtered_lazy = combined_lazy.filter(
+            pl.col("`data.state`") == "successful"
+        )
         
-        # First count total rows and filter for successful only
-        total_count = con.execute(f"""
-            SELECT COUNT(*) 
-            FROM '{decompressed_filename}'
-            WHERE "data.state" = 'successful'
-        """).fetchone()[0]
+        # Limit rows
+        limited_lazy = filtered_lazy.limit(999999)
         
-        # Set a reasonable limit if there are too many rows
-        limit = 10000  # Adjust this based on your memory constraints
+        # Execute the query plan
+        status_text.text("Processing query results...")
+        progress_bar.progress(0.8)
         
-        if total_count > limit:
-            st.warning(f"Dataset contains {total_count} successful items. Processing with a limit of {limit} to conserve memory.")
-            
-            # Use DuckDB to efficiently fetch only what we need
-            query = f"""
-                SELECT {', '.join([f'"{col}"' for col in required_columns])}
-                FROM '{decompressed_filename}'
-                WHERE "data.state" = 'successful'
-                LIMIT {limit}
-            """
-        else:
-            query = f"""
-                SELECT {', '.join([f'"{col}"' for col in required_columns])}
-                FROM '{decompressed_filename}'
-                WHERE "data.state" = 'successful'
-            """
-        
-        # Execute the filtered query and load as pandas DataFrame
-        # This is more memory efficient as we're only loading the columns we need
-        filtered_df = con.execute(query).fetchdf()
-        
-        # Force garbage collection after query
-        con.close()
-        del con
-        gc.collect()
-        
+        # Collect results
+        result_df = limited_lazy.collect()
         progress_bar.progress(0.9)
-        memory_text.text(f"Current memory usage after loading data: {get_memory_usage()}")
         
-        # Convert to the expected format (list of dictionaries)
-        items = filtered_df.to_dict(orient='records')
+        # Convert to pandas for compatibility with rest of the app
+        # Note: convert in chunks for large datasets
+        chunk_size = 10000
+        total_rows = result_df.height
+        items = []
+        
+        for i in range(0, total_rows, chunk_size):
+            end_idx = min(i + chunk_size, total_rows)
+            # Convert chunk to pandas then to dict
+            chunk_pandas = result_df.slice(i, end_idx - i).to_pandas()
+            items.extend(chunk_pandas.to_dict(orient='records'))
+            
+            # Update progress
+            progress = 0.9 + 0.1 * (end_idx / total_rows)
+            progress_bar.progress(progress)
+            status_text.text(f"Converting results: {end_idx}/{total_rows}")
         
         progress_bar.progress(1.0)
         status_text.empty()
         progress_bar.empty()
         
-        st.success(f"Successfully loaded {len(items)} items")
-        memory_text.text(f"Final memory usage: {get_memory_usage()}")
+        st.success(f"Successfully loaded {len(items)} items using Polars")
         
         return items
         
     except Exception as e:
-        st.error(f"Error processing parquet file: {str(e)}")
+        st.error(f"Error processing parquet files with Polars: {str(e)}")
         return []
     finally:
         # Clean up temporary files
         try:
-            if combined_filename:
-                os.unlink(combined_filename)
-            if decompressed_filename:
-                os.unlink(decompressed_filename)
+            if 'temp_dir' in locals() and temp_dir and os.path.exists(temp_dir):
+                for file in glob.glob(os.path.join(temp_dir, "*")):
+                    os.unlink(file)
+                os.rmdir(temp_dir)
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
-# Load data from parquet chunks with optimized approach
+# Load data using the memory-efficient Polars function
 items = load_data_from_parquet_chunks()
 
 # Create DataFrame and restructure columns
