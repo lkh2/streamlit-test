@@ -95,7 +95,7 @@ def generate_component(name, template="", script=""):
 @st.cache_data(ttl=600)
 def load_data_from_parquet_chunks():
     """
-    Load data from compressed parquet chunks using Polars for memory efficiency
+    Load data from compressed parquet chunks by first combining them into a complete file
     """
     # Find all parquet chunk files
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
@@ -108,130 +108,93 @@ def load_data_from_parquet_chunks():
     status_text = st.empty()
     status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
     
-    try:
-        # First combine all chunks into a single file (as in the original approach)
-        combined_file_path = os.path.join(tempfile.mkdtemp(), "combined.parquet.gz")
+    # Create a temporary file to store the combined chunks
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet.gz') as combined_file:
+        combined_filename = combined_file.name
         
         # Sort the chunks to ensure they're processed in the correct order
         chunk_files = sorted(chunk_files)
         
-        # Combine all chunks into a single gzip file
-        with open(combined_file_path, 'wb') as combined_file:
-            for i, chunk_file in enumerate(chunk_files):
-                try:
-                    with open(chunk_file, 'rb') as f:
-                        combined_file.write(f.read())
-                    progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
-                    status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
-                except Exception as e:
-                    st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
-        
-        # Now decompress the combined file
+        # First combine all chunks into a single file
+        for i, chunk_file in enumerate(chunk_files):
+            try:
+                with open(chunk_file, 'rb') as f:
+                    combined_file.write(f.read())
+                progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
+                status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
+            except Exception as e:
+                st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
+    
+    # Create another temporary file for the decompressed parquet
+    decompressed_filename = None
+    
+    try:
         status_text.text("Decompressing combined file...")
         
         # Create a temporary file for the decompressed parquet
-        decompressed_file_path = os.path.join(os.path.dirname(combined_file_path), "decompressed.parquet")
-        
-        # Decompress the combined gzip file
-        with gzip.open(combined_file_path, 'rb') as gz_file:
-            with open(decompressed_file_path, 'wb') as decompressed_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as decompressed_file:
+            decompressed_filename = decompressed_file.name
+            
+            # Decompress the combined gzip file
+            with gzip.open(combined_filename, 'rb') as gz_file:
                 decompressed_file.write(gz_file.read())
         
-        progress_bar.progress(0.7)  # 70% progress after decompression
+        # Read the decompressed parquet file
+        status_text.text("Reading parquet data...")
+        progress_bar.progress(0.75)  # 75% progress after decompression
         
-        # Check if the decompressed file contains valid data
-        if os.path.getsize(decompressed_file_path) < 100:
-            st.error("Decompressed parquet file appears to be empty or invalid")
-            # Use pandas as a fallback for small files
-            try:
-                df = pd.read_parquet(decompressed_file_path)
-                return df.to_dict(orient='records')
-            except Exception as e:
-                st.error(f"Failed to read with pandas fallback: {str(e)}")
-                return create_dummy_data()  # Create some dummy data for testing
+        # Read the parquet file
+        df = pd.read_parquet(decompressed_filename, engine='pyarrow')
         
-        # Process the decompressed parquet file with Polars
-        status_text.text("Processing with Polars...")
+        # Check column format and handle both prefixed and non-prefixed columns
+        column_format = 'data_prefix' if 'data.state' in df.columns else 'no_prefix'
+        status_text.text(f"Detected column format: {column_format}")
         
-        try:
-            # Try to read file info first
-            file_info = pl.read_parquet_schema(decompressed_file_path)
-            st.write("Parquet schema:", file_info)
-        except Exception as e:
-            st.warning(f"Could not read parquet schema: {str(e)}")
+        if column_format == 'no_prefix':
+            # Add 'data.' prefix to all columns except those that already have structures
+            rename_map = {}
+            for col in df.columns:
+                if '.' not in col and col != 'run_id':
+                    rename_map[col] = f'data.{col}'
+            
+            # Only rename if there are columns to rename
+            if rename_map:
+                df = df.rename(columns=rename_map)
+                status_text.text("Added 'data.' prefix to column names")
         
-        # Use Polars lazy execution to efficiently process the parquet file
-        try:
-            lazy_df = pl.scan_parquet(decompressed_file_path)
-            
-            # Show schema
-            st.write("Polars schema:", lazy_df.schema)
-            
-            # Limit rows if needed
-            limited_lazy = lazy_df.limit(999999)
-            
-            # Execute the query plan with detailed error handling
-            status_text.text("Processing query results...")
-            progress_bar.progress(0.8)
-            
-            try:
-                # Collect results - this is where memory optimization happens with Polars
-                result_df = limited_lazy.collect()
-                
-                # Debug output - check if we got data
-                st.write(f"Rows in Polars DataFrame: {result_df.height}")
-                st.write(f"Columns in Polars DataFrame: {result_df.width}")
-                if result_df.height > 0:
-                    st.write("First row sample:", result_df.slice(0, 1))
-                
-                progress_bar.progress(0.9)
-                
-                # Use simpler conversion to pandas
-                pandas_df = result_df.to_pandas()
-                
-                # Debug - check pandas conversion
-                st.write(f"Rows in Pandas DataFrame: {len(pandas_df)}")
-                st.write(f"Columns in Pandas DataFrame: {len(pandas_df.columns)}")
-                
-                # Return as list of dictionaries
-                return pandas_df.to_dict(orient='records')
-                
-            except Exception as e:
-                st.error(f"Error collecting Polars results: {str(e)}")
-                # Try direct pandas approach as fallback
-                try:
-                    pandas_df = pd.read_parquet(decompressed_file_path)
-                    st.write(f"Fallback pandas read successful with {len(pandas_df)} rows")
-                    return pandas_df.to_dict(orient='records')
-                except Exception as e2:
-                    st.error(f"Pandas fallback also failed: {str(e2)}")
-                    return create_dummy_data()
-        except Exception as e:
-            st.error(f"Error scanning parquet with Polars: {str(e)}")
-            # Try direct pandas approach as fallback
-            try:
-                pandas_df = pd.read_parquet(decompressed_file_path)
-                st.write(f"Fallback pandas read successful with {len(pandas_df)} rows")
-                return pandas_df.to_dict(orient='records')
-            except Exception as e2:
-                st.error(f"Pandas fallback also failed: {str(e2)}")
-                return create_dummy_data()
+        # Filter for successful projects if not already filtered
+        if 'data.state' in df.columns and 'successful' in df['data.state'].unique():
+            original_len = len(df)
+            df = df[df['data.state'] == 'successful']
+            if len(df) < original_len:
+                status_text.text(f"Filtered to {len(df)} successful projects")
+        
+        # Limit the number of rows if needed
+        limit = 999999
+        if len(df) > limit:
+            df = df.iloc[:limit]
+            status_text.text(f"Limited to {limit} rows")
+        
+        progress_bar.progress(1.0)
+        status_text.empty()
+        progress_bar.empty()
+        
+        st.success(f"Successfully loaded {len(df)} items")
+        
+        # Convert to the expected format (list of dictionaries)
+        items = df.to_dict(orient='records')
+        return items
         
     except Exception as e:
-        st.error(f"Error processing parquet files: {str(e)}")
-        return create_dummy_data()  # Return dummy data as last resort
+        st.error(f"Error processing combined parquet file: {str(e)}")
+        return []
     finally:
         # Clean up temporary files
         try:
-            if 'combined_file_path' in locals() and os.path.exists(combined_file_path):
-                os.unlink(combined_file_path)
-            if 'decompressed_file_path' in locals() and os.path.exists(decompressed_file_path):
-                os.unlink(decompressed_file_path)
-            # Remove temp directory
-            if 'combined_file_path' in locals():
-                temp_dir = os.path.dirname(combined_file_path)
-                if os.path.exists(temp_dir):
-                    os.rmdir(temp_dir)
+            if combined_filename:
+                os.unlink(combined_filename)
+            if decompressed_filename:
+                os.unlink(decompressed_filename)
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
