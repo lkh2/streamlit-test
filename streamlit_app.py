@@ -97,10 +97,10 @@ def load_data_from_gz_chunks():
     Load data from gzip chunks in the gzip_chunk folder
     """
     # Find all chunk files
-    chunk_files = glob.glob("gzip_chunk/*.part")
+    chunk_files = glob.glob("gzip_chunks/*.part")
     
     if not chunk_files:
-        st.error("No gzip chunks found in gzip_chunk folder")
+        st.error("No gzip chunks found in gzip_chunks folder")
         return []
     
     progress_bar = st.progress(0)
