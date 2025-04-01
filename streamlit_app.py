@@ -146,22 +146,6 @@ def load_data_from_parquet_chunks():
         # Read the parquet file with Polars
         df = pl.read_parquet(decompressed_filename)
         
-        # Check column format and handle both prefixed and non-prefixed columns
-        column_format = 'data_prefix' if 'data.state' in df.columns else 'no_prefix'
-        status_text.text(f"Detected column format: {column_format}")
-        
-        if column_format == 'no_prefix':
-            # Add 'data.' prefix to all columns except those that already have structures
-            rename_map = {}
-            for col in df.columns:
-                if '.' not in col and col != 'run_id':
-                    rename_map[col] = f'data.{col}'
-            
-            # Only rename if there are columns to rename
-            if rename_map:
-                df = df.rename(rename_map)
-                status_text.text("Added 'data.' prefix to column names")
-        
         # Limit the number of rows if needed
         limit = 999999
         if len(df) > limit:
@@ -174,9 +158,7 @@ def load_data_from_parquet_chunks():
         
         st.success(f"Successfully loaded {len(df)} items")
         
-        # Convert to the expected format (list of dictionaries)
-        items = df.to_dicts()
-        return items
+        return df
         
     except Exception as e:
         st.error(f"Error processing combined parquet file: {str(e)}")
@@ -192,30 +174,7 @@ def load_data_from_parquet_chunks():
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
 # Load data using the memory-efficient Polars function
-items = load_data_from_parquet_chunks()
-
-# Create DataFrame and inspect the structure of items
-if len(items) > 0:
-    pass
-
-# Replace pandas DataFrame with Polars DataFrame
-try:
-    df = pl.DataFrame(items)
-except Exception as e:
-    st.error(f"Error in creating Polars DataFrame: {str(e)}")
-    # Fallback: create dataframe directly 
-    df = pl.DataFrame(items)
-
-# If we have nested 'data' dictionaries, handle them
-if 'data' in df.columns and len(df) > 0:
-    if isinstance(df['data'][0], dict):
-        # Extract nested dictionaries
-        data_df = pl.DataFrame(df['data'].to_list())
-        # Combine with original df
-        for col in data_df.columns:
-            df = df.with_column(data_df[col].alias(f'data.{col}'))
-        # Drop the original nested column
-        df = df.drop('data')
+df = load_data_from_parquet_chunks()
 
 # Define a helper function to safely access columns that might have different naming
 def safe_column_access(df, possible_names):
