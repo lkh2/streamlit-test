@@ -139,12 +139,12 @@ def load_data_from_parquet_chunks():
             with gzip.open(combined_filename, 'rb') as gz_file:
                 decompressed_file.write(gz_file.read())
         
-        # Read the decompressed parquet file
+        # Read the decompressed parquet file using Polars
         status_text.text("Reading parquet data...")
         progress_bar.progress(0.75)  # 75% progress after decompression
         
-        # Read the parquet file
-        df = pd.read_parquet(decompressed_filename, engine='pyarrow')
+        # Read the parquet file with Polars
+        df = pl.read_parquet(decompressed_filename)
         
         # Check column format and handle both prefixed and non-prefixed columns
         column_format = 'data_prefix' if 'data.state' in df.columns else 'no_prefix'
@@ -159,20 +159,20 @@ def load_data_from_parquet_chunks():
             
             # Only rename if there are columns to rename
             if rename_map:
-                df = df.rename(columns=rename_map)
+                df = df.rename(rename_map)
                 status_text.text("Added 'data.' prefix to column names")
         
         # Filter for successful projects if not already filtered
         if 'data.state' in df.columns and 'successful' in df['data.state'].unique():
             original_len = len(df)
-            df = df[df['data.state'] == 'successful']
+            df = df.filter(pl.col('data.state') == 'successful')
             if len(df) < original_len:
                 status_text.text(f"Filtered to {len(df)} successful projects")
         
         # Limit the number of rows if needed
         limit = 999999
         if len(df) > limit:
-            df = df.iloc[:limit]
+            df = df.head(limit)
             status_text.text(f"Limited to {limit} rows")
         
         progress_bar.progress(1.0)
@@ -182,7 +182,7 @@ def load_data_from_parquet_chunks():
         st.success(f"Successfully loaded {len(df)} items")
         
         # Convert to the expected format (list of dictionaries)
-        items = df.to_dict(orient='records')
+        items = df.to_dicts()
         return items
         
     except Exception as e:
@@ -247,24 +247,24 @@ items = load_data_from_parquet_chunks()
 if len(items) > 0:
     pass
 
-# Create DataFrame with json_normalize and check keys
+# Replace pandas DataFrame with Polars DataFrame
 try:
-    df = json_normalize(items)
+    df = pl.DataFrame(items)
 except Exception as e:
-    st.error(f"Error in json_normalize: {str(e)}")
+    st.error(f"Error in creating Polars DataFrame: {str(e)}")
     # Fallback: create dataframe directly 
-    df = pd.DataFrame(items)
+    df = pl.DataFrame(items)
 
 # If we have nested 'data' dictionaries, handle them
 if 'data' in df.columns and len(df) > 0:
-    if isinstance(df['data'].iloc[0], dict):
+    if isinstance(df['data'][0], dict):
         # Extract nested dictionaries
-        data_df = pd.json_normalize(df['data'].tolist())
+        data_df = pl.DataFrame(df['data'].to_list())
         # Combine with original df
         for col in data_df.columns:
-            df[f'data.{col}'] = data_df[col]
+            df = df.with_column(data_df[col].alias(f'data.{col}'))
         # Drop the original nested column
-        df = df.drop(columns=['data'])
+        df = df.drop('data')
 
 # Now proceed with column normalization...
 
@@ -291,47 +291,54 @@ backers_col = safe_column_access(df, ['data.backers_count', 'data_backers_count'
 
 # Calculate and store raw values - only if columns exist
 if goal_col and exchange_rate_col:
-    df['Raw Goal'] = df[goal_col].fillna(0).astype(float) * df[exchange_rate_col].fillna(1.0).astype(float)
-    df['Raw Goal'] = df['Raw Goal'].apply(lambda x: max(1.0, x))
+    df = df.with_columns(
+        (pl.col(goal_col).fill_null(0).cast(float) * pl.col(exchange_rate_col).fill_null(1.0).cast(float)).alias('Raw Goal')
+    )
+    df = df.with_columns(
+        pl.when(pl.col('Raw Goal') < 1.0).then(1.0).otherwise(pl.col('Raw Goal')).alias('Raw Goal')
+    )
 else:
-    df['Raw Goal'] = 1.0  # Default value if columns not found
+    df = df.with_columns(pl.lit(1.0).alias('Raw Goal'))  # Default value if columns not found
 
 if pledged_col:
-    df['Raw Pledged'] = df[pledged_col].fillna(0).astype(float)
+    df = df.with_columns(pl.col(pledged_col).fill_null(0).cast(float).alias('Raw Pledged'))
 else:
-    df['Raw Pledged'] = 0.0  # Default value if column not found
+    df = df.with_columns(pl.lit(0.0).alias('Raw Pledged'))  # Default value if column not found
 
 # Calculate Raw Raised with special handling for zero pledged amount
-df['Raw Raised'] = df.apply(
-    lambda row: 0.0 if row['Raw Pledged'] == 0 or row['Raw Goal'] == 0
-    else (row['Raw Pledged'] / row['Raw Goal']) * 100, 
-    axis=1
+df = df.with_columns(
+    pl.when((pl.col('Raw Pledged') == 0) | (pl.col('Raw Goal') == 0))
+    .then(0.0)
+    .otherwise((pl.col('Raw Pledged') / pl.col('Raw Goal')) * 100)
+    .alias('Raw Raised')
 )
 
 if created_col:
-    df['Raw Date'] = pd.to_datetime(df[created_col], unit='s')
+    df = df.with_columns(pl.col(created_col).cast(pl.Datetime).alias('Raw Date'))
 else:
-    df['Raw Date'] = pd.to_datetime('2020-01-01')  # Default fallback date
+    df = df.with_columns(pl.lit(pd.to_datetime('2020-01-01')).alias('Raw Date'))  # Default fallback date
 
 # Convert deadline to datetime and format display columns
 if deadline_col:
-    df['Raw Deadline'] = pd.to_datetime(df[deadline_col], unit='s')
-    df['Deadline'] = df['Raw Deadline'].dt.strftime('%Y-%m-%d')
+    df = df.with_columns(pl.col(deadline_col).cast(pl.Datetime).alias('Raw Deadline'))
+    df = df.with_columns(df['Raw Deadline'].dt.strftime('%Y-%m-%d').alias('Deadline'))
 else:
-    df['Raw Deadline'] = pd.to_datetime('2020-12-31')  # Default fallback date
-    df['Deadline'] = '2020-12-31'
+    df = df.with_columns(pl.lit(pd.to_datetime('2020-12-31')).alias('Raw Deadline'))  # Default fallback date
+    df = df.with_columns(pl.lit('2020-12-31').alias('Deadline'))
 
 # Backer count with null handling
 if backers_col:
-    df['Backer Count'] = df[backers_col].fillna(0).astype(int)
+    df = df.with_columns(pl.col(backers_col).fill_null(0).cast(int).alias('Backer Count'))
 else:
-    df['Backer Count'] = 0  # Default value if column not found
+    df = df.with_columns(pl.lit(0).alias('Backer Count'))  # Default value if column not found
 
 # Format display columns - Add null handling
-df['Goal'] = df['Raw Goal'].fillna(0).round(2).map(lambda x: f"${x:,.2f}")
-df['Pledged Amount'] = df['Raw Pledged'].fillna(0).map(lambda x: f"${int(x):,}")
-df['%Raised'] = df['Raw Raised'].fillna(0).map(lambda x: f"{x:.1f}%")
-df['Date'] = df['Raw Date'].dt.strftime('%Y-%m-%d')
+df = df.with_columns(
+    df['Raw Goal'].fill_null(0).round(2).map(lambda x: f"${x:,.2f}").alias('Goal'),
+    df['Raw Pledged'].fill_null(0).map(lambda x: f"${int(x):,}").alias('Pledged Amount'),
+    df['Raw Raised'].fill_null(0).map(lambda x: f"{x:.1f}%").alias('%Raised'),
+    df['Raw Date'].dt.strftime('%Y-%m-%d').alias('Date')
+)
 
 # Continue working with the remaining columns similarly
 # Find other required columns
@@ -349,14 +356,14 @@ staff_pick_col = safe_column_access(df, ['data.staff_pick', 'data_staff_pick', '
 new_columns = {}
 
 # Add columns with fallbacks
-new_columns['Project Name'] = df[name_col] if name_col else 'Unknown Project'
-new_columns['Creator'] = df[creator_col] if creator_col else 'Unknown Creator'
+new_columns['Project Name'] = df[name_col] if name_col else pl.lit('Unknown Project')
+new_columns['Creator'] = df[creator_col] if creator_col else pl.lit('Unknown Creator')
 new_columns['Pledged Amount'] = df['Pledged Amount']
-new_columns['Link'] = df[link_col] if link_col else '#'
-new_columns['Country'] = df[country_expanded_col] if country_expanded_col else 'Unknown'
-new_columns['State'] = df[state_col] if state_col else 'unknown'
-new_columns['Category'] = df[category_col] if category_col else 'Other'
-new_columns['Subcategory'] = df[subcategory_col] if subcategory_col else 'Other'
+new_columns['Link'] = df[link_col] if link_col else pl.lit('#')
+new_columns['Country'] = df[country_expanded_col] if country_expanded_col else pl.lit('Unknown')
+new_columns['State'] = df[state_col] if state_col else pl.lit('unknown')
+new_columns['Category'] = df[category_col] if category_col else pl.lit('Other')
+new_columns['Subcategory'] = df[subcategory_col] if subcategory_col else pl.lit('Other')
 new_columns['Date'] = df['Date']
 new_columns['Deadline'] = df['Deadline']
 new_columns['Goal'] = df['Goal']
@@ -367,15 +374,14 @@ new_columns['Raw Raised'] = df['Raw Raised']
 new_columns['Raw Date'] = df['Raw Date']
 new_columns['Raw Deadline'] = df['Raw Deadline']
 new_columns['Backer Count'] = df['Backer Count']
-new_columns['Country Code'] = df[country_code_col] if country_code_col else 'US'
-new_columns['Staff Pick'] = df[staff_pick_col] if staff_pick_col else False
+new_columns['Country Code'] = df[country_code_col] if country_code_col else pl.lit('US')
+new_columns['Staff Pick'] = df[staff_pick_col] if staff_pick_col else pl.lit(False)
 
 # Create new dataframe with the correct columns
-df = pd.DataFrame(new_columns)
+df = pl.DataFrame(new_columns)
 
 # Convert remaining object columns to string
-object_columns = df.select_dtypes(include=['object']).columns
-df[object_columns] = df[object_columns].astype(str)
+df = df.with_columns([pl.col(col).cast(str) for col in df.columns if df[col].dtype == pl.Object])
 
 # Function to style state with colored span
 def style_state(state):
@@ -383,21 +389,21 @@ def style_state(state):
     return f'<div class="state_cell state-{state}">{state}</div>'
 
 # Apply styling to State column
-df['State'] = df['State'].apply(style_state)
+df = df.with_columns(df['State'].map(style_state).alias('State'))
 
 # After creating the initial DataFrame, add country coordinates
 @st.cache_data
 def load_country_data():
     # Downloaded from https://developers.google.com/public-data/docs/canonical/countries_csv
-    country_df = pd.read_csv('country.csv')
+    country_df = pl.read_csv('country.csv')
     return country_df
 
 # Add latitude/longitude from country data
 country_data = load_country_data()
-df = df.merge(country_data[['country', 'latitude', 'longitude']], 
-              left_on='Country Code', 
-              right_on='country', 
-              how='left')
+df = df.join(country_data.select(['country', 'latitude', 'longitude']), 
+             left_on='Country Code', 
+             right_on='country', 
+             how='left')
 
 # Add geolocation call before data processing
 loc = get_geolocation()
@@ -431,20 +437,22 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
 # After merging with country data, calculate distances if location is available
 if user_location:
-    df['Distance'] = df.apply(
-        lambda row: calculate_distance(
-            user_location['latitude'],
-            user_location['longitude'],
-            float(row['latitude']) if pd.notna(row['latitude']) else 0,  # Handle NaN values
-            float(row['longitude']) if pd.notna(row['longitude']) else 0  # Handle NaN values
-        ) if pd.notna(row['latitude']) and pd.notna(row['longitude']) else float('inf'),
-        axis=1
-    ).astype(float)  # Ensure Distance is float type
+    df = df.with_columns(
+        df.apply(
+            lambda row: calculate_distance(
+                user_location['latitude'],
+                user_location['longitude'],
+                float(row['latitude']) if pd.notna(row['latitude']) else 0,  # Handle NaN values
+                float(row['longitude']) if pd.notna(row['longitude']) else 0  # Handle NaN values
+            ) if pd.notna(row['latitude']) and pd.notna(row['longitude']) else float('inf'),
+            axis=1
+        ).alias('Distance')
+    ).with_columns(pl.col('Distance').cast(float))  # Ensure Distance is float type
 else:
-    df['Distance'] = float('inf')  # Set as float infinity
+    df = df.with_columns(pl.lit(float('inf')).alias('Distance'))  # Set as float infinity
 
 # Sort DataFrame by Distance initially to verify values
-df = df.sort_values('Distance')
+df = df.sort('Distance')
 
 # Calculate popularity score components
 now = pd.Timestamp.now()
@@ -460,12 +468,14 @@ normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pl
 normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
 
 # Calculate popularity score
-df['Popularity Score'] = (
-    normalized_backers * 0.25 +      # Backer count (25% weight, reduced from 35%)
-    normalized_pledged * 0.35 +      # Pledged amount (35% weight, increased from 25%)
-    normalized_percentage * 0.20 +    # Percentage raised (20% weight, unchanged)
-    time_factor * 0.10 +             # Time factor (10% weight, unchanged)
-    df['Staff Pick'].astype(int) * 0.10  # Staff pick (10% weight, unchanged)
+df = df.with_columns(
+    (
+        normalized_backers * 0.25 +      # Backer count (25% weight, reduced from 35%)
+        normalized_pledged * 0.35 +      # Pledged amount (35% weight, increased from 25%)
+        normalized_percentage * 0.20 +    # Percentage raised (20% weight, unchanged)
+        time_factor * 0.10 +             # Time factor (10% weight, unchanged)
+        df['Staff Pick'].cast(int) * 0.10  # Staff pick (10% weight, unchanged)
+    ).alias('Popularity Score')
 )
 
 def generate_table_html(df):
