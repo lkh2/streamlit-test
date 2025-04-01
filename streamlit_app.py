@@ -92,7 +92,7 @@ def generate_component(name, template="", script=""):
     return f
 
 # Replace MongoDB connection with Polars-powered Parquet processing
-@st.cache_data(ttl=600)
+@st.experimental_singleton
 def load_data_from_parquet_chunks():
     """
     Load data from compressed parquet chunks by first combining them into a complete file
@@ -191,48 +191,6 @@ def load_data_from_parquet_chunks():
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
-# Function to create dummy data if everything else fails
-def create_dummy_data():
-    """Create some dummy kickstarter data for testing"""
-    st.warning("Loading dummy data for testing")
-    dummy_items = []
-    
-    for i in range(100):
-        # Create a random date within last 5 years
-        created_at = int((pd.Timestamp.now() - pd.Timedelta(days=np.random.randint(1, 1825))).timestamp())
-        deadline = created_at + np.random.randint(15, 60) * 86400  # 15-60 days later
-        
-        goal = np.random.randint(1000, 50000)
-        pledged = np.random.randint(0, int(goal * 2))
-        backers = np.random.randint(0, 500)
-        
-        dummy_item = {
-            "data": {
-                "name": f"Test Project {i}",
-                "creator": {"name": f"Creator {i % 10}"},
-                "goal": float(goal),
-                "usd_exchange_rate": 1.0,
-                "converted_pledged_amount": float(pledged),
-                "backers_count": backers,
-                "created_at": created_at,
-                "deadline": deadline,
-                "state": "successful",
-                "urls": {"web": {"project": f"https://example.com/project{i}"}},
-                "location": {
-                    "country": "US",
-                    "expanded_country": "United States"
-                },
-                "category": {
-                    "parent_name": ["Technology", "Art", "Games", "Design", "Food"][i % 5],
-                    "name": f"Subcategory {i % 10}"
-                },
-                "staff_pick": bool(i % 5 == 0)
-            }
-        }
-        dummy_items.append(dummy_item)
-    
-    return dummy_items
-
 # Load data using the memory-efficient Polars function
 items = load_data_from_parquet_chunks()
 
@@ -258,11 +216,6 @@ if 'data' in df.columns and len(df) > 0:
             df = df.with_column(data_df[col].alias(f'data.{col}'))
         # Drop the original nested column
         df = df.drop('data')
-
-# Now proceed with column normalization...
-
-# Inspect available columns and print for debugging
-# st.write("Available columns:", df.columns.tolist())
 
 # Define a helper function to safely access columns that might have different naming
 def safe_column_access(df, possible_names):
