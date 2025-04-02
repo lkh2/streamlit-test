@@ -239,9 +239,9 @@ else:
 
 # Format display columns - Add null handling
 df = df.with_columns(
-    df['Raw Goal'].fill_null(0).round(2).map(lambda x: f"${x:,.2f}").alias('Goal'),
-    df['Raw Pledged'].fill_null(0).map(lambda x: f"${int(x):,}").alias('Pledged Amount'),
-    df['Raw Raised'].fill_null(0).map(lambda x: f"{x:.1f}%").alias('%Raised'),
+    df['Raw Goal'].fill_null(0).round(2).alias('Goal'),
+    df['Raw Pledged'].fill_null(0).alias('Pledged Amount'),
+    df['Raw Raised'].fill_null(0).alias('%Raised'),
     df['Raw Date'].dt.strftime('%Y-%m-%d').alias('Date')
 )
 
