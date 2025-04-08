@@ -155,9 +155,7 @@ def load_data_from_parquet_chunks():
         progress_bar.progress(1.0)
         status_text.empty()
         progress_bar.empty()
-        
-        st.success(f"Successfully loaded {len(df)} items")
-        
+
         return df
         
     except Exception as e:
