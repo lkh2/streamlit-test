@@ -3,7 +3,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 import tempfile, os
 import pandas as pd
-from pandas import json_normalize
 from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
