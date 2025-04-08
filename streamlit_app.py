@@ -443,17 +443,17 @@ max_raised = int(df['Raw Raised'].max())
 # After loading data and before generating table, prepare filter options
 def get_filter_options(df):
     # Make sure 'All Subcategories' is first, then sort the rest
-    subcategories = df['Subcategory'].unique().tolist()
+    subcategories = df['Subcategory'].unique().to_list()
     sorted_subcategories = sorted(subcategories)
     
     # Extract states without HTML formatting
-    states = df['State'].str.extract(r'state-(\w+)')[0].unique().tolist()
+    states = df['State'].str.extract(r'state-(\w+)')[0].unique().to_list()
     states = [state.title() for state in states]  # Capitalize first letter
     
     return {
-        'categories': sorted(['All Categories'] + df['Category'].unique().tolist()),
+        'categories': sorted(['All Categories'] + df['Category'].unique().to_list()),
         'subcategories': ['All Subcategories'] + sorted_subcategories,
-        'countries': sorted(['All Countries'] + df['Country'].unique().tolist()),
+        'countries': sorted(['All Countries'] + df['Country'].unique().to_list()),
         'states': sorted(['All States'] + states),
         'date_ranges': [
             'All Time',
