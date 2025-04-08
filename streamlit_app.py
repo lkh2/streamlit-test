@@ -369,7 +369,7 @@ max_days = (now - df['Raw Date']).dt.total_seconds().max() / (24*60*60)
 time_factor = 1 - ((now - df['Raw Date']).dt.total_seconds() / (24*60*60) / max_days)
 
 # Cap percentage raised at 500% to prevent extreme outliers
-capped_percentage = df['Raw Raised'].clip(upper=500)
+capped_percentage = df['Raw Raised'].clip(min_val=None, max_val=500)
 
 # Normalize components to 0-1 scale
 normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
