@@ -446,9 +446,11 @@ def get_filter_options(df):
     subcategories = df['Subcategory'].unique().to_list()
     sorted_subcategories = sorted(subcategories)
     
-    # Extract states without HTML formatting
-    states = df['State'].str.extract(r'state-(\w+)')[0].unique().to_list()
-    states = [state.title() for state in states]  # Capitalize first letter
+    # Extract states without HTML formatting using Polars native expressions
+    states_expr = pl.col('State').str.extract(r'state-(\w+)')
+    states_df = df.select(states_expr.alias('extracted_state'))
+    states = states_df['extracted_state'].unique().to_list()
+    states = [state.title() for state in states if state]  # Capitalize first letter and filter out None
     
     return {
         'categories': sorted(['All Categories'] + df['Category'].unique().to_list()),
