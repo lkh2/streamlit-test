@@ -453,9 +453,9 @@ def get_filter_options(df):
     states = [state.title() for state in states if state]  # Capitalize first letter and filter out None
     
     return {
-        'categories': sorted(['All Categories'] + df['Category'].unique().to_list()),
+        'categories': sorted(['All Categories'] + df.select(pl.col('Category').filter(pl.col('Category').is_not_null())).unique()['Category'].to_list()),
         'subcategories': ['All Subcategories'] + sorted_subcategories,
-        'countries': sorted(['All Countries'] + df['Country'].unique().to_list()),
+        'countries': sorted(['All Countries'] + df.select(pl.col('Country').filter(pl.col('Country').is_not_null())).unique()['Country'].to_list()),
         'states': sorted(['All States'] + states),
         'date_ranges': [
             'All Time',
