@@ -91,11 +91,12 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# Replace MongoDB connection with Polars-powered Parquet processing
+# Replace DataFrame with LazyFrame for Parquet processing
 @st.cache_data
 def load_data_from_parquet_chunks():
     """
     Load data from compressed parquet chunks by first combining them into a complete file
+    Uses LazyFrame for memory efficiency with large datasets
     """
     # Find all parquet chunk files
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
@@ -139,18 +140,16 @@ def load_data_from_parquet_chunks():
             with gzip.open(combined_filename, 'rb') as gz_file:
                 decompressed_file.write(gz_file.read())
         
-        # Read the decompressed parquet file using Polars
-        status_text.text("Reading parquet data...")
+        # Read the decompressed parquet file using Polars LazyFrame
+        status_text.text("Reading parquet data (lazy mode)...")
         progress_bar.progress(0.75)  # 75% progress after decompression
         
-        # Read the parquet file with Polars
-        df = pl.read_parquet(decompressed_filename)
+        # Use scan_parquet instead of read_parquet to create a LazyFrame
+        df = pl.scan_parquet(decompressed_filename)
         
-        # Limit the number of rows if needed
+        # Limit the number of rows if needed (lazy operation)
         limit = 999999
-        if len(df) > limit:
-            df = df.head(limit)
-            status_text.text(f"Limited to {limit} rows")
+        df = df.limit(limit)
         
         progress_bar.progress(1.0)
         status_text.empty()
@@ -160,7 +159,7 @@ def load_data_from_parquet_chunks():
         
     except Exception as e:
         st.error(f"Error processing combined parquet file: {str(e)}")
-        return []
+        return pl.LazyFrame()  # Return empty LazyFrame instead of empty list
     finally:
         # Clean up temporary files
         try:
@@ -171,20 +170,25 @@ def load_data_from_parquet_chunks():
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
-# Load data using the memory-efficient Polars function
+# Load data using the memory-efficient Polars LazyFrame function
 df = load_data_from_parquet_chunks()
 
+# Define a helper function to check if a column exists in a LazyFrame schema
+def column_exists(lf, column_name):
+    """Check if a column exists in a LazyFrame schema"""
+    return column_name in lf.columns
+
 # Define a helper function to safely access columns that might have different naming
-def safe_column_access(df, possible_names):
+def safe_column_access(lf, possible_names):
     """Try multiple possible column names and return the first one that exists"""
     for col in possible_names:
-        if col in df.columns:
+        if column_exists(lf, col):
             return col
     # If no matching column found, return None
     st.warning(f"Could not find any column matching: {possible_names}")
     return None
 
-# Find the correct column names using direct Parquet columns (no 'data.' prefix)
+# Find the correct column names using LazyFrame schema
 goal_col = safe_column_access(df, ['goal'])
 exchange_rate_col = safe_column_access(df, ['usd_exchange_rate'])
 pledged_col = safe_column_access(df, ['converted_pledged_amount'])
@@ -192,10 +196,10 @@ created_col = safe_column_access(df, ['created_at'])
 deadline_col = safe_column_access(df, ['deadline'])
 backers_col = safe_column_access(df, ['backers_count'])
 
-# Calculate and store raw values - only if columns exist
+# Calculate and store raw values - only if columns exist (all lazy operations)
 if goal_col and exchange_rate_col:
     df = df.with_columns(
-        (pl.col(goal_col).fill_null(0).cast(float) * pl.col(exchange_rate_col).fill_null(1.0).cast(float)).alias('Raw Goal')
+        (pl.col(goal_col).fill_null(0).cast(pl.Float64) * pl.col(exchange_rate_col).fill_null(1.0).cast(pl.Float64)).alias('Raw Goal')
     )
     df = df.with_columns(
         pl.when(pl.col('Raw Goal') < 1.0).then(1.0).otherwise(pl.col('Raw Goal')).alias('Raw Goal')
@@ -204,7 +208,7 @@ else:
     df = df.with_columns(pl.lit(1.0).alias('Raw Goal'))  # Default value if columns not found
 
 if pledged_col:
-    df = df.with_columns(pl.col(pledged_col).fill_null(0).cast(float).alias('Raw Pledged'))
+    df = df.with_columns(pl.col(pledged_col).fill_null(0).cast(pl.Float64).alias('Raw Pledged'))
 else:
     df = df.with_columns(pl.lit(0.0).alias('Raw Pledged'))  # Default value if column not found
 
@@ -226,23 +230,23 @@ else:
 if deadline_col:
     # Convert Unix timestamp to datetime if needed
     df = df.with_columns(pl.col(deadline_col).cast(pl.Int64).cast(pl.Datetime).alias('Raw Deadline'))
-    df = df.with_columns(df['Raw Deadline'].dt.strftime('%Y-%m-%d').alias('Deadline'))
+    df = df.with_columns(pl.col('Raw Deadline').dt.strftime('%Y-%m-%d').alias('Deadline'))
 else:
     df = df.with_columns(pl.lit(pd.to_datetime('2020-12-31')).alias('Raw Deadline'))
     df = df.with_columns(pl.lit('2020-12-31').alias('Deadline'))
 
 # Backer count with null handling
 if backers_col:
-    df = df.with_columns(pl.col(backers_col).fill_null(0).cast(int).alias('Backer Count'))
+    df = df.with_columns(pl.col(backers_col).fill_null(0).cast(pl.Int64).alias('Backer Count'))
 else:
     df = df.with_columns(pl.lit(0).alias('Backer Count'))
 
 # Format display columns - Add null handling
 df = df.with_columns(
-    df['Raw Goal'].fill_null(0).round(2).alias('Goal'),
-    df['Raw Pledged'].fill_null(0).alias('Pledged Amount'),
-    df['Raw Raised'].fill_null(0).alias('%Raised'),
-    df['Raw Date'].dt.strftime('%Y-%m-%d').alias('Date')
+    pl.col('Raw Goal').fill_null(0).round(2).alias('Goal'),
+    pl.col('Raw Pledged').fill_null(0).alias('Pledged Amount'),
+    pl.col('Raw Raised').fill_null(0).alias('%Raised'),
+    pl.col('Raw Date').dt.strftime('%Y-%m-%d').alias('Date')
 )
 
 # Continue working with the remaining columns - using direct Parquet columns
@@ -256,36 +260,38 @@ subcategory_col = safe_column_access(df, ['category.name'])
 country_code_col = safe_column_access(df, ['location.country'])
 staff_pick_col = safe_column_access(df, ['staff_pick'])
 
-# Create a new DataFrame with only the columns we need
-new_columns = {}
+# Create a new LazyFrame with only the columns we need
+# We'll use lazy select and rename operations
+columns_to_select = [
+    pl.col(name_col).alias('Project Name'),
+    pl.col(creator_col).alias('Creator'),
+    pl.col('Pledged Amount'),
+    pl.col(link_col).alias('Link'),
+    pl.col(country_expanded_col).alias('Country'),
+    pl.col(state_col).alias('State'),
+    pl.col(category_col).alias('Category'),
+    pl.col(subcategory_col).alias('Subcategory'),
+    pl.col('Date'),
+    pl.col('Deadline'),
+    pl.col('Goal'),
+    pl.col('%Raised'),
+    pl.col('Raw Goal'),
+    pl.col('Raw Pledged'),
+    pl.col('Raw Raised'),
+    pl.col('Raw Date'),
+    pl.col('Raw Deadline'),
+    pl.col('Backer Count'),
+    pl.col(country_code_col).alias('Country Code'),
+    pl.col(staff_pick_col).alias('Staff Pick')
+]
 
-# Add columns from Parquet schema - using direct access without unnecessary fallbacks
-new_columns['Project Name'] = df[name_col]
-new_columns['Creator'] = df[creator_col]
-new_columns['Pledged Amount'] = df['Pledged Amount']
-new_columns['Link'] = df[link_col]
-new_columns['Country'] = df[country_expanded_col]
-new_columns['State'] = df[state_col]
-new_columns['Category'] = df[category_col]
-new_columns['Subcategory'] = df[subcategory_col]
-new_columns['Date'] = df['Date']
-new_columns['Deadline'] = df['Deadline']
-new_columns['Goal'] = df['Goal']
-new_columns['%Raised'] = df['%Raised']
-new_columns['Raw Goal'] = df['Raw Goal']
-new_columns['Raw Pledged'] = df['Raw Pledged']
-new_columns['Raw Raised'] = df['Raw Raised']
-new_columns['Raw Date'] = df['Raw Date']
-new_columns['Raw Deadline'] = df['Raw Deadline']
-new_columns['Backer Count'] = df['Backer Count']
-new_columns['Country Code'] = df[country_code_col]
-new_columns['Staff Pick'] = df[staff_pick_col]
+df = df.select(columns_to_select)
 
-# Create new dataframe with the correct columns
-df = pl.DataFrame(new_columns)
-
-# Convert remaining object columns to string
-df = df.with_columns([pl.col(col).cast(str) for col in df.columns if df[col].dtype == pl.Object])
+# Cast all object columns to string
+object_columns = [col for col in df.columns]
+df = df.with_columns([
+    pl.col(col).cast(pl.Utf8) for col in object_columns
+])
 
 # Apply styling to State column using native polars expressions
 df = df.with_columns(
@@ -298,19 +304,24 @@ df = df.with_columns(
     ).alias('State')
 )
 
-# After creating the initial DataFrame, add country coordinates
+# Load country data - keep as a normal DataFrame since it's small
 @st.cache_data
 def load_country_data():
-    # Downloaded from https://developers.google.com/public-data/docs/canonical/countries_csv
     country_df = pl.read_csv('country.csv')
     return country_df
 
 # Add latitude/longitude from country data
 country_data = load_country_data()
-df = df.join(country_data.select(['country', 'latitude', 'longitude']), 
-             left_on='Country Code', 
-             right_on='country', 
-             how='left')
+# Convert country_data to LazyFrame for join
+country_data_lazy = country_data.lazy()
+
+# Join with country data using lazy operations
+df = df.join(
+    country_data_lazy.select(['country', 'latitude', 'longitude']), 
+    left_on='Country Code', 
+    right_on='country', 
+    how='left'
+)
 
 # Add geolocation call before data processing
 loc = get_geolocation()
@@ -327,65 +338,130 @@ if (loc and 'coords' in loc):
     time.sleep(1.5)
     loading_success.empty()
 
-# Add function to calculate distances
-def calculate_distance(lat1, lon1, lat2, lon2):
-    """Calculate distance between two points using Haversine formula"""
-    R = 6371  # Earth's radius in kilometers
-    
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
-    
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1  # Fixed: Calculate dlon correctly
-    
-    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
-    c = 2 * np.arcsin(np.sqrt(a))
-    
-    return R * c
-
-# After merging with country data, calculate distances if location is available
+# Calculate distances using Polars expressions instead of Python functions
 if user_location:
-    df = df.with_columns(
-        df.apply(
-            lambda row: calculate_distance(
-                user_location['latitude'],
-                user_location['longitude'],
-                float(row['latitude']) if pd.notna(row['latitude']) else 0,  # Handle NaN values
-                float(row['longitude']) if pd.notna(row['longitude']) else 0  # Handle NaN values
-            ) if pd.notna(row['latitude']) and pd.notna(row['longitude']) else float('inf'),
-            axis=1
-        ).alias('Distance')
-    ).with_columns(pl.col('Distance').cast(float))  # Ensure Distance is float type
+    # We need to collect the data to calculate distance since it requires complex calculations
+    # First, ensure we have latitude/longitude columns as floats
+    df = df.with_columns([
+        pl.col('latitude').cast(pl.Float64),
+        pl.col('longitude').cast(pl.Float64)
+    ])
+    
+    # We'll need to materialize the data to do the distance calculation
+    # This is one operation where we need to collect the data
+    df_collected = df.collect()
+    
+    # Define the Haversine distance calculation for Polars
+    # Convert to radians
+    lat1_rad = np.radians(user_location['latitude'])
+    lon1_rad = np.radians(user_location['longitude'])
+    
+    # Calculate distance using vectorized operations
+    def calculate_distances(df):
+        # Handle null values in latitude/longitude
+        lat2 = df['latitude'].fill_null(0.0)
+        lon2 = df['longitude'].fill_null(0.0)
+        
+        # Convert to radians
+        lat2_rad = np.radians(lat2)
+        lon2_rad = np.radians(lon2)
+        
+        # Haversine formula components
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+        
+        a = np.sin(dlat/2)**2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon/2)**2
+        c = 2 * np.arcsin(np.sqrt(a))
+        R = 6371  # Earth's radius in kilometers
+        
+        # Set distance to inf for rows with null coordinates
+        distances = R * c
+        distances = distances.fill_null(float('inf'))
+        
+        return distances
+    
+    distances = calculate_distances(df_collected)
+    
+    # Create a new LazyFrame with the distances
+    df = pl.LazyFrame(df_collected).with_columns(
+        pl.lit(distances).alias('Distance')
+    )
 else:
     df = df.with_columns(pl.lit(float('inf')).alias('Distance'))  # Set as float infinity
 
-# Sort DataFrame by Distance initially to verify values
+# Sort LazyFrame by Distance initially
 df = df.sort('Distance')
+
+# Collect the LazyFrame for time-related calculations that need materialized data
+df_time = df.select('Raw Date').collect()
 
 # Calculate popularity score components
 now = pd.Timestamp.now()
-max_days = (now - df['Raw Date']).dt.total_seconds().max() / (24*60*60)
-time_factor = 1 - ((now - df['Raw Date']).dt.total_seconds() / (24*60*60) / max_days)
+max_days_seconds = (now - pd.to_datetime(df_time['Raw Date'])).dt.total_seconds().max()
+max_days = max_days_seconds / (24*60*60) if max_days_seconds else 1.0
 
-# Cap percentage raised at 500% to prevent extreme outliers
-capped_percentage = df['Raw Raised'].clip(upper_bound=500)
+# We'll use a Python function to calculate time factors since it needs pandas functionality
+time_factors = 1 - ((now - pd.to_datetime(df_time['Raw Date'])).dt.total_seconds() / (24*60*60) / max_days)
 
-# Normalize components to 0-1 scale
-normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
-normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())  # Fixed this line
-normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
+# Convert back to LazyFrame and add the time factors
+df = df.with_columns(pl.lit(time_factors.tolist()).alias('Time Factor'))
 
-# Calculate popularity score
+# Cap percentage raised at 500% using native LazyFrame operations
+df = df.with_columns(
+    pl.col('Raw Raised').clip(upper_bound=500).alias('Capped Percentage')
+)
+
+# Get min/max values for normalization - we need to collect for these aggregations
+min_max_values = df.select(
+    pl.min('Backer Count').alias('min_backers'),
+    pl.max('Backer Count').alias('max_backers'),
+    pl.min('Raw Pledged').alias('min_pledged'),
+    pl.max('Raw Pledged').alias('max_pledged'),
+    pl.min('Capped Percentage').alias('min_percentage'),
+    pl.max('Capped Percentage').alias('max_percentage')
+).collect()
+
+# Extract the min/max values from the collected result
+min_backers = min_max_values['min_backers'][0]
+max_backers = min_max_values['max_backers'][0]
+min_pledged = min_max_values['min_pledged'][0]
+max_pledged = min_max_values['max_pledged'][0]
+min_percentage = min_max_values['min_percentage'][0]
+max_percentage = min_max_values['max_percentage'][0]
+
+# Use LazyFrame expressions to normalize components
+backers_range = max_backers - min_backers
+pledged_range = max_pledged - min_pledged
+percentage_range = max_percentage - min_percentage
+
+# Handle edge cases where min and max are the same
+backers_range = 1.0 if backers_range == 0 else backers_range
+pledged_range = 1.0 if pledged_range == 0 else pledged_range
+percentage_range = 1.0 if percentage_range == 0 else percentage_range
+
+# Calculate normalized values with LazyFrame operations
+df = df.with_columns([
+    ((pl.col('Backer Count') - min_backers) / backers_range).alias('Normalized Backers'),
+    ((pl.col('Raw Pledged') - min_pledged) / pledged_range).alias('Normalized Pledged'),
+    ((pl.col('Capped Percentage') - min_percentage) / percentage_range).alias('Normalized Percentage')
+])
+
+# Calculate popularity score using LazyFrame expressions
 df = df.with_columns(
     (
-        normalized_backers * 0.25 +      # Backer count (25% weight, reduced from 35%)
-        normalized_pledged * 0.35 +      # Pledged amount (35% weight, increased from 25%)
-        normalized_percentage * 0.20 +    # Percentage raised (20% weight, unchanged)
-        time_factor * 0.10 +             # Time factor (10% weight, unchanged)
-        df['Staff Pick'].cast(int) * 0.10  # Staff pick (10% weight, unchanged)
+        pl.col('Normalized Backers') * 0.25 +      # Backer count (25% weight)
+        pl.col('Normalized Pledged') * 0.35 +      # Pledged amount (35% weight)
+        pl.col('Normalized Percentage') * 0.20 +   # Percentage raised (20% weight)
+        pl.col('Time Factor') * 0.10 +             # Time factor (10% weight)
+        pl.col('Staff Pick').cast(pl.Int64) * 0.10  # Staff pick (10% weight)
     ).alias('Popularity Score')
 )
 
-def generate_table_html(df):
+# Function to generate table HTML - needs to collect data since it processes row by row
+def generate_table_html(df_lazy):
+    # Collect LazyFrame to process rows - this materializes the data
+    df_collected = df_lazy.collect()
+    
     # Define visible and hidden columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
     
@@ -394,7 +470,7 @@ def generate_table_html(df):
     
     # Generate table rows with raw values in data attributes
     rows_html = ''
-    for row in df.iter_rows(named=True):
+    for row in df_collected.iter_rows(named=True):
         # Add data attributes to each row for filtering
         data_attrs = f'''
             data-category="{row['Category']}"
@@ -427,34 +503,54 @@ def generate_table_html(df):
     
     return header_html, rows_html
 
-# Generate table HTML
+# Generate table HTML - this will collect the LazyFrame
 header_html, rows_html = generate_table_html(df)
 
-# Calculate min/max values from the DataFrame
-min_pledged = int(df['Raw Pledged'].min())
-max_pledged = int(df['Raw Pledged'].max())
-min_goal = int(df['Raw Goal'].min())
-max_goal = int(df['Raw Goal'].max())
-min_raised = int(df['Raw Raised'].min())
-max_raised = int(df['Raw Raised'].max())
+# Calculate min/max values from the LazyFrame - need to collect for aggregations
+min_max_collected = df.select(
+    pl.min('Raw Pledged').alias('min_pledged'),
+    pl.max('Raw Pledged').alias('max_pledged'),
+    pl.min('Raw Goal').alias('min_goal'),
+    pl.max('Raw Goal').alias('max_goal'),
+    pl.min('Raw Raised').alias('min_raised'),
+    pl.max('Raw Raised').alias('max_raised')
+).collect()
 
-# After loading data and before generating table, prepare filter options
-def get_filter_options(df):
-    # Make sure 'All Subcategories' is first, then sort the rest
-    subcategories = df['Subcategory'].unique().to_list()
-    sorted_subcategories = sorted(subcategories)
+# Extract scalar values from the collected result
+min_pledged = int(min_max_collected['min_pledged'][0])
+max_pledged = int(min_max_collected['max_pledged'][0])
+min_goal = int(min_max_collected['min_goal'][0])
+max_goal = int(min_max_collected['max_goal'][0])
+min_raised = int(min_max_collected['min_raised'][0])
+max_raised = int(min_max_collected['max_raised'][0])
+
+# Function to get filter options - needs to collect unique values
+def get_filter_options(df_lazy):
+    # Collect unique values - we need materialized data for these operations
+    categories = df_lazy.select('Category').unique().collect()
+    subcategories = df_lazy.select('Subcategory').unique().collect()
+    countries = df_lazy.select('Country').unique().collect()
     
-    # Extract states without HTML formatting using Polars native expressions
-    states_expr = pl.col('State').str.extract(r'state-(\w+)')
-    states_df = df.select(states_expr.alias('extracted_state'))
-    states = states_df['extracted_state'].unique().to_list()
-    states = [state.title() for state in states if state]  # Capitalize first letter and filter out None
+    # Extract states using regex on the State column and collect unique values
+    states_pattern = r'state-(\w+)'
+    states_extracted = df_lazy.select(
+        pl.col('State').str.extract(states_pattern, group_index=1).alias('extracted_state')
+    ).unique().collect()
+    
+    # Process the collected results
+    category_list = sorted(['All Categories'] + categories['Category'].to_list())
+    subcategory_list = ['All Subcategories'] + sorted(subcategories['Subcategory'].to_list())
+    country_list = sorted(['All Countries'] + countries['Country'].to_list())
+    
+    # Process states - title case and filter out None values
+    states = states_extracted['extracted_state'].to_list()
+    state_list = sorted(['All States'] + [state.title() for state in states if state])
     
     return {
-        'categories': sorted(['All Categories'] + df.select(pl.col('Category').filter(pl.col('Category').is_not_null())).unique()['Category'].to_list()),
-        'subcategories': ['All Subcategories'] + sorted_subcategories,
-        'countries': sorted(['All Countries'] + df.select(pl.col('Country').filter(pl.col('Country').is_not_null())).unique()['Country'].to_list()),
-        'states': sorted(['All States'] + states),
+        'categories': category_list,
+        'subcategories': subcategory_list,
+        'countries': country_list,
+        'states': state_list,
         'date_ranges': [
             'All Time',
             'Last Month',
@@ -465,6 +561,7 @@ def get_filter_options(df):
         ]
     }
 
+# Get filter options - this will collect the LazyFrame for unique values
 filter_options = get_filter_options(df)
 
 # Update template to include filter controls with default subcategory
@@ -2051,5 +2148,3 @@ script = """
 # Create and use the component
 table_component = generate_component('searchable_table', template=css + template, script=script)
 table_component()
-
-# st.dataframe(df) # Display the dataframe
