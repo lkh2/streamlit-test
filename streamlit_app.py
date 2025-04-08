@@ -289,13 +289,16 @@ df = pl.DataFrame(new_columns)
 # Convert remaining object columns to string
 df = df.with_columns([pl.col(col).cast(str) for col in df.columns if df[col].dtype == pl.Object])
 
-# Function to style state with colored span
-def style_state(state):
-    state = state.lower()
-    return f'<div class="state_cell state-{state}">{state}</div>'
-
-# Apply styling to State column
-df = df.with_columns(df['State'].map(style_state).alias('State'))
+# Apply styling to State column using native polars expressions
+df = df.with_columns(
+    (
+        pl.lit('<div class="state_cell state-')
+        + pl.col('State').str.to_lowercase()
+        + pl.lit('">')
+        + pl.col('State').str.to_lowercase()
+        + pl.lit('</div>')
+    ).alias('State')
+)
 
 # After creating the initial DataFrame, add country coordinates
 @st.cache_data
