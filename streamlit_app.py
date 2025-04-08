@@ -186,13 +186,13 @@ def safe_column_access(df, possible_names):
     st.warning(f"Could not find any column matching: {possible_names}")
     return None
 
-# Find the correct column names
-goal_col = safe_column_access(df, ['data.goal', 'data_goal', 'goal'])
-exchange_rate_col = safe_column_access(df, ['data.usd_exchange_rate', 'data_usd_exchange_rate', 'usd_exchange_rate'])
-pledged_col = safe_column_access(df, ['data.converted_pledged_amount', 'data_converted_pledged_amount', 'converted_pledged_amount'])
-created_col = safe_column_access(df, ['data.created_at', 'data_created_at', 'created_at'])
-deadline_col = safe_column_access(df, ['data.deadline', 'data_deadline', 'deadline'])
-backers_col = safe_column_access(df, ['data.backers_count', 'data_backers_count', 'backers_count'])
+# Find the correct column names using direct Parquet columns (no 'data.' prefix)
+goal_col = safe_column_access(df, ['goal'])
+exchange_rate_col = safe_column_access(df, ['usd_exchange_rate'])
+pledged_col = safe_column_access(df, ['converted_pledged_amount'])
+created_col = safe_column_access(df, ['created_at'])
+deadline_col = safe_column_access(df, ['deadline'])
+backers_col = safe_column_access(df, ['backers_count'])
 
 # Calculate and store raw values - only if columns exist
 if goal_col and exchange_rate_col:
@@ -219,23 +219,25 @@ df = df.with_columns(
 )
 
 if created_col:
-    df = df.with_columns(pl.col(created_col).cast(pl.Datetime).alias('Raw Date'))
+    # Convert Unix timestamp to datetime if needed
+    df = df.with_columns(pl.col(created_col).cast(pl.Int64).cast(pl.Datetime).alias('Raw Date'))
 else:
-    df = df.with_columns(pl.lit(pd.to_datetime('2020-01-01')).alias('Raw Date'))  # Default fallback date
+    df = df.with_columns(pl.lit(pd.to_datetime('2020-01-01')).alias('Raw Date'))
 
 # Convert deadline to datetime and format display columns
 if deadline_col:
-    df = df.with_columns(pl.col(deadline_col).cast(pl.Datetime).alias('Raw Deadline'))
+    # Convert Unix timestamp to datetime if needed
+    df = df.with_columns(pl.col(deadline_col).cast(pl.Int64).cast(pl.Datetime).alias('Raw Deadline'))
     df = df.with_columns(df['Raw Deadline'].dt.strftime('%Y-%m-%d').alias('Deadline'))
 else:
-    df = df.with_columns(pl.lit(pd.to_datetime('2020-12-31')).alias('Raw Deadline'))  # Default fallback date
+    df = df.with_columns(pl.lit(pd.to_datetime('2020-12-31')).alias('Raw Deadline'))
     df = df.with_columns(pl.lit('2020-12-31').alias('Deadline'))
 
 # Backer count with null handling
 if backers_col:
     df = df.with_columns(pl.col(backers_col).fill_null(0).cast(int).alias('Backer Count'))
 else:
-    df = df.with_columns(pl.lit(0).alias('Backer Count'))  # Default value if column not found
+    df = df.with_columns(pl.lit(0).alias('Backer Count'))
 
 # Format display columns - Add null handling
 df = df.with_columns(
@@ -245,30 +247,29 @@ df = df.with_columns(
     df['Raw Date'].dt.strftime('%Y-%m-%d').alias('Date')
 )
 
-# Continue working with the remaining columns similarly
-# Find other required columns
-name_col = safe_column_access(df, ['data.name', 'data_name', 'name'])
-creator_col = safe_column_access(df, ['data.creator.name', 'data_creator_name', 'creator_name'])
-link_col = safe_column_access(df, ['data.urls.web.project', 'data_urls_web_project', 'urls_web_project'])
-country_expanded_col = safe_column_access(df, ['data.location.expanded_country', 'data_location_expanded_country', 'location_expanded_country'])
-state_col = safe_column_access(df, ['data.state', 'data_state', 'state'])
-category_col = safe_column_access(df, ['data.category.parent_name', 'data_category_parent_name', 'category_parent_name'])
-subcategory_col = safe_column_access(df, ['data.category.name', 'data_category_name', 'category_name'])
-country_code_col = safe_column_access(df, ['data.location.country', 'data_location_country', 'location_country'])
-staff_pick_col = safe_column_access(df, ['data.staff_pick', 'data_staff_pick', 'staff_pick'])
+# Continue working with the remaining columns - using direct Parquet columns
+name_col = safe_column_access(df, ['name'])
+creator_col = safe_column_access(df, ['creator.name'])
+link_col = safe_column_access(df, ['urls.web.project'])
+country_expanded_col = safe_column_access(df, ['location.expanded_country'])
+state_col = safe_column_access(df, ['state'])
+category_col = safe_column_access(df, ['category.parent_name'])
+subcategory_col = safe_column_access(df, ['category.name'])
+country_code_col = safe_column_access(df, ['location.country'])
+staff_pick_col = safe_column_access(df, ['staff_pick'])
 
 # Create a new DataFrame with only the columns we need
 new_columns = {}
 
-# Add columns with fallbacks
-new_columns['Project Name'] = df[name_col] if name_col else pl.lit('Unknown Project')
-new_columns['Creator'] = df[creator_col] if creator_col else pl.lit('Unknown Creator')
+# Add columns from Parquet schema - using direct access without unnecessary fallbacks
+new_columns['Project Name'] = df[name_col]
+new_columns['Creator'] = df[creator_col]
 new_columns['Pledged Amount'] = df['Pledged Amount']
-new_columns['Link'] = df[link_col] if link_col else pl.lit('#')
-new_columns['Country'] = df[country_expanded_col] if country_expanded_col else pl.lit('Unknown')
-new_columns['State'] = df[state_col] if state_col else pl.lit('unknown')
-new_columns['Category'] = df[category_col] if category_col else pl.lit('Other')
-new_columns['Subcategory'] = df[subcategory_col] if subcategory_col else pl.lit('Other')
+new_columns['Link'] = df[link_col]
+new_columns['Country'] = df[country_expanded_col]
+new_columns['State'] = df[state_col]
+new_columns['Category'] = df[category_col]
+new_columns['Subcategory'] = df[subcategory_col]
 new_columns['Date'] = df['Date']
 new_columns['Deadline'] = df['Deadline']
 new_columns['Goal'] = df['Goal']
@@ -279,8 +280,8 @@ new_columns['Raw Raised'] = df['Raw Raised']
 new_columns['Raw Date'] = df['Raw Date']
 new_columns['Raw Deadline'] = df['Raw Deadline']
 new_columns['Backer Count'] = df['Backer Count']
-new_columns['Country Code'] = df[country_code_col] if country_code_col else pl.lit('US')
-new_columns['Staff Pick'] = df[staff_pick_col] if staff_pick_col else pl.lit(False)
+new_columns['Country Code'] = df[country_code_col]
+new_columns['Staff Pick'] = df[staff_pick_col]
 
 # Create new dataframe with the correct columns
 df = pl.DataFrame(new_columns)
