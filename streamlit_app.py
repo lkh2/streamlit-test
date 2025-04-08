@@ -396,7 +396,7 @@ def generate_table_html(df):
     
     # Generate table rows with raw values in data attributes
     rows_html = ''
-    for _, row in df.iterrows():
+    for _, row in df.iter_rows(named=True):
         # Add data attributes to each row for filtering
         data_attrs = f'''
             data-category="{row['Category']}"
