@@ -91,33 +91,31 @@ def generate_component(name, template="", script=""):
     return f
 
 @st.cache_data
-def load_data_from_parquet_chunks() -> pl.LazyFrame: # Return LazyFrame
+def load_data_from_parquet_chunks() -> tuple[pl.LazyFrame | None, str | None]: # Return LazyFrame and temp file path
     """
     Scan data from compressed parquet chunks lazily.
     Combines chunks first, then scans the resulting file.
+    Returns a tuple: (LazyFrame, temp_file_path_to_delete_later)
     """
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
 
     if not chunk_files:
         st.error("No parquet chunks found in parquet_gz_chunks folder. Please run database_download.py first.")
-        # Return an empty LazyFrame by scanning a non-existent file? Or handle differently?
-        # For now, let's return an empty eager DF and handle it below.
-        # A truly empty LF is harder to signal errors with downstream.
-        # Returning empty eager DF to be checked easily later.
-        return pl.DataFrame().lazy()
+        return None, None # Indicate error
 
     progress_bar = st.progress(0)
     status_text = st.empty()
     status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
 
     combined_filename = None
-    decompressed_filename = None
-    lf = None # Initialize LazyFrame variable
+    decompressed_file_obj = None # To hold the file object
+    decompressed_filename = None # To hold the file path
+    lf = None
 
     try:
-        # Create a temporary file to store the combined chunks
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet.gz') as combined_file:
-            combined_filename = combined_file.name
+        # Create a temporary file for the combined chunks (deleted automatically on close)
+        with tempfile.NamedTemporaryFile(delete=True, suffix='.parquet.gz') as combined_file:
+            combined_filename = combined_file.name # Get path for potential logging
             chunk_files = sorted(chunk_files)
             for i, chunk_file in enumerate(chunk_files):
                 try:
@@ -128,72 +126,74 @@ def load_data_from_parquet_chunks() -> pl.LazyFrame: # Return LazyFrame
                 except Exception as e:
                     st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
 
-        status_text.text("Decompressing combined file...")
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as decompressed_file:
-            decompressed_filename = decompressed_file.name
+            combined_file.flush() # Ensure all data is written before gzip reads it
+
+            status_text.text("Decompressing combined file...")
+            # Create the decompressed file - IMPORTANT: delete=False
+            decompressed_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix='.parquet')
+            decompressed_filename = decompressed_file_obj.name # Store the path
+
             with gzip.open(combined_filename, 'rb') as gz_file:
-                decompressed_file.write(gz_file.read())
+                 # Write decompressed data to the persistent temp file
+                decompressed_file_obj.write(gz_file.read())
+            decompressed_file_obj.close() # Close the file handle, but file persists
+
 
         # Scan the decompressed parquet file using Polars Lazily
         status_text.text("Scanning pre-processed parquet data...")
         progress_bar.progress(0.75)
 
-        # Scan the parquet file lazily
         lf = pl.scan_parquet(decompressed_filename)
-
-        # Optional: Fetch a small amount to check if scan worked without loading all
-        # try:
-        #     _ = lf.fetch(1) # Check if scan is valid
-        # except Exception as scan_error:
-        #      st.error(f"Error scanning parquet file: {scan_error}")
-        #      return pl.DataFrame().lazy() # Return empty lazy frame on scan error
 
         progress_bar.progress(1.0)
         status_text.empty()
         progress_bar.empty()
 
-        # We don't know the length until collect, maybe fetch()?
-        # st.success(f"Successfully scanned projects!") # Cannot show count yet
-        return lf
+        # Return the LazyFrame and the path to the temp file that needs deletion later
+        return lf, decompressed_filename
 
     except Exception as e:
         st.error(f"Error processing parquet file for scanning: {str(e)}")
-        return pl.DataFrame().lazy() # Return empty LazyFrame on error
-    finally:
-        # Clean up temporary files
-        # Note: Deleting decompressed_filename immediately might cause issues
-        # if the scan hasn't fully completed its metadata read.
-        # Consider delaying cleanup or handling it more robustly if needed.
-        try:
-            if combined_filename and os.path.exists(combined_filename):
-                os.unlink(combined_filename)
-            # Keep decompressed file around until the end? Or manage lifetime?
-            # For simplicity now, we risk deleting it early, but scan_parquet likely reads metadata quickly.
-            if decompressed_filename and os.path.exists(decompressed_filename):
-                 # Pass the filename to be deleted later if needed
-                 # For now, delete it, assuming scan_parquet has read metadata
-                 os.unlink(decompressed_filename)
-                 pass # Or manage cleanup later
-        except Exception as e:
-            st.warning(f"Error cleaning up temporary files: {str(e)}")
+         # Clean up the decompressed file if it exists and an error occurred
+        if decompressed_filename and os.path.exists(decompressed_filename):
+            try:
+                os.unlink(decompressed_filename)
+            except OSError as unlink_error:
+                st.warning(f"Error cleaning up temporary decompressed file on error: {unlink_error}")
+        return None, None # Indicate error
+    # No finally block needed here for decompressed_filename, as we return its path
 
 
 # Load pre-processed data lazily
-lf = load_data_from_parquet_chunks()
+lf, temp_parquet_path = load_data_from_parquet_chunks()
+
+# Exit if loading failed
+if lf is None or temp_parquet_path is None:
+     st.error("Failed to load or scan data. Cannot proceed.")
+     st.stop() # Stop execution if lf is None
 
 # --- Check if LazyFrame is potentially empty ---
-# Use head(0).collect() to validate schema without loading data
 try:
     # Apply head(0) lazily, then collect the empty frame with the correct schema
-    schema_check = lf.head(0).collect() # Fetch 0 rows just to validate schema and connectivity
-    if schema_check.is_empty() and schema_check.width == 0 : # Check if schema is also empty
-         st.error("Failed to load data or data file is empty. Please check logs and ensure database_download.py ran successfully.")
+    schema_check = lf.head(0).collect()
+    if schema_check.is_empty() and schema_check.width == 0 :
+         st.error("Loaded data appears empty or schema is invalid. Please check logs and ensure database_download.py ran successfully.")
+         # Clean up the temp file before stopping
+         if temp_parquet_path and os.path.exists(temp_parquet_path):
+              try:
+                  os.unlink(temp_parquet_path)
+              except OSError as e:
+                  st.warning(f"Error cleaning up temporary file on empty schema check: {e}")
          st.stop()
-    # We can now assume the LazyFrame is likely valid and has columns
     print("LazyFrame Schema:", lf.schema)
-
 except Exception as e:
      st.error(f"Error during initial data check: {e}. Cannot proceed.")
+     # Clean up the temp file before stopping
+     if temp_parquet_path and os.path.exists(temp_parquet_path):
+          try:
+              os.unlink(temp_parquet_path)
+          except OSError as unlink_error:
+              st.warning(f"Error cleaning up temporary file on data check error: {unlink_error}")
      st.stop()
 
 
@@ -306,6 +306,7 @@ else:
     # Add Distance column lazily
     lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
 
+
 # --- Calculate Filter Options and Min/Max (More Efficiently) ---
 
 # Prepare filter options (operate lazily as much as possible)
@@ -363,7 +364,7 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
     return options
 
 # Calculate filter options using the LazyFrame
-filter_options = get_filter_options(lf)
+filter_options = get_filter_options(lf) # Now the function is defined above
 
 # Calculate Min/Max values lazily
 min_pledged, max_pledged = 0, 1000
@@ -383,7 +384,7 @@ if all(col in lf.schema for col in required_minmax_cols):
             pl.max('Raw Goal').alias('max_goal'),
             pl.min('Raw Raised').alias('min_raised'),
             pl.max('Raw Raised').alias('max_raised_calc')
-        ]).collect()
+        ]).collect() # This collect is fine, operates on aggregations
 
         min_pledged = int(min_max_vals['min_pledged'][0]) if min_max_vals['min_pledged'][0] is not None else 0
         max_pledged = int(min_max_vals['max_pledged'][0]) if min_max_vals['max_pledged'][0] is not None else 1000
@@ -396,26 +397,33 @@ if all(col in lf.schema for col in required_minmax_cols):
         print("Min/max ranges calculated.")
     except Exception as e:
         st.error(f"Error calculating min/max filter ranges: {e}. Using defaults.")
-        # Defaults are already set
 else:
     st.error("Missing columns required for min/max filter ranges in schema. Using defaults.")
-    # Defaults are already set
 
 
-# --- Collect Data ONLY before generating HTML ---
-print("Collecting final DataFrame for display...")
-start_collect_time = time.time()
+# --- Main Collect and Cleanup ---
+df_collected = None
 try:
-    df_collected = lf.collect(streaming=True) # Use streaming for potential memory benefits
+    print("Collecting final DataFrame for display...")
+    start_collect_time = time.time()
+    df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
     st.success(f"Loaded {len(df_collected)} projects successfully! (Collection took {collect_duration:.2f}s)")
 except Exception as e:
     st.error(f"Error collecting final DataFrame: {e}")
-    df_collected = pl.DataFrame() # Ensure df_collected exists but is empty
-    st.stop()
+    df_collected = pl.DataFrame()
+finally:
+    # --- IMPORTANT: Clean up the temporary file AFTER collect attempt ---
+    if temp_parquet_path and os.path.exists(temp_parquet_path):
+        print(f"Cleaning up temporary file: {temp_parquet_path}")
+        try:
+            os.unlink(temp_parquet_path)
+        except OSError as unlink_error:
+            st.warning(f"Error cleaning up temporary file: {unlink_error}")
 
+# Check collection result
 if df_collected.is_empty():
-     st.error("Data collection resulted in an empty DataFrame. Cannot display table.")
+     st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
      st.stop()
 
 
