@@ -106,16 +106,17 @@ except Exception as e:
      st.stop()
 
 try:
+    collected_schema = lf.collect_schema() 
     schema_check = lf.head(0).collect()
     if schema_check.width == 0 :
          st.error(f"Loaded data from '{parquet_source_path}' appears to have no columns or is invalid. Please check the source file/directory.")
          st.stop()
-    print("LazyFrame Schema:", lf.schema)
+    print("LazyFrame Schema:", collected_schema)
 except Exception as e:
      st.error(f"Error during initial data check on '{parquet_source_path}': {e}. Cannot proceed.")
      st.stop()
 
-if 'State' in lf.schema:
+if 'State' in collected_schema:
     lf = lf.with_columns(
         (
             pl.lit('<div class="state_cell state-')
@@ -140,17 +141,16 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame):
         ]
     }
     category_subcategory_map = {'All Categories': ['All Subcategories']}
-    schema_lf = pl.LazyFrame(schema=schema_dict) 
 
     try:
-        if 'Category' in schema_lf.schema:
+        if 'Category' in schema_dict:
             categories_unique = data_lf.select(pl.col('Category')).unique().collect()['Category']
             valid_categories = sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
             options['categories'] += valid_categories
             for cat in valid_categories:
                 category_subcategory_map[cat] = []
 
-        if 'Category' in schema_lf.schema and 'Subcategory' in schema_lf.schema:
+        if 'Category' in schema_dict and 'Subcategory' in schema_dict:
              cat_subcat_pairs = data_lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect()
              all_subcategories_set = set()
              for row in cat_subcat_pairs.iter_rows(named=True):
@@ -175,7 +175,7 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame):
                       rest = sorted(subcats)
                  category_subcategory_map[cat] = prefix + rest
 
-        elif 'Subcategory' in schema_lf.schema and 'Category' not in schema_lf.schema:
+        elif 'Subcategory' in schema_dict and 'Category' not in schema_dict:
              subcategories_unique = data_lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
              all_subcats = sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
              category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats
@@ -183,11 +183,11 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame):
         if not category_subcategory_map['All Categories']:
              category_subcategory_map['All Categories'] = ['All Subcategories']
 
-        if 'Country' in schema_lf.schema:
+        if 'Country' in schema_dict:
              countries_unique = data_lf.select(pl.col('Country')).unique().collect()['Country']
              options['countries'] += sorted(countries_unique.filter(countries_unique.is_not_null() & (countries_unique != "N/A")).to_list())
 
-        if 'State' in schema_lf.schema and schema_lf.schema['State'] == pl.Utf8:
+        if 'State' in schema_dict and schema_dict['State'] == pl.Utf8:
              states_collected = data_lf.select('State').collect()['State']
              sample_state = states_collected.head(1).to_list()
              if sample_state and sample_state[0] and sample_state[0].startswith('<div class="state_cell state-'):
@@ -208,14 +208,14 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame):
 
     return options, category_subcategory_map
 
-filter_options, category_subcategory_map = get_filter_options(lf.schema, lf) 
+filter_options, category_subcategory_map = get_filter_options(lf.collect_schema(), lf) 
 
 min_pledged, max_pledged = 0, 1000
 min_goal, max_goal = 0, 10000
 min_raised, max_raised = 0, 500 
 
 required_minmax_cols = ['Raw Pledged', 'Raw Goal', 'Raw Raised']
-if all(col in lf.schema for col in required_minmax_cols):
+if all(col in lf.collect_schema() for col in required_minmax_cols):
     print("Calculating min/max filter ranges...")
     try:
         min_max_vals = lf.select([
@@ -240,14 +240,14 @@ if all(col in lf.schema for col in required_minmax_cols):
 else:
     st.warning("Missing columns required for min/max filter ranges in schema. Using defaults.")
 
-print("Schema before final collect:", lf.schema)
+print("Schema before final collect:", lf.collect_schema())
 
 df_collected = None
 try:
     print("Collecting final DataFrame for display...")
     start_collect_time = time.time()
 
-    df_collected = lf.collect(streaming=True)
+    df_collected = lf.collect(engine='streaming')
     collect_duration = time.time() - start_collect_time
     print(f"Data collection took {collect_duration:.2f} seconds.")
 
