@@ -91,33 +91,34 @@ def generate_component(name, template="", script=""):
     return f
 
 @st.cache_data
-def load_data_from_parquet_chunks():
+def load_data_from_parquet_chunks() -> pl.LazyFrame: # Return LazyFrame
     """
-    Load data from compressed parquet chunks by first combining them into a complete file
+    Scan data from compressed parquet chunks lazily.
+    Combines chunks first, then scans the resulting file.
     """
-    # Find all parquet chunk files
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
-    
+
     if not chunk_files:
         st.error("No parquet chunks found in parquet_gz_chunks folder. Please run database_download.py first.")
-        return pl.DataFrame() # Return empty Polars DF
-    
+        # Return an empty LazyFrame by scanning a non-existent file? Or handle differently?
+        # For now, let's return an empty eager DF and handle it below.
+        # A truly empty LF is harder to signal errors with downstream.
+        # Returning empty eager DF to be checked easily later.
+        return pl.DataFrame().lazy()
+
     progress_bar = st.progress(0)
     status_text = st.empty()
     status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
-    
+
     combined_filename = None
     decompressed_filename = None
-    
+    lf = None # Initialize LazyFrame variable
+
     try:
         # Create a temporary file to store the combined chunks
         with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet.gz') as combined_file:
             combined_filename = combined_file.name
-            
-            # Sort the chunks
             chunk_files = sorted(chunk_files)
-            
-            # Combine all chunks
             for i, chunk_file in enumerate(chunk_files):
                 try:
                     with open(chunk_file, 'rb') as f:
@@ -126,60 +127,81 @@ def load_data_from_parquet_chunks():
                     status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
                 except Exception as e:
                     st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
-        
-        # Create a temporary file for the decompressed parquet
+
         status_text.text("Decompressing combined file...")
         with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as decompressed_file:
             decompressed_filename = decompressed_file.name
-            
-            # Decompress the combined gzip file
             with gzip.open(combined_filename, 'rb') as gz_file:
                 decompressed_file.write(gz_file.read())
-        
-        # Read the decompressed parquet file using Polars
-        status_text.text("Reading pre-processed parquet data...")
+
+        # Scan the decompressed parquet file using Polars Lazily
+        status_text.text("Scanning pre-processed parquet data...")
         progress_bar.progress(0.75)
-        
-        # Read the parquet file with Polars
-        df = pl.read_parquet(decompressed_filename)
-        
-        # Limit the number of rows if needed (optional)
-        # limit = 100000
-        # if len(df) > limit:
-        #     df = df.head(limit)
-        #     status_text.text(f"Limited to {limit} rows for performance")
-        
+
+        # Scan the parquet file lazily
+        lf = pl.scan_parquet(decompressed_filename)
+
+        # Optional: Fetch a small amount to check if scan worked without loading all
+        # try:
+        #     _ = lf.fetch(1) # Check if scan is valid
+        # except Exception as scan_error:
+        #      st.error(f"Error scanning parquet file: {scan_error}")
+        #      return pl.DataFrame().lazy() # Return empty lazy frame on scan error
+
         progress_bar.progress(1.0)
         status_text.empty()
         progress_bar.empty()
 
-        st.success(f"Loaded {len(df)} projects successfully!")
-        return df
-        
+        # We don't know the length until collect, maybe fetch()?
+        # st.success(f"Successfully scanned projects!") # Cannot show count yet
+        return lf
+
     except Exception as e:
-        st.error(f"Error processing combined parquet file: {str(e)}")
-        return pl.DataFrame() # Return empty Polars DF on error
+        st.error(f"Error processing parquet file for scanning: {str(e)}")
+        return pl.DataFrame().lazy() # Return empty LazyFrame on error
     finally:
         # Clean up temporary files
+        # Note: Deleting decompressed_filename immediately might cause issues
+        # if the scan hasn't fully completed its metadata read.
+        # Consider delaying cleanup or handling it more robustly if needed.
         try:
             if combined_filename and os.path.exists(combined_filename):
                 os.unlink(combined_filename)
+            # Keep decompressed file around until the end? Or manage lifetime?
+            # For simplicity now, we risk deleting it early, but scan_parquet likely reads metadata quickly.
             if decompressed_filename and os.path.exists(decompressed_filename):
-                os.unlink(decompressed_filename)
+                 # Pass the filename to be deleted later if needed
+                 # For now, delete it, assuming scan_parquet has read metadata
+                 os.unlink(decompressed_filename)
+                 pass # Or manage cleanup later
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
-# Load pre-processed data
-df = load_data_from_parquet_chunks()
 
-# Check if DataFrame is empty
-if df.is_empty():
-    st.error("Failed to load data. Please check the logs and ensure database_download.py ran successfully.")
-    st.stop()
+# Load pre-processed data lazily
+lf = load_data_from_parquet_chunks()
 
-# Apply styling to State column
-if 'State' in df.columns:
-    df = df.with_columns(
+# --- Check if LazyFrame is potentially empty ---
+# Fetching 1 row is a relatively cheap way to check if the scan is valid
+# and if there's any data, without loading everything.
+try:
+    # Use fetch instead of collect for minimal data loading
+    schema_check = lf.fetch(0) # Fetch 0 rows just to validate schema and connectivity
+    if schema_check.is_empty() and schema_check.width == 0 : # Check if schema is also empty
+         st.error("Failed to load data or data file is empty. Please check logs and ensure database_download.py ran successfully.")
+         st.stop()
+    # We can now assume the LazyFrame is likely valid and has columns
+    print("LazyFrame Schema:", lf.schema)
+
+except Exception as e:
+     st.error(f"Error during initial data check: {e}. Cannot proceed.")
+     st.stop()
+
+
+# Apply styling to State column (Lazy)
+# Check if 'State' exists in the schema
+if 'State' in lf.schema:
+    lf = lf.with_columns(
         (
             pl.lit('<div class="state_cell state-')
             + pl.col('State').str.to_lowercase().fill_null('unknown')
@@ -189,37 +211,41 @@ if 'State' in df.columns:
         ).alias('State')
     )
 else:
-    st.warning("Column 'State' not found in the loaded data. Skipping state styling.")
+    st.warning("Column 'State' not found in the schema. Skipping state styling.")
 
-# Add country coordinates by joining country.csv
+# Add country coordinates by joining country.csv (Lazy)
 @st.cache_data
-def load_country_data():
+def load_country_data() -> pl.DataFrame: # Keep this eager, it's small
     try:
+        # Use read_csv for eager loading of the small country file
         country_df = pl.read_csv('country.csv')
         country_df = country_df.select(['country', 'latitude', 'longitude']).rename({'latitude': 'country_lat', 'longitude': 'country_lon'})
         return country_df
     except Exception as e:
         st.error(f"Failed to load country.csv: {e}")
-        return pl.DataFrame()
+        return pl.DataFrame() # Return empty eager DF
 
 country_data = load_country_data()
 
-# Join with country_data and create latitude/longitude columns
-if not country_data.is_empty() and 'Country Code' in df.columns:
-     df = df.join(country_data,
+# Join with country_data (Lazy) and create latitude/longitude columns
+if not country_data.is_empty() and 'Country Code' in lf.schema:
+     # Convert small country_data to LazyFrame for the join
+     lf = lf.join(country_data.lazy(),
                   left_on='Country Code',
                   right_on='country',
                   how='left')
-     df = df.with_columns([
+     lf = lf.with_columns([
           pl.col('country_lat').fill_null(0.0).alias('latitude'),
           pl.col('country_lon').fill_null(0.0).alias('longitude')
      ])
-     cols_to_drop_after_join = [col for col in ['country_lat', 'country_lon'] if col in df.columns]
+     # Drop columns lazily - check schema first
+     cols_to_drop_after_join = [col for col in ['country_lat', 'country_lon'] if col in lf.schema]
      if cols_to_drop_after_join:
-          df = df.drop(cols_to_drop_after_join)
+          lf = lf.drop(cols_to_drop_after_join)
 else:
-     st.warning("Could not join country data or 'Country Code' column missing. Creating default Latitude/Longitude columns (0.0).")
-     df = df.with_columns([
+     st.warning("Could not join country data or 'Country Code' column missing in schema. Creating default Latitude/Longitude columns (0.0).")
+     # Add columns lazily
+     lf = lf.with_columns([
          pl.lit(0.0).cast(pl.Float64).alias('latitude'),
          pl.lit(0.0).cast(pl.Float64).alias('longitude')
      ])
@@ -239,7 +265,7 @@ if (loc and 'coords' in loc):
     time.sleep(1.5)
     loading_success.empty()
 
-# --- RE-ADD Distance Calculation Function and Logic ---
+# --- RE-ADD Distance Calculation Function and Logic (Lazy) ---
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two points using Haversine formula"""
     R = 6371  # Earth's radius in kilometers
@@ -260,27 +286,142 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
     return R * c
 
-# Calculate distances if user location is available
-if user_location and 'latitude' in df.columns and 'longitude' in df.columns:
-    print("Calculating distances from user location...")
+# Calculate distances if user location is available (Lazy)
+if user_location and 'latitude' in lf.schema and 'longitude' in lf.schema:
+    print("Adding distance calculation to LazyFrame plan...")
     user_lat = float(user_location['latitude'])
     user_lon = float(user_location['longitude'])
 
-    # Apply the distance function row-wise using Polars expressions
-    df = df.with_columns(
+    # Apply the distance function lazily using Polars expressions
+    lf = lf.with_columns(
         pl.struct(['latitude', 'longitude'])
-        .apply(lambda x: calculate_distance(user_lat, user_lon, x['latitude'], x['longitude']))
+        # The apply function here will be executed when .collect() is called
+        .apply(lambda x: calculate_distance(user_lat, user_lon, x['latitude'], x['longitude']),
+               return_dtype=pl.Float64) # Specify return type for apply in lazy mode
         .alias('Distance')
-        .cast(pl.Float64)
     )
-    print("Distance calculation complete.")
+    print("Distance calculation added to plan.")
 
 else:
-    print("User location not available or lat/lon columns missing. Setting Distance to infinity.")
-    df = df.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+    print("User location not available or lat/lon columns missing in schema. Setting Distance to infinity (Lazy).")
+    # Add Distance column lazily
+    lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
 
-# --- Generate Table HTML ---
-def generate_table_html(df_display):
+# --- Calculate Filter Options and Min/Max (More Efficiently) ---
+
+# Prepare filter options (operate lazily as much as possible)
+@st.cache_data
+def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to indicate mutation
+    print("Calculating filter options...")
+    # Collect unique values only for required columns
+    options = {
+        'categories': ['All Categories'],
+        'subcategories': ['All Subcategories'],
+        'countries': ['All Countries'],
+        'states': ['All States'],
+        'date_ranges': [
+            'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
+            'Last 5 Years', 'Last 10 Years'
+        ]
+    }
+
+    try:
+        if 'Category' in _lf.schema:
+            categories_unique = _lf.select(pl.col('Category')).unique().collect()['Category']
+            options['categories'] += sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
+
+        if 'Subcategory' in _lf.schema:
+             subcategories_unique = _lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
+             options['subcategories'] += sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
+
+        if 'Country' in _lf.schema:
+             countries_unique = _lf.select(pl.col('Country')).unique().collect()['Country']
+             options['countries'] += sorted(countries_unique.filter(countries_unique.is_not_null() & (countries_unique != "N/A")).to_list())
+
+        # State extraction needs collection first, as str.extract is complex
+        if 'State' in _lf.schema and _lf.schema['State'] == pl.Utf8:
+             # Collect only the State column for processing
+             states_collected = _lf.select('State').collect()['State']
+             # Check if the column likely contains the HTML structure on the collected data
+             sample_state = states_collected.head(1).to_list()
+             if sample_state and sample_state[0] and sample_state[0].startswith('<div class="state_cell state-'):
+                  # Perform extraction on the collected Series
+                  extracted_states = states_collected.str.extract(r'state-(\w+)', 1).unique().drop_nulls().to_list()
+                  options['states'] += sorted([state.capitalize() for state in extracted_states if state != 'unknown'])
+             else: # Assume it's plain text if no HTML structure detected
+                  plain_states = states_collected.filter(states_collected.is_not_null() & (states_collected != "N/A")).unique().to_list()
+                  options['states'] += sorted([s.capitalize() for s in plain_states])
+        print("Filter options calculated.")
+
+    except Exception as e:
+         st.error(f"Error calculating filter options: {e}")
+         # Return default options on error
+         options = {k: v[:1] for k, v in options.items()} # Keep only "All..." options
+         options['date_ranges'] = [ # Restore date ranges
+            'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
+            'Last 5 Years', 'Last 10 Years'
+         ]
+    return options
+
+# Calculate filter options using the LazyFrame
+filter_options = get_filter_options(lf)
+
+# Calculate Min/Max values lazily
+min_pledged, max_pledged = 0, 1000
+min_goal, max_goal = 0, 10000
+min_raised, max_raised = 0, 500 # Default raised range
+max_raised_display_cap = 5000 # Cap for slider usability
+
+required_minmax_cols = ['Raw Pledged', 'Raw Goal', 'Raw Raised']
+if all(col in lf.schema for col in required_minmax_cols):
+    print("Calculating min/max filter ranges...")
+    try:
+        # Compute min/max in a single collect call if possible
+        min_max_vals = lf.select([
+            pl.min('Raw Pledged').alias('min_pledged'),
+            pl.max('Raw Pledged').alias('max_pledged'),
+            pl.min('Raw Goal').alias('min_goal'),
+            pl.max('Raw Goal').alias('max_goal'),
+            pl.min('Raw Raised').alias('min_raised'),
+            pl.max('Raw Raised').alias('max_raised_calc')
+        ]).collect()
+
+        min_pledged = int(min_max_vals['min_pledged'][0]) if min_max_vals['min_pledged'][0] is not None else 0
+        max_pledged = int(min_max_vals['max_pledged'][0]) if min_max_vals['max_pledged'][0] is not None else 1000
+        min_goal = int(min_max_vals['min_goal'][0]) if min_max_vals['min_goal'][0] is not None else 0
+        max_goal = int(min_max_vals['max_goal'][0]) if min_max_vals['max_goal'][0] is not None else 10000
+        min_raised = int(min_max_vals['min_raised'][0]) if min_max_vals['min_raised'][0] is not None else 0
+        max_raised_calc_val = min_max_vals['max_raised_calc'][0]
+        # Cap max_raised for the slider range
+        max_raised = int(max_raised_calc_val) if max_raised_calc_val is not None and max_raised_calc_val < max_raised_display_cap else max_raised_display_cap
+        print("Min/max ranges calculated.")
+    except Exception as e:
+        st.error(f"Error calculating min/max filter ranges: {e}. Using defaults.")
+        # Defaults are already set
+else:
+    st.error("Missing columns required for min/max filter ranges in schema. Using defaults.")
+    # Defaults are already set
+
+
+# --- Collect Data ONLY before generating HTML ---
+print("Collecting final DataFrame for display...")
+start_collect_time = time.time()
+try:
+    df_collected = lf.collect(streaming=True) # Use streaming for potential memory benefits
+    collect_duration = time.time() - start_collect_time
+    st.success(f"Loaded {len(df_collected)} projects successfully! (Collection took {collect_duration:.2f}s)")
+except Exception as e:
+    st.error(f"Error collecting final DataFrame: {e}")
+    df_collected = pl.DataFrame() # Ensure df_collected exists but is empty
+    st.stop()
+
+if df_collected.is_empty():
+     st.error("Data collection resulted in an empty DataFrame. Cannot display table.")
+     st.stop()
+
+
+# --- Generate Table HTML (using collected DataFrame) ---
+def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
     # Define visible columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
 
@@ -310,6 +451,7 @@ def generate_table_html(df_display):
 
     # Generate table rows with raw values in data attributes
     rows_html = ''
+    # Convert collected DataFrame to dicts efficiently
     data_dicts = df_display.to_dicts()
 
     for row in data_dicts:
@@ -350,79 +492,16 @@ def generate_table_html(df_display):
 
     return header_html, rows_html
 
-# Generate table HTML
-# Ensure required columns for min/max calculation exist
-required_minmax_cols = ['Raw Pledged', 'Raw Goal', 'Raw Raised']
-if all(col in df.columns for col in required_minmax_cols):
-    min_pledged = int(df['Raw Pledged'].min()) if df['Raw Pledged'].min() is not None else 0
-    max_pledged = int(df['Raw Pledged'].max()) if df['Raw Pledged'].max() is not None else 1000
-    min_goal = int(df['Raw Goal'].min()) if df['Raw Goal'].min() is not None else 0
-    max_goal = int(df['Raw Goal'].max()) if df['Raw Goal'].max() is not None else 10000
-    min_raised = int(df['Raw Raised'].min()) if df['Raw Raised'].min() is not None else 0
-    # Cap max_raised for the slider range if it's excessively high
-    max_raised_calc = df['Raw Raised'].max()
-    max_raised = int(max_raised_calc) if max_raised_calc is not None and max_raised_calc < 5000 else 5000 # Cap at 5000% for slider usability
-
-    # Generate HTML (pass the main df, it will be converted to dicts inside)
-    header_html, rows_html = generate_table_html(df)
-
-else:
-    st.error("Missing columns required for min/max filter ranges. Setting defaults.")
-    min_pledged, max_pledged = 0, 1000
-    min_goal, max_goal = 0, 10000
-    min_raised, max_raised = 0, 500
-    header_html, rows_html = "", "<p>Error generating table rows due to missing columns.</p>"
-
-
-# Prepare filter options (verify columns used)
-def get_filter_options(df_filters):
-    # Ensure columns exist before getting unique values
-    categories = ['All Categories']
-    if 'Category' in df_filters.columns:
-        categories += sorted(df_filters.select(pl.col('Category').filter(pl.col('Category').is_not_null() & (pl.col('Category') != "N/A"))).unique()['Category'].to_list())
-
-    subcategories = ['All Subcategories']
-    if 'Subcategory' in df_filters.columns:
-         subcategories += sorted(df_filters.select(pl.col('Subcategory').filter(pl.col('Subcategory').is_not_null() & (pl.col('Subcategory') != "N/A"))).unique()['Subcategory'].to_list())
-
-
-    countries = ['All Countries']
-    if 'Country' in df_filters.columns:
-         countries += sorted(df_filters.select(pl.col('Country').filter(pl.col('Country').is_not_null() & (pl.col('Country') != "N/A"))).unique()['Country'].to_list())
-
-
-    # Extract states from HTML formatting if 'State' column has HTML
-    states = ['All States']
-    if 'State' in df_filters.columns and df_filters['State'].dtype == pl.Utf8:
-         # Check if the column likely contains the HTML structure
-         sample_state = df_filters['State'].head(1).to_list()
-         if sample_state and sample_state[0].startswith('<div class="state_cell state-'):
-              states_expr = pl.col('State').str.extract(r'state-(\w+)', 1) # Extract group 1
-              states_df = df_filters.select(states_expr.alias('extracted_state'))
-              extracted_states = states_df['extracted_state'].unique().drop_nulls().to_list()
-              states += sorted([state.capitalize() for state in extracted_states if state != 'unknown']) # Capitalize
-         else: # Assume it's plain text if no HTML structure detected
-              plain_states = df_filters.select(pl.col('State').filter(pl.col('State').is_not_null() & (pl.col('State') != "N/A"))).unique()['State'].to_list()
-              states += sorted([s.capitalize() for s in plain_states])
-
-
-    return {
-        'categories': categories,
-        'subcategories': subcategories,
-        'countries': countries,
-        'states': states,
-        'date_ranges': [
-            'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
-            'Last 5 Years', 'Last 10 Years'
-        ]
-    }
-
-filter_options = get_filter_options(df)
+# Generate HTML using the collected DataFrame
+header_html, rows_html = generate_table_html(df_collected)
 
 
 # --- TEMPLATE AND CSS definitions ---
 # RE-ADD 'Near Me' sort option conditionally
 # RE-ADD userLocation to script tag
+# --- Check user_location BEFORE generating the template ---
+near_me_option_html = '<option value="nearme">Near Me</option>' if user_location else '<option value="nearme" disabled>Near Me (Location needed)</option>'
+
 template = f"""
 <script>
     // RE-ADD user location to JavaScript
@@ -469,7 +548,7 @@ template = f"""
                 <option value="mostfunded">Most Funded</option>
                 <option value="mostbacked">Most Backed</option>
                 <option value="enddate">End Date</option>
-                {'<option value="nearme">Near Me</option>' if user_location else ''}
+                {near_me_option_html}
             </select>
         </div>
         <div class="filter-row">
@@ -506,7 +585,7 @@ template = f"""
                 <div class="range-content">
                     <div class="range-container">
                         <div class="sliders-control">
-                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal}"/> 
+                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal}"/>
                             <input id="goalToSlider" type="range" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
                         </div>
                         <div class="form-control">
@@ -560,7 +639,7 @@ template = f"""
                 <tr>{header_html}</tr>
             </thead>
             <tbody>
-                {rows_html} 
+                {rows_html}
             </tbody>
         </table>
     </div>
@@ -1112,7 +1191,7 @@ css = """
 """
 
 # --- SCRIPT definition ---
-# RE-ADD distance-related logic
+# No changes needed in the script as it operates on the rendered HTML/data attributes
 script = """
     // Helper functions
     function debounce(func, wait) {
@@ -1135,7 +1214,7 @@ script = """
     function updateTableRows(rows, currentPage, pageSize) {
         const start = (currentPage - 1) * pageSize;
         const end = start + pageSize;
-        
+
         rows.forEach((row, index) => {
             row.style.display = (index >= start && index < end) ? '' : 'none';
         });
@@ -1193,11 +1272,11 @@ script = """
                 this.visibleRows.sort((a, b) => {
                     const scoreA = parseFloat(a.dataset.popularity);
                     const scoreB = parseFloat(b.dataset.popularity);
-                    
+
                     // Handle invalid values
                     if (isNaN(scoreA)) return 1;
                     if (isNaN(scoreB)) return -1;
-                    
+
                     // Sort in descending order
                     return scoreB - scoreA;
                 });
@@ -1209,6 +1288,9 @@ script = """
                      if (sortSelect.value === 'nearme') {
                            sortSelect.value = 'popularity';
                            this.currentSort = 'popularity';
+                           // Maybe disable the option visually too?
+                           const nearMeOption = sortSelect.querySelector('option[value="nearme"]');
+                           if (nearMeOption) nearMeOption.disabled = true;
                      }
                     await this.sortRows('popularity'); // Re-sort by popularity
                     return; // Exit early
@@ -1229,7 +1311,7 @@ script = """
                 this.visibleRows.sort((a, b) => {
                     const deadlineA = new Date(a.dataset.deadline);
                     const deadlineB = new Date(b.dataset.deadline);
-                    return deadlineB - deadlineA; 
+                    return deadlineB - deadlineA;
                 });
             } else if (sortType === 'mostfunded') {
                 // Sort by pledged amount
@@ -1246,18 +1328,42 @@ script = """
                     return backersB - backersA;  // Descending order (most backers first)
                 });
             } else {
-                // Date-based sorting only
+                // Date-based sorting ('newest', 'oldest')
                 this.visibleRows.sort((a, b) => {
-                    const dateA = new Date(a.dataset.date);
-                    const dateB = new Date(b.dataset.date);
+                    // Handle 'N/A' dates by treating them as very old/very new depending on sort
+                    const dateStrA = a.dataset.date;
+                    const dateStrB = b.dataset.date;
+
+                    if (dateStrA === 'N/A' && dateStrB === 'N/A') return 0;
+                    if (dateStrA === 'N/A') return sortType === 'newest' ? 1 : -1; // N/A is oldest
+                    if (dateStrB === 'N/A') return sortType === 'newest' ? -1 : 1; // N/A is oldest
+
+                    const dateA = new Date(dateStrA);
+                    const dateB = new Date(dateStrB);
+
+                    // Add safety checks for invalid date parsing just in case
+                    if (isNaN(dateA) && isNaN(dateB)) return 0;
+                    if (isNaN(dateA)) return sortType === 'newest' ? 1 : -1;
+                    if (isNaN(dateB)) return sortType === 'newest' ? -1 : 1;
+
+
                     return sortType === 'newest' ? dateB - dateA : dateA - dateB;
                 });
             }
 
+
             const tbody = document.querySelector('#data-table tbody');
-            this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
-            this.visibleRows.forEach(row => tbody.appendChild(row));
-            
+            // Detach all rows first for performance
+            const fragment = document.createDocumentFragment();
+            this.visibleRows.forEach(row => fragment.appendChild(row));
+            // Clear the tbody completely
+            while (tbody.firstChild) {
+                 tbody.removeChild(tbody.firstChild);
+            }
+            // Append the sorted rows back
+            tbody.appendChild(fragment);
+
+
             // Update current page and pagination
             this.currentPage = 1;
             this.updateTable();
@@ -1271,11 +1377,15 @@ script = """
             // Apply search if exists
             if (this.currentSearchTerm) {
                 const pattern = createRegexPattern(this.currentSearchTerm);
-                filteredRows = filteredRows.filter(row => {
-                    const text = row.textContent || row.innerText;
-                    return pattern.test(text);
-                });
+                if (pattern) { // Only filter if pattern is valid
+                    filteredRows = filteredRows.filter(row => {
+                        // Improve search by checking specific columns if needed, or just textContent
+                        const text = row.textContent || row.innerText || '';
+                        return pattern.test(text);
+                    });
+                }
             }
+
 
             // Apply filters if they exist
             if (this.currentFilters) {
@@ -1288,11 +1398,11 @@ script = """
             this.visibleRows = filteredRows;
 
             // Apply current sort
-            await this.sortRows(this.currentSort);
+            await this.sortRows(this.currentSort); // sortRows now updates the table internally
 
-            // Reset to first page and update display
-            this.currentPage = 1;
-            this.updateTable();
+            // Reset to first page and update display (This might be redundant now)
+            // this.currentPage = 1; // sortRows already sets this
+            // this.updateTable(); // sortRows already calls this
         }
 
         // Update applyFilters to handle async
@@ -1341,7 +1451,13 @@ script = """
                       max: parseFloat(document.getElementById('raisedToInput').value)
                  }
             };
+            // Validate range filters to ensure min <= max
+            if (rangeFilters.pledged.min > rangeFilters.pledged.max) rangeFilters.pledged.min = rangeFilters.pledged.max;
+            if (rangeFilters.goal.min > rangeFilters.goal.max) rangeFilters.goal.min = rangeFilters.goal.max;
+            if (rangeFilters.raised.min > rangeFilters.raised.max) rangeFilters.raised.min = rangeFilters.raised.max;
+
             this.currentFilters.ranges = rangeFilters;
+
 
             await this.applyAllFilters();
         }
@@ -1351,9 +1467,18 @@ script = """
             this.setupFilters();
             this.setupRangeSlider();
             this.currentSort = 'popularity';  // Set default sort to popularity
-            this.applyAllFilters();
-            this.updateTable();
+
+             // Disable 'Near Me' initially if no location
+            const sortSelect = document.getElementById('sortFilter');
+            const nearMeOption = sortSelect ? sortSelect.querySelector('option[value="nearme"]') : null;
+            if (nearMeOption && !window.hasLocation) {
+                 nearMeOption.disabled = true;
+            }
+
+            this.applyAllFilters(); // This now includes sorting and updating the table
+            // this.updateTable(); // No longer needed here, called by applyAllFilters/sortRows
         }
+
 
         setupSearchAndPagination() {
             // Setup search
@@ -1369,7 +1494,12 @@ script = """
             // Setup pagination controls
             document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
             document.getElementById('next-page').addEventListener('click', () => this.nextPage());
-            window.handlePageClick = (page) => this.goToPage(page);
+            // Define the function globally so inline onclick can access it
+            window.handlePageClick = (page) => {
+                if (window.tableManager) { // Ensure tableManager is initialized
+                    window.tableManager.goToPage(page);
+                }
+            };
         }
 
         matchesFilters(row, filters) {
@@ -1385,169 +1515,226 @@ script = """
                 return false;
             }
 
-            // Country filter
-            const country = row.querySelector('td:nth-child(5)').textContent.trim();
-            if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
+            // Country filter - Use data attribute for consistency if available
+            const countryCode = row.dataset.countryCode; // Use country code if reliable
+            const countryText = row.querySelector('td:nth-child(5)')?.textContent?.trim(); // Fallback to text
+            const countryToMatch = countryCode !== 'N/A' ? countryCode : countryText; // Prefer code? Or text? Check consistency with filter options. Assuming filter uses full names from `country_expanded_col`
+            if (!filters.countries.includes('All Countries') && !filters.countries.includes(countryText)) { // Match based on text displayed / generated in options
                 return false;
             }
 
-            // State filter - Extract state from class name instead of text content
+
+            // State filter - Extract state from class name
             const stateCell = row.querySelector('.state_cell');
-            let state = '';
+            let state = 'unknown'; // Default if no cell or class found
             if (stateCell) {
-                for (const cls of stateCell.classList) {
-                    if (cls.startsWith('state-')) {
-                        state = cls.substring(6);
-                        break;
-                    }
-                }
+                 // Find class like 'state-successful'
+                 const stateClass = Array.from(stateCell.classList).find(cls => cls.startsWith('state-'));
+                 if (stateClass) {
+                      state = stateClass.substring(6); // e.g., 'successful'
+                 }
             }
+            // Compare lowercase state name with capitalized filter options (lowercase both)
             if (!filters.states.includes('All States')) {
-                const stateLower = state.toLowerCase();
-                const matchingState = filters.states.find(s => s.toLowerCase() === stateLower);
-                if (!matchingState) return false;
+                 const stateLower = state.toLowerCase();
+                 const matchingState = filters.states.find(s => s.toLowerCase() === stateLower);
+                 if (!matchingState) return false;
             }
 
-            // Get all other values
-            const pledged = parseFloat(row.dataset.pledged);
-            const goal = parseFloat(row.dataset.goal);
-            const raised = parseFloat(row.dataset.raised);
-            const date = new Date(row.dataset.date);
+
+            // Get all other values safely
+            const pledged = parseFloat(row.dataset.pledged || '0'); // Default to 0 if missing
+            const goal = parseFloat(row.dataset.goal || '0');
+            const raised = parseFloat(row.dataset.raised || '0');
+            const dateStr = row.dataset.date; // Keep as string for now
+
 
             // Rest of filter checks
-            // Check pledged range
-            const minPledged = parseFloat(document.getElementById('fromInput').value);
-            const maxPledged = parseFloat(document.getElementById('toInput').value);
-            if (pledged < minPledged || pledged > maxPledged) return false;
+            // Check range filters (use values from filters.ranges)
+            const ranges = filters.ranges || {}; // Ensure ranges object exists
+            const pledgedRange = ranges.pledged || { min: -Infinity, max: Infinity };
+            const goalRange = ranges.goal || { min: -Infinity, max: Infinity };
+            const raisedRange = ranges.raised || { min: -Infinity, max: Infinity };
 
-            // Check goal range
-            const minGoal = parseFloat(document.getElementById('goalFromInput').value);
-            const maxGoal = parseFloat(document.getElementById('goalToInput').value);
-            if (goal < minGoal || goal > maxGoal) return false;
+            if (pledged < pledgedRange.min || pledged > pledgedRange.max) return false;
+            if (goal < goalRange.min || goal > goalRange.max) return false;
 
-            // Check raised range
-            const minRaised = parseFloat(document.getElementById('raisedFromInput').value);
-            const maxRaised = parseFloat(document.getElementById('raisedToInput').value);
-            const raisedValue = parseFloat(row.dataset.raised);
-            
-            // Handle the case where raised is exactly 0%
-            if (raisedValue === 0 && minRaised > 0) return false;
-            if (raisedValue < minRaised || raisedValue > maxRaised) return false;
+            // Handle 0% raised correctly
+            if (raised === 0 && raisedRange.min > 0) return false;
+            if (raised < raisedRange.min || raised > raisedRange.max) return false;
+
 
             // Date filter
             if (filters.date !== 'All Time') {
+                 if (dateStr === 'N/A') return false; // Don't include N/A dates in specific ranges
+                 const date = new Date(dateStr);
+                 if (isNaN(date)) return false; // Invalid date format
+
                 const now = new Date();
                 let compareDate = new Date();
-                
+                // Set time to 00:00:00 for consistent date comparisons
+                now.setHours(0,0,0,0);
+                compareDate.setHours(0,0,0,0);
+                date.setHours(0,0,0,0);
+
+
                 switch(filters.date) {
                     case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
                     case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
                     case 'Last Year': compareDate.setFullYear(now.getFullYear() - 1); break;
                     case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
                     case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
+                    default: return true; // Should not happen with current options
                 }
-                
+
                 if (date < compareDate) return false;
             }
 
-            return true;
+            return true; // If all checks pass
         }
+
 
         resetFilters() {
             // Reset category selections
             const categoryOptions = document.querySelectorAll('.category-option');
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            allCategoriesOption.classList.add('selected');
-            const categoryBtn = document.querySelector('.multi-select-btn');
-            categoryBtn.textContent = 'All Categories';
+            if (allCategoriesOption) allCategoriesOption.classList.add('selected'); // Add check
+            const categoryBtn = document.getElementById('categoryFilterBtn'); // Use ID
+            if (categoryBtn) categoryBtn.textContent = 'All Categories'; // Add check
 
             // Reset country selections
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-            allCountriesOption.classList.add('selected');
-            const countryBtn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            countryBtn.textContent = 'All Countries';
+            if (allCountriesOption) allCountriesOption.classList.add('selected');
+            const countryBtn = document.getElementById('countryFilterBtn'); // Use ID
+             if (countryBtn) countryBtn.textContent = 'All Countries';
+
 
             // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
             stateOptions.forEach(opt => opt.classList.remove('selected'));
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-            allStatesOption.classList.add('selected');
-            const stateBtn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            stateBtn.textContent = 'All States';
+            if (allStatesOption) allStatesOption.classList.add('selected');
+            const stateBtn = document.getElementById('stateFilterBtn'); // Use ID
+            if (stateBtn) stateBtn.textContent = 'All States';
+
 
             // Reset subcategory selections
             const subcategoryOptions = document.querySelectorAll('.subcategory-option');
             subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-            allSubcategoriesOption.classList.add('selected');
-            const subcategoryBtn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            subcategoryBtn.textContent = 'All Subcategories';
+             if (allSubcategoriesOption) allSubcategoriesOption.classList.add('selected');
+            const subcategoryBtn = document.getElementById('subcategoryFilterBtn'); // Use ID
+            if (subcategoryBtn) subcategoryBtn.textContent = 'All Subcategories';
 
-            // Reset the stored selections in the Sets
-            if (window.selectedCategories) window.selectedCategories.clear();
-            if (window.selectedCountries) window.selectedCountries.clear();
-            if (window.selectedStates) window.selectedStates.clear();
-            if (window.selectedSubcategories) window.selectedSubcategories.clear();
 
-            // Re-add "All" options to the Sets
-            if (window.selectedCategories) window.selectedCategories.add('All Categories');
-            if (window.selectedCountries) window.selectedCountries.add('All Countries');
-            if (window.selectedStates) window.selectedStates.add('All States');
-            if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
+            // Reset the stored selections in the Sets (if still used, maybe remove if filters read directly)
+            // If applyFilters reads selections directly, these Sets might be redundant
+            if (window.selectedCategories) window.selectedCategories.clear(); window.selectedCategories.add('All Categories');
+            if (window.selectedCountries) window.selectedCountries.clear(); window.selectedCountries.add('All Countries');
+            if (window.selectedStates) window.selectedStates.clear(); window.selectedStates.add('All States');
+            if (window.selectedSubcategories) window.selectedSubcategories.clear(); window.selectedSubcategories.add('All Subcategories');
 
-            // Reset all range sliders and inputs
-            if (this.rangeSliderElements) {
-                const { 
-                    fromSlider, toSlider, fromInput, toInput,
-                    goalFromSlider, goalToSlider, goalFromInput, goalToInput,
-                    raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
-                    fillSlider 
-                } = this.rangeSliderElements;
+            // Reset range sliders and inputs
+             this.resetRangeSliders();
 
-                // Reset pledged amount range
-                fromSlider.value = fromSlider.min;
-                toSlider.value = toSlider.max;
-                fromInput.value = fromSlider.min;
-                toInput.value = toSlider.max;
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
 
-                // Reset goal amount range
-                goalFromSlider.value = goalFromSlider.min;
-                goalToSlider.value = goalToSlider.max;
-                goalFromInput.value = goalFromSlider.min;
-                goalToInput.value = goalToSlider.max;
-                fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
+            // Reset Sort dropdown to 'popularity'
+            const sortSelect = document.getElementById('sortFilter');
+             if (sortSelect) sortSelect.value = 'popularity';
 
-                // Reset percentage raised range
-                raisedFromSlider.value = raisedFromSlider.min;
-                raisedToSlider.value = raisedToSlider.max;
-                raisedFromInput.value = raisedFromSlider.min;
-                raisedToInput.value = raisedToSlider.max;
-                fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
-            }
+
+             // Reset Date Filter dropdown to 'All Time'
+            const dateSelect = document.getElementById('dateFilter');
+            if (dateSelect) dateSelect.value = 'All Time';
+
 
             this.searchInput.value = '';
             this.currentSearchTerm = '';
-            this.currentFilters = null;
-            this.currentSort = 'popularity';
-            this.visibleRows = this.allRows;
-            this.applyAllFilters();
+            this.currentFilters = null; // Clear applied filters state
+            this.currentSort = 'popularity'; // Reset sort state
+            // this.visibleRows = this.allRows; // applyAllFilters will handle this
+            this.applyAllFilters(); // Re-apply default filters/sort
         }
 
+         resetRangeSliders() {
+             if (this.rangeSliderElements) {
+                 const {
+                     fromSlider, toSlider, fromInput, toInput,
+                     goalFromSlider, goalToSlider, goalFromInput, goalToInput,
+                     raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
+                     fillSlider // Make sure fillSlider is correctly referenced or defined
+                 } = this.rangeSliderElements;
+
+                 // Helper to safely get min/max or default
+                 const getAttr = (el, attr, defaultVal) => el ? (el[attr] || defaultVal) : defaultVal;
+
+                 // Reset pledged amount range
+                 const minPledged = getAttr(fromSlider, 'min', 0);
+                 const maxPledged = getAttr(toSlider, 'max', 1000);
+                 if (fromSlider) fromSlider.value = minPledged;
+                 if (toSlider) toSlider.value = maxPledged;
+                 if (fromInput) fromInput.value = minPledged;
+                 if (toInput) toInput.value = maxPledged;
+                 if (fromSlider && toSlider && fillSlider) fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+
+
+                 // Reset goal amount range
+                 const minGoal = getAttr(goalFromSlider, 'min', 0);
+                 const maxGoal = getAttr(goalToSlider, 'max', 10000);
+                 if (goalFromSlider) goalFromSlider.value = minGoal;
+                 if (goalToSlider) goalToSlider.value = maxGoal;
+                 if (goalFromInput) goalFromInput.value = minGoal;
+                 if (goalToInput) goalToInput.value = maxGoal;
+                 if (goalFromSlider && goalToSlider && fillSlider) fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
+
+
+                 // Reset percentage raised range
+                 const minRaised = getAttr(raisedFromSlider, 'min', 0);
+                 const maxRaised = getAttr(raisedToSlider, 'max', 500); // Check if this max corresponds to slider definition
+                 if (raisedFromSlider) raisedFromSlider.value = minRaised;
+                 if (raisedToSlider) raisedToSlider.value = maxRaised;
+                 if (raisedFromInput) raisedFromInput.value = minRaised;
+                 if (raisedToInput) raisedToInput.value = maxRaised;
+                 if (raisedFromSlider && raisedToSlider && fillSlider) fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
+             } else {
+                  console.warn("Range slider elements not found for reset.");
+             }
+         }
+
+
         updateTable() {
-            // Hide all rows first
-            this.allRows.forEach(row => row.style.display = 'none');
-            
-            // Calculate visible range
+             const tbody = document.querySelector('#data-table tbody');
+             if (!tbody) {
+                 console.error("Table body not found for updating.");
+                 return;
+             }
+
+            // Hide all rows currently in the visibleRows array (which might just have been sorted)
+             // This prevents brief display of rows not on the current page
+             this.visibleRows.forEach(row => {
+                 // Ensure row is still attached to the DOM before trying to hide
+                 if (row.parentNode === tbody) {
+                      row.style.display = 'none';
+                 }
+             });
+
+
+            // Calculate visible range based on current page and page size
             const start = (this.currentPage - 1) * this.pageSize;
             const end = Math.min(start + this.pageSize, this.visibleRows.length);
-            
-            // Show only rows for current page
+
+            // Show only rows for the current page slice
             this.visibleRows.slice(start, end).forEach(row => {
-                row.style.display = '';
+                 // Ensure row is still attached to the DOM before trying to show
+                 if (row.parentNode === tbody) {
+                     row.style.display = ''; // Show row by resetting display style
+                 } else {
+                      // If a row isn't in the tbody (e.g., after a sort), it shouldn't be shown
+                      console.warn("Attempted to show a row not currently in the table body.");
+                 }
             });
 
             this.updatePagination();
@@ -1558,33 +1745,45 @@ script = """
             const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
             const pageNumbers = this.generatePageNumbers(totalPages);
             const container = document.getElementById('page-numbers');
-            
+            if (!container) return; // Safety check
+
             container.innerHTML = pageNumbers.map(page => {
                 if (page === '...') {
                     return '<span class="page-ellipsis">...</span>';
                 }
+                // Ensure onclick calls the globally defined function
                 return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
-                    ${page === this.currentPage ? 'disabled' : ''} 
-                    onclick="handlePageClick(${page})">${page}</button>`;
+                    ${page === this.currentPage ? 'disabled' : ''}
+                    onclick="window.handlePageClick(${page})">${page}</button>`;
             }).join('');
 
-            document.getElementById('prev-page').disabled = this.currentPage <= 1;
-            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
+            const prevButton = document.getElementById('prev-page');
+            const nextButton = document.getElementById('next-page');
+            if (prevButton) prevButton.disabled = this.currentPage <= 1;
+            if (nextButton) nextButton.disabled = this.currentPage >= totalPages;
+
         }
 
         generatePageNumbers(totalPages) {
             let pages = [];
-            if (totalPages <= 10) {
-                pages = Array.from({length: totalPages}, (_, i) => i + 1);
-            } else {
-                if (this.currentPage <= 7) {
-                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
-                } else if (this.currentPage >= totalPages - 6) {
-                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
-                } else {
-                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
-                }
-            }
+            const C = this.currentPage; // Current Page
+            const T = totalPages;      // Total Pages
+            const S = 7; // Number of pages to show including ellipsis (e.g., 1 ... 4 5 6 ... 10) - must be odd >= 5
+
+             if (T <= S + 2) { // Show all pages if total is small enough
+                 pages = Array.from({length: T}, (_, i) => i + 1);
+             } else {
+                 const K = Math.floor((S - 3) / 2); // Number of pages around current page (excluding current)
+
+                 if (C <= K + 2) { // Near the beginning
+                     pages = [...Array.from({length: K + 3}, (_, i) => i + 1), '...', T];
+                 } else if (C >= T - (K + 1)) { // Near the end
+                     pages = [1, '...', ...Array.from({length: K + 3}, (_, i) => T - (K + 2) + i)];
+                 } else { // In the middle
+                     pages = [1, '...', ...Array.from({length: K * 2 + 1}, (_, i) => C - K + i), '...', T];
+                 }
+             }
+
             return pages;
         }
 
@@ -1605,179 +1804,219 @@ script = """
 
         goToPage(page) {
             const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            if (page >= 1 && page <= totalPages) {
+            if (page >= 1 && page <= totalPages && page !== this.currentPage) { // Only update if page changed
                 this.currentPage = page;
                 this.updateTable();
             }
         }
 
         adjustHeight() {
+             // Debounce or throttle this if it causes performance issues on resize
             requestAnimationFrame(() => {
                 const elements = {
                     titleWrapper: document.querySelector('.title-wrapper'),
                     filterWrapper: document.querySelector('.filter-wrapper'),
                     tableWrapper: document.querySelector('.table-wrapper'),
                     tableContainer: document.querySelector('.table-container'),
-                    table: document.querySelector('#data-table'),
+                    // table: document.querySelector('#data-table'), // Table itself might not be needed
                     controls: document.querySelector('.table-controls'),
-                    pagination: document.querySelector('.pagination-controls')
+                    pagination: document.querySelector('.pagination-controls'),
+                    tbody: document.querySelector('#data-table tbody') // Need tbody to estimate row height
                 };
 
-                if (!Object.values(elements).every(el => el)) return;
+                // Check essential elements for height calculation
+                if (!elements.titleWrapper || !elements.filterWrapper || !elements.tableWrapper || !elements.tableContainer || !elements.controls || !elements.pagination || !elements.tbody) {
+                    // console.warn("One or more elements missing for height adjustment.");
+                    // Try to set a default height if possible or just return
+                    // Streamlit.setFrameHeight(window.innerHeight); // Fallback maybe?
+                    return;
+                }
 
-                // Count visible rows in current page
-                const visibleRowCount = this.visibleRows.slice(
-                    (this.currentPage - 1) * this.pageSize,
-                    this.currentPage * this.pageSize
-                ).length;
+
+                // Estimate row height from the first visible row if possible
+                let rowHeight = 52; // Default fallback
+                const firstVisibleRow = elements.tbody.querySelector('tr:not([style*="display: none"])');
+                 if (firstVisibleRow) {
+                      const style = window.getComputedStyle(firstVisibleRow);
+                      // Include margins if they affect layout
+                      const marginTop = parseFloat(style.marginTop);
+                      const marginBottom = parseFloat(style.marginBottom);
+                      rowHeight = firstVisibleRow.offsetHeight + marginTop + marginBottom;
+                 } else if (this.visibleRows.length > 0 && this.allRows[0]) {
+                      // If no rows are visible *yet* (e.g., page loading), estimate from first overall row
+                      // Temporarily show it to measure? Risky. Use default or estimate from first row data.
+                      rowHeight = 52; // Stick to default if no visible rows
+                 }
+
+
+                // Count visible rows on the current page
+                const start = (this.currentPage - 1) * this.pageSize;
+                const end = Math.min(start + this.pageSize, this.visibleRows.length);
+                const visibleRowCount = end - start;
+
 
                 // Constants
-                const rowHeight = 52;        // Height per row including padding
-                const headerHeight = 60;     // Table header height
+                const headerHeight = document.querySelector('#data-table thead')?.offsetHeight || 60; // Measure header or use default
                 const controlsHeight = elements.controls.offsetHeight;
                 const paginationHeight = elements.pagination.offsetHeight;
-                const padding = 40;
-                const minTableHeight = 400;  // Minimum table content height
+                const wrapperPadding = 40; // Combined padding/margin for the main wrapper
+                const minTableContainerHeight = 300;  // Minimum height for the scrollable table area
 
                 // Calculate table content height
+                // Use actual number of rows displayed, max 10 (pageSize)
                 const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
-                const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
+                const actualTableContainerHeight = Math.max(tableContentHeight, minTableContainerHeight);
 
-                // Set dimensions
-                elements.tableContainer.style.height = `${actualTableHeight}px`;
-                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
+                // Set dimensions for the scrollable container
+                 elements.tableContainer.style.height = `${actualTableContainerHeight}px`;
+                 // The wrapper height is determined by its content naturally + container height
+                 // elements.tableWrapper.style.height = `${actualTableContainerHeight + controlsHeight + paginationHeight}px`; // This might constrain it too much
 
-                // Calculate final component height
-                const finalHeight = 
-                    elements.titleWrapper.offsetHeight +
-                    elements.filterWrapper.offsetHeight +
-                    actualTableHeight +
-                    controlsHeight +
-                    paginationHeight +
-                    padding;
+                // Calculate final component height needed for Streamlit frame
+                // Sum heights of non-scrollable parts + the calculated scrollable height + padding
+                 const finalHeight =
+                     elements.titleWrapper.offsetHeight +
+                     elements.filterWrapper.offsetHeight +
+                     controlsHeight + // Table controls are outside scrolling area
+                     actualTableContainerHeight + // The scrolling container height
+                     paginationHeight + // Pagination controls are outside scrolling area
+                     wrapperPadding; // Overall padding/margins
+
 
                 // Update Streamlit frame height if changed significantly
-                if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
-                    this.lastHeight = finalHeight;
-                    Streamlit.setFrameHeight(finalHeight);
-                }
+                 const currentFrameHeight = document.documentElement.scrollHeight; // Get current frame height
+                 if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 20) { // Increase threshold slightly
+                     console.log(`Adjusting height from ${this.lastHeight} to ${finalHeight}`);
+                     this.lastHeight = finalHeight;
+                     Streamlit.setFrameHeight(finalHeight);
+                 } else if (Math.abs(currentFrameHeight - finalHeight) > 20) {
+                      // If calculated height differs significantly from actual scroll height, update anyway
+                      console.log(`Adjusting height (scroll diff) from ${currentFrameHeight} to ${finalHeight}`);
+                      this.lastHeight = finalHeight;
+                      Streamlit.setFrameHeight(finalHeight);
+                 }
             });
         }
 
-        setupFilters() {
-            // Initialize global Sets to track selections
-            window.selectedCategories = new Set(['All Categories']);
-            window.selectedCountries = new Set(['All Countries']);
-            window.selectedStates = new Set(['All States']);
-            window.selectedSubcategories = new Set(['All Subcategories']);
 
-            // Get button elements by ID
+        setupFilters() {
+            // Remove global Sets - read directly from elements when applying filters
+            // window.selectedCategories = new Set(['All Categories']); // REMOVE
+            // window.selectedCountries = new Set(['All Countries']); // REMOVE
+            // window.selectedStates = new Set(['All States']); // REMOVE
+            // window.selectedSubcategories = new Set(['All Subcategories']); // REMOVE
+
+            // Get button elements by ID more robustly
             const categoryBtn = document.getElementById('categoryFilterBtn');
             const countryBtn = document.getElementById('countryFilterBtn');
             const stateBtn = document.getElementById('stateFilterBtn');
             const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
 
-            // Create a single update function for all buttons
-            const updateButtonText = (selectedItems, buttonElement) => {
+            // Update button text function
+            const updateButtonText = (optionsSelector, buttonElement, allValue) => {
                 if (!buttonElement) return;
-                
-                const selectedArray = Array.from(selectedItems);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    buttonElement.textContent = selectedArray[0];
+
+                const selectedOptions = Array.from(document.querySelectorAll(`${optionsSelector}.selected`));
+                const selectedValues = selectedOptions.map(opt => opt.dataset.value);
+
+                if (selectedValues.includes(allValue) || selectedValues.length === 0) {
+                    buttonElement.textContent = allValue;
                 } else {
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
-                    if (sortedArray.length > 2) {
-                        buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                     // Sort selected values alphabetically for consistent display
+                     selectedValues.sort((a, b) => a.localeCompare(b));
+                    if (selectedValues.length > 2) {
+                        buttonElement.textContent = `${selectedValues[0]}, ${selectedValues[1]} +${selectedValues.length - 2}`;
                     } else {
-                        buttonElement.textContent = sortedArray.join(', ');
+                        buttonElement.textContent = selectedValues.join(', ');
                     }
                 }
             };
 
+
             // Setup multi-select handlers
-            const setupMultiSelect = (options, selectedSet, allValue, buttonElement) => {
-                const allOption = document.querySelector(`[data-value="${allValue}"]`);
-                
+            const setupMultiSelect = (optionsSelector, allValue, buttonElement) => {
+                const options = document.querySelectorAll(optionsSelector);
+                 if (options.length === 0) {
+                      console.warn(`No options found for selector: ${optionsSelector}`);
+                      return; // Don't setup if no options
+                 }
+
+                const allOption = document.querySelector(`${optionsSelector}[data-value="${allValue}"]`);
+
+                 // Ensure "All" option is selected by default visually
+                 if (allOption) {
+                      options.forEach(opt => opt.classList.remove('selected')); // Clear others first
+                      allOption.classList.add('selected');
+                 } else {
+                      console.warn(`"All" option not found for ${optionsSelector}`);
+                 }
+
+
                 options.forEach(option => {
                     option.addEventListener('click', (e) => {
                         const clickedValue = e.target.dataset.value;
-                        
+                        const isSelected = e.target.classList.contains('selected');
+
                         if (clickedValue === allValue) {
+                            // If "All" is clicked, deselect others and select "All"
                             options.forEach(opt => opt.classList.remove('selected'));
-                            selectedSet.clear();
-                            selectedSet.add(allValue);
-                            allOption.classList.add('selected');
+                            if(allOption) allOption.classList.add('selected');
                         } else {
-                            allOption.classList.remove('selected');
-                            selectedSet.delete(allValue);
-                            
-                            e.target.classList.toggle('selected');
-                            if (e.target.classList.contains('selected')) {
-                                selectedSet.add(clickedValue);
-                            } else {
-                                selectedSet.delete(clickedValue);
+                            // If a specific option is clicked
+                            e.target.classList.toggle('selected'); // Toggle its state
+
+                            // If this action resulted in selecting it, deselect "All"
+                            if (e.target.classList.contains('selected') && allOption) {
+                                allOption.classList.remove('selected');
                             }
-                            
-                            if (selectedSet.size === 0) {
+
+                            // Check if any specific options are selected
+                            const anySelected = Array.from(options).some(opt => opt.dataset.value !== allValue && opt.classList.contains('selected'));
+
+                            // If no specific options are selected, select "All"
+                            if (!anySelected && allOption) {
                                 allOption.classList.add('selected');
-                                selectedSet.add(allValue);
                             }
                         }
-                        
-                        updateButtonText(selectedSet, buttonElement);
-                        this.applyFilters();
+
+                        updateButtonText(optionsSelector, buttonElement, allValue);
+                        this.applyFilters(); // Trigger filter application
                     });
                 });
 
-                // Initialize button text
-                updateButtonText(selectedSet, buttonElement);
+                // Initialize button text on load
+                updateButtonText(optionsSelector, buttonElement, allValue);
             };
 
-            // Setup each multi-select with the correct button element
-            setupMultiSelect(
-                document.querySelectorAll('.category-option'),
-                window.selectedCategories,
-                'All Categories',
-                categoryBtn
-            );
+            // Setup each multi-select
+            setupMultiSelect('.category-option', 'All Categories', categoryBtn);
+            setupMultiSelect('.country-option', 'All Countries', countryBtn);
+            setupMultiSelect('.state-option', 'All States', stateBtn);
+            setupMultiSelect('.subcategory-option', 'All Subcategories', subcategoryBtn);
 
-            setupMultiSelect(
-                document.querySelectorAll('.country-option'),
-                window.selectedCountries,
-                'All Countries',
-                countryBtn
-            );
 
-            setupMultiSelect(
-                document.querySelectorAll('.state-option'),
-                window.selectedStates,
-                'All States',
-                stateBtn
-            );
-
-            setupMultiSelect(
-                document.querySelectorAll('.subcategory-option'),
-                window.selectedSubcategories,
-                'All Subcategories',
-                subcategoryBtn
-            );
-
-            // Setup other filters
+            // Setup other filters (Date and Sort)
             const filterIds = ['dateFilter', 'sortFilter'];
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
+                     // Use 'change' event for select dropdowns
                     element.addEventListener('change', () => this.applyFilters());
+                } else {
+                     console.warn(`Filter element with ID "${id}" not found.`);
                 }
             });
+
 
             // Add reset button handler
             const resetButton = document.getElementById('resetFilters');
             if (resetButton) {
                 resetButton.addEventListener('click', () => this.resetFilters());
+            } else {
+                 console.warn("Reset button not found.");
             }
 
-            // Add range slider initialization
+            // Initialize Range Sliders (ensure this happens after elements are in DOM)
             this.setupRangeSlider();
         }
 
@@ -1800,240 +2039,209 @@ script = """
             const raisedFromInput = document.getElementById('raisedFromInput');
             const raisedToInput = document.getElementById('raisedToInput');
 
+            // Check if all elements exist before proceeding
+            if (!fromSlider || !toSlider || !fromInput || !toInput ||
+                !goalFromSlider || !goalToSlider || !goalFromInput || !goalToInput ||
+                !raisedFromSlider || !raisedToSlider || !raisedFromInput || !raisedToInput) {
+                console.error("One or more range slider elements are missing. Cannot initialize sliders.");
+                this.rangeSliderElements = null; // Indicate sliders are not set up
+                return;
+            }
+
+
             let inputTimeout;
 
             const fillSlider = (from, to, sliderColor, rangeColor, controlSlider) => {
-                const rangeDistance = controlSlider.max - controlSlider.min;
-                const fromPosition = from.value - controlSlider.min;
-                const toPosition = to.value - controlSlider.min;
-                controlSlider.style.background = `linear-gradient(
-                    to right,
-                    ${sliderColor} 0%,
-                    ${sliderColor} ${(fromPosition)/(rangeDistance)*100}%,
-                    ${rangeColor} ${((fromPosition)/(rangeDistance))*100}%,
-                    ${rangeColor} ${(toPosition)/(rangeDistance)*100}%, 
-                    ${sliderColor} ${(toPosition)/(rangeDistance)*100}%, 
-                    ${sliderColor} 100%)`;
-            }
+                 // Ensure sliders exist before accessing properties
+                 if (!from || !to || !controlSlider) return;
 
-            const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
+                 const rangeDistance = parseFloat(controlSlider.max) - parseFloat(controlSlider.min);
+                 const fromPosition = parseFloat(from.value) - parseFloat(controlSlider.min);
+                 const toPosition = parseFloat(to.value) - parseFloat(controlSlider.min);
+
+                 // Handle potential division by zero or invalid range
+                 if (rangeDistance <= 0) {
+                      // Set a default background or handle appropriately
+                      controlSlider.style.background = sliderColor;
+                      return;
+                 }
+
+
+                 // Calculate percentages
+                 const fromPercent = (fromPosition / rangeDistance) * 100;
+                 const toPercent = (toPosition / rangeDistance) * 100;
+
+
+                 controlSlider.style.background = `linear-gradient(
+                    to right,
+                    ${sliderColor} ${fromPercent}%,
+                    ${rangeColor} ${fromPercent}%,
+                    ${rangeColor} ${toPercent}%,
+                    ${sliderColor} ${toPercent}%)`;
+
+            };
+
+             // Store fillSlider in the instance so it's accessible in resetRangeSliders
+             this.rangeSliderElements = { fillSlider };
+
+
+            const debouncedApplyFilters = debounce(() => this.applyFilters(), 500); // Slightly longer debounce for sliders/inputs
 
             const controlFromSlider = (fromSlider, toSlider, fromInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider); // Use the instance fillSlider
                 if (from > to) {
                     fromSlider.value = to;
-                    fromInput.value = to;
+                    if(fromInput) fromInput.value = to; // Check if input exists
                 } else {
-                    fromInput.value = from;
+                     if(fromInput) fromInput.value = from;
                 }
+                 debouncedApplyFilters(); // Apply filters after slider changes
             };
 
             const controlToSlider = (fromSlider, toSlider, toInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider); // Use the instance fillSlider
                 if (from <= to) {
-                    toSlider.value = to;
-                    toInput.value = to;
+                     if(toInput) toInput.value = to; // Check if input exists
+                    // Don't need to set toSlider.value = to, it's already set by user action
                 } else {
-                    toInput.value = from;
-                    toSlider.value = from;
+                     if(toInput) toInput.value = from;
+                    toSlider.value = from; // Adjust the 'to' slider if it's less than 'from'
                 }
+                 debouncedApplyFilters(); // Apply filters after slider changes
             };
 
             const getParsedValue = (fromSlider, toSlider) => {
-                const from = parseInt(fromSlider.value);
-                const to = parseInt(toSlider.value);
-                return [from, to];
+                 // Provide defaults if sliders don't exist (shouldn't happen with initial check)
+                 const fromVal = fromSlider ? parseFloat(fromSlider.value) : 0;
+                 const toVal = toSlider ? parseFloat(toSlider.value) : 0;
+                 return [fromVal, toVal];
             };
 
-            const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
-                const updateValues = () => {
-                    let value = parseInt(input.value);
-                    const minAllowed = parseInt(input.min);
-                    const maxAllowed = parseInt(input.max);
-                    const isGoalInput = input.id.startsWith('goal');
-                    
-                    if (isNaN(value)) {
-                        value = isMin ? minAllowed : maxAllowed;
-                    }
-                    
-                    const fromSlider = isGoalInput ? goalFromSlider : this.rangeSliderElements.fromSlider;
-                    const toSlider = isGoalInput ? goalToSlider : this.rangeSliderElements.toSlider;
-                    
-                    if (isMin) {
-                        const maxValue = parseInt(toSlider.value);
-                        value = Math.max(minAllowed, Math.min(maxValue, value));
-                        fromSlider.value = value;
-                        input.value = value;
-                    } else {
-                        const minValue = parseInt(fromSlider.value);
-                        value = Math.max(minValue, Math.min(maxAllowed, value));
-                        toSlider.value = value;
-                        input.value = value;
-                    }
-                    
-                    fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                    debouncedApplyFilters();
-                };
+            const validateAndUpdateRangeInput = (inputElement, isMin = true) => {
+                 clearTimeout(inputTimeout); // Clear previous timeout
 
-                if (immediate) {
-                    clearTimeout(inputTimeout);
-                    updateValues();
-                } else {
-                    clearTimeout(inputTimeout);
-                    inputTimeout = setTimeout(updateValues, 1000);
-                }
+                 inputTimeout = setTimeout(() => {
+                      if (!inputElement) return;
+
+                      let value = parseFloat(inputElement.value);
+                      const minAllowed = parseFloat(inputElement.min);
+                      const maxAllowed = parseFloat(inputElement.max);
+
+                      // Determine corresponding sliders based on input ID pattern
+                      let fromSliderElement, toSliderElement;
+                      if (inputElement.id.includes('goal')) {
+                           fromSliderElement = goalFromSlider;
+                           toSliderElement = goalToSlider;
+                      } else if (inputElement.id.includes('raised')) {
+                           fromSliderElement = raisedFromSlider;
+                           toSliderElement = raisedToSlider;
+                      } else { // Default to pledged
+                           fromSliderElement = fromSlider;
+                           toSliderElement = toSlider;
+                      }
+
+                      if (!fromSliderElement || !toSliderElement) return; // Need both sliders
+
+
+                      if (isNaN(value)) {
+                           value = isMin ? minAllowed : maxAllowed; // Default to min/max if input is invalid
+                      }
+
+                      // Clamp value within min/max allowed for the input itself
+                      value = Math.max(minAllowed, Math.min(maxAllowed, value));
+
+
+                      if (isMin) {
+                           const maxValue = parseFloat(toSliderElement.value);
+                           // Ensure 'from' value isn't greater than the 'to' slider's current value
+                           value = Math.min(value, maxValue);
+                           fromSliderElement.value = value; // Update the 'from' slider
+                      } else { // isMax
+                           const minValue = parseFloat(fromSliderElement.value);
+                           // Ensure 'to' value isn't less than the 'from' slider's current value
+                           value = Math.max(value, minValue);
+                           toSliderElement.value = value; // Update the 'to' slider
+                      }
+
+                      inputElement.value = value; // Update input field with validated/adjusted value
+                      fillSlider(fromSliderElement, toSliderElement, '#C6C6C6', '#5932EA', toSliderElement); // Update slider background
+                      debouncedApplyFilters(); // Apply filters after validation
+                 }, 750); // Delay before validating input (e.g., 750ms)
             };
 
-            // Event listeners for pledged amount slider
-            fromSlider.addEventListener('input', (e) => {
-                controlFromSlider(fromSlider, toSlider, fromInput);
-                debouncedApplyFilters();
-            });
 
-            toSlider.addEventListener('input', (e) => {
-                controlToSlider(fromSlider, toSlider, toInput);
-                debouncedApplyFilters();
-            });
+            // --- Event Listeners ---
 
-            // Event listeners for goal amount slider
-            goalFromSlider.addEventListener('input', (e) => {
-                controlFromSlider(goalFromSlider, goalToSlider, goalFromInput);
-                debouncedApplyFilters();
-            });
+             // Slider Input Listeners
+             fromSlider.addEventListener('input', () => controlFromSlider(fromSlider, toSlider, fromInput));
+             toSlider.addEventListener('input', () => controlToSlider(fromSlider, toSlider, toInput));
+             goalFromSlider.addEventListener('input', () => controlFromSlider(goalFromSlider, goalToSlider, goalFromInput));
+             goalToSlider.addEventListener('input', () => controlToSlider(goalFromSlider, goalToSlider, goalToInput));
+             raisedFromSlider.addEventListener('input', () => controlFromSlider(raisedFromSlider, raisedToSlider, raisedFromInput));
+             raisedToSlider.addEventListener('input', () => controlToSlider(raisedFromSlider, raisedToSlider, raisedToInput));
 
-            goalToSlider.addEventListener('input', (e) => {
-                controlToSlider(goalFromSlider, goalToSlider, goalToInput);
-                debouncedApplyFilters();
-            });
+             // Input Field Listeners (using 'input' for responsiveness, validated on timeout)
+             fromInput.addEventListener('input', () => validateAndUpdateRangeInput(fromInput, true));
+             toInput.addEventListener('input', () => validateAndUpdateRangeInput(toInput, false));
+             goalFromInput.addEventListener('input', () => validateAndUpdateRangeInput(goalFromInput, true));
+             goalToInput.addEventListener('input', () => validateAndUpdateRangeInput(goalToInput, false));
+             raisedFromInput.addEventListener('input', () => validateAndUpdateRangeInput(raisedFromInput, true));
+             raisedToInput.addEventListener('input', () => validateAndUpdateRangeInput(raisedToInput, false));
 
-            // Add event listeners for percentage raised slider
-            raisedFromSlider.addEventListener('input', (e) => {
-                controlFromSlider(raisedFromSlider, raisedToSlider, raisedFromInput);
-                debouncedApplyFilters();
-            });
 
-            raisedToSlider.addEventListener('input', (e) => {
-                controlToSlider(raisedFromSlider, raisedToSlider, raisedToInput);
-                debouncedApplyFilters();
-            });
-
-            // Input handlers for both sliders
-            [fromInput, goalFromInput, raisedFromInput].forEach(input => {
-                input.addEventListener('input', () => {
-                    validateAndUpdateRange(input, true, false);
-                });
-            });
-
-            [toInput, goalToInput, raisedToInput].forEach(input => {
-                input.addEventListener('input', () => {
-                    validateAndUpdateRange(input, false, false);
-                });
-            });
-
-            // Add key events for immediate validation on Enter
-            fromInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(fromInput, true, true);
-                }
-            });
-
-            toInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(toInput, false, true);
-                }
-            });
-
-            // Add key events for goal slider inputs
-            goalFromInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(goalFromInput, true, true);
-                }
-            });
-
-            goalToInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(goalToInput, false, true);
-                }
-            });
-
-            // Add key events for percentage raised slider inputs
-            raisedFromInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(raisedFromInput, true, true);
-                }
-            });
-
-            raisedToInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') {
-                    validateAndUpdateRange(raisedToInput, false, true);
-                }
-            });
-
-            // Also handle blur events for immediate validation
-            fromInput.addEventListener('blur', () => {
-                validateAndUpdateRange(fromInput, true, true);
-            });
-
-            toInput.addEventListener('blur', () => {
-                validateAndUpdateRange(toInput, false, true);
-            });
-
-            goalFromInput.addEventListener('blur', () => {
-                validateAndUpdateRange(goalFromInput, true, true);
-            });
-
-            goalToInput.addEventListener('blur', () => {
-                validateAndUpdateRange(goalToInput, false, true);
-            });
-
-            raisedFromInput.addEventListener('blur', () => {
-                validateAndUpdateRange(raisedFromInput, true, true);
-            });
-
-            raisedToInput.addEventListener('blur', () => {
-                validateAndUpdateRange(raisedToInput, false, true);
-            });
-
-            // Store references for reset function
+            // Store references for reset function - Ensure fillSlider is stored correctly
             this.rangeSliderElements = {
                 fromSlider, toSlider, fromInput, toInput,
                 goalFromSlider, goalToSlider, goalFromInput, goalToInput,
                 raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
-                fillSlider
+                fillSlider // Store the function itself
             };
 
-            // Initial setup
+            // Initial setup of slider backgrounds
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
             fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
             fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
         }
     }
 
+    // --- Initialization ---
     function onRender(event) {
+        // Ensure initialization runs only once
         if (!window.rendered) {
-            window.tableManager = new TableManager();
+             console.log("Initializing TableManager...");
+            window.tableManager = new TableManager(); // Creates and initializes
             window.rendered = true;
 
-            // Add resize observer
+            // Add resize observer for dynamic height adjustment
             const resizeObserver = new ResizeObserver(() => {
                 if (window.tableManager) {
                     window.tableManager.adjustHeight();
                 }
             });
-            const tableWrapper = document.querySelector('.table-wrapper');
-            if (tableWrapper) {
-                 resizeObserver.observe(tableWrapper);
+            // Observe the main app container or a suitable wrapper
+            const appContainer = document.querySelector('[data-testid="stAppViewContainer"]'); // Or find a more specific wrapper if needed
+            if (appContainer) {
+                 resizeObserver.observe(appContainer);
             } else {
-                 console.error("Table wrapper not found for ResizeObserver.");
+                 console.error("App container not found for ResizeObserver.");
             }
+        } else {
+             console.log("TableManager already initialized.");
+             // Potentially call adjustHeight here if re-renders might change layout
+             if (window.tableManager) {
+                  window.tableManager.adjustHeight();
+             }
         }
     }
+
+    // Streamlit event listeners
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
     Streamlit.setComponentReady();
+
 """
 
 # Create and use the component
 table_component = generate_component('searchable_table', template=css + template, script=script)
-table_component()
+table_component(key="kickstarter_table") # Add a key for stability
