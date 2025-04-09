@@ -432,6 +432,7 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
         st.error(f"Error converting DataFrame to dictionaries: {e}")
         return header_html, "" # Return header but empty rows
 
+    for row in data_dicts:
         data_attrs = f'''
             data-category="{row.get('Category', 'N/A')}"
             data-subcategory="{row.get('Subcategory', 'N/A')}"
