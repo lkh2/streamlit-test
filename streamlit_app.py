@@ -1,6 +1,9 @@
 import streamlit as st
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="CrowdInsight")
+
+st.write("CrowdInsight")
+
 st.markdown(
     """
     <style>
@@ -11,6 +14,16 @@ st.markdown(
             background: transparent;
         }  
     </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    """
+    CrowdInsight is a robust web application designed with three primary objectives in mind: 
+    to gather and preprocess data from crowdfunding platforms, to predict the success rates 
+    of projects using advanced machine learning models, and to offer users a dynamic and 
+    intuitive interface for project exploration and improvement.
     """,
     unsafe_allow_html=True
 )
