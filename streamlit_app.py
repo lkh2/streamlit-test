@@ -1,6 +1,10 @@
 import streamlit as st
 
-st.set_page_config(layout="wide", page_title="CrowdInsight")
+st.set_page_config(
+    layout="wide", 
+    page_title="CrowdInsight",
+    initial_sidebar_state="collapsed"
+)
 
 st.write("CrowdInsight")
 

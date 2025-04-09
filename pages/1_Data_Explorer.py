@@ -5,7 +5,13 @@ import tempfile, os
 import json
 import polars as pl
 
-st.set_page_config(layout="wide", page_icon="📊", page_title="Data Explorer")
+st.set_page_config(
+    layout="wide", 
+    page_icon="📊", 
+    page_title="Data Explorer",
+    initial_sidebar_state="collapsed"
+)
+
 st.markdown(
     """
     <style>
@@ -85,7 +91,7 @@ def generate_component(name, template="", script=""):
     return f
 
 # *** IMPORTANT: Process the Parquet file before running this script (See README.md) ***
-parquet_source_path = "../data.parquet" 
+parquet_source_path = "data.parquet" 
 
 if not os.path.exists(parquet_source_path):
     st.error(f"Parquet data source not found at '{parquet_source_path}'. Please ensure the file/directory exists in the project root.")

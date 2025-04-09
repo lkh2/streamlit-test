@@ -1,6 +1,12 @@
 import streamlit as st
 
-st.set_page_config(layout="wide", page_icon="📊", page_title="Model")
+st.set_page_config(
+    layout="wide", 
+    page_icon="📊", 
+    page_title="Model",
+    initial_sidebar_state="collapsed"
+)
+
 st.markdown(
     """
     <style>
