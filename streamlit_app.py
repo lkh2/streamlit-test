@@ -122,9 +122,6 @@ try:
     if schema_check.width == 0 :
          st.error(f"Loaded data from '{parquet_source_path}' appears to have no columns or is invalid. Please check the source file/directory.")
          st.stop()
-    elif schema_check.is_empty():
-        # It's okay if the file has a schema but no rows
-         st.info(f"Data source '{parquet_source_path}' loaded successfully, but contains no projects initially.")
     print("LazyFrame Schema:", lf.schema)
 except Exception as e:
      st.error(f"Error during initial data check on '{parquet_source_path}': {e}. Cannot proceed.")
@@ -147,8 +144,7 @@ else:
     st.warning("Column 'State' not found in the schema. Skipping state styling.")
 
 # Prepare filter options (operate lazily as much as possible)
-@st.cache_data # Caching filter options based on the *schema* might still be useful
-def get_filter_options(_lf_schema: dict): # Pass schema instead of LF to cache effectively
+def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame): # Pass schema AND the actual LazyFrame
     print("Calculating filter options...")
     options = {
         'categories': ['All Categories'],
@@ -161,24 +157,23 @@ def get_filter_options(_lf_schema: dict): # Pass schema instead of LF to cache e
     }
     category_subcategory_map = {'All Categories': ['All Subcategories']}
     
-    # Create a dummy LazyFrame with the correct schema just for option calculation
-    # This avoids passing the full lf into the cached function if schema is enough
-    # Or, better, just pass the schema dict and work with that
-    schema_lf = pl.LazyFrame(schema=_lf_schema) 
+    # Use the passed schema_dict for checks
+    schema_lf = pl.LazyFrame(schema=schema_dict) # Keep this for schema checks
 
     try:
         # Get unique categories first
         if 'Category' in schema_lf.schema:
-            # We still need to collect unique values, so we use the *actual* lf here
-            categories_unique = lf.select(pl.col('Category')).unique().collect()['Category']
+            # Use the passed data_lf for collection
+            categories_unique = data_lf.select(pl.col('Category')).unique().collect()['Category']
             valid_categories = sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
             options['categories'] += valid_categories
             for cat in valid_categories:
-                category_subcategory_map[cat] = [] 
+                category_subcategory_map[cat] = []
 
         # Get unique Category-Subcategory pairs
         if 'Category' in schema_lf.schema and 'Subcategory' in schema_lf.schema:
-             cat_subcat_pairs = lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect() # Use actual lf
+             # Use the passed data_lf for collection
+             cat_subcat_pairs = data_lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect()
              all_subcategories_set = set()
              for row in cat_subcat_pairs.iter_rows(named=True):
                   category = row['Category']
@@ -199,11 +194,12 @@ def get_filter_options(_lf_schema: dict): # Pass schema instead of LF to cache e
                      prefix = ['All Subcategories']
                      rest = sorted([s for s in subcats if s != 'All Subcategories'])
                  else:
-                      rest = sorted(subcats) 
+                      rest = sorted(subcats)
                  category_subcategory_map[cat] = prefix + rest
 
         elif 'Subcategory' in schema_lf.schema and 'Category' not in schema_lf.schema:
-             subcategories_unique = lf.select(pl.col('Subcategory')).unique().collect()['Subcategory'] # Use actual lf
+             # Use the passed data_lf for collection
+             subcategories_unique = data_lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
              all_subcats = sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
              category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats
 
@@ -211,34 +207,35 @@ def get_filter_options(_lf_schema: dict): # Pass schema instead of LF to cache e
              category_subcategory_map['All Categories'] = ['All Subcategories']
 
         if 'Country' in schema_lf.schema:
-             countries_unique = lf.select(pl.col('Country')).unique().collect()['Country'] # Use actual lf
+             # Use the passed data_lf for collection
+             countries_unique = data_lf.select(pl.col('Country')).unique().collect()['Country']
              options['countries'] += sorted(countries_unique.filter(countries_unique.is_not_null() & (countries_unique != "N/A")).to_list())
 
         if 'State' in schema_lf.schema and schema_lf.schema['State'] == pl.Utf8:
-             # Collect only the State column for processing - use actual lf
-             states_collected = lf.select('State').collect()['State'] 
+             # Collect only the State column for processing - use passed data_lf
+             states_collected = data_lf.select('State').collect()['State']
              sample_state = states_collected.head(1).to_list()
              if sample_state and sample_state[0] and sample_state[0].startswith('<div class="state_cell state-'):
-                  extracted_states = states_collected.str.extract(r'>(\w+)<', 1).unique().drop_nulls().to_list() 
-                  options['states'] += sorted([state.capitalize() for state in extracted_states if state.lower() != 'unknown']) 
-             else: 
+                  extracted_states = states_collected.str.extract(r'>(\w+)<', 1).unique().drop_nulls().to_list()
+                  options['states'] += sorted([state.capitalize() for state in extracted_states if state.lower() != 'unknown'])
+             else:
                   plain_states = states_collected.filter(states_collected.is_not_null() & (states_collected != "N/A")).unique().to_list()
                   options['states'] += sorted([s.capitalize() for s in plain_states])
         print("Filter options calculated.")
 
     except Exception as e:
          st.error(f"Error calculating filter options: {e}")
-         options = {k: v[:1] for k, v in options.items() if k != 'subcategories'} 
-         options['date_ranges'] = [ 
-            'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
-            'Last 5 Years', 'Last 10 Years'
-         ]
-         category_subcategory_map = {'All Categories': ['All Subcategories']} 
+         # Simplified fallback
+         options = {
+             'categories': ['All Categories'], 'countries': ['All Countries'], 'states': ['All States'],
+             'date_ranges': ['All Time', 'Last Month', 'Last 6 Months', 'Last Year', 'Last 5 Years', 'Last 10 Years']
+         }
+         category_subcategory_map = {'All Categories': ['All Subcategories']}
 
     return options, category_subcategory_map
 
-# Calculate filter options using the LazyFrame schema
-filter_options, category_subcategory_map = get_filter_options(lf.schema)
+# Calculate filter options using the LazyFrame schema AND the LazyFrame itself
+filter_options, category_subcategory_map = get_filter_options(lf.schema, lf) # Pass lf here
 
 # Calculate Min/Max values lazily
 min_pledged, max_pledged = 0, 1000
