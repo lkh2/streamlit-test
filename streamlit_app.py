@@ -377,6 +377,16 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
                 # Truncate long URLs for display if needed
                 display_url = url if len(url) < 60 else url[:57] + '...'
                 visible_cells += f'<td><a href="{url}" target="_blank" title="{url}">{display_url}</a></td>'
+            elif col == 'Pledged Amount': # Add this block for Pledged Amount formatting
+                import html
+                try:
+                    # Convert to float first to handle potential string/decimal inputs, then to int
+                    amount = int(float(value))
+                    # Format with '$' prefix and comma separators for thousands
+                    formatted_value = f"${amount:,}" 
+                except (ValueError, TypeError):
+                    formatted_value = 'N/A' # Fallback for non-numeric data
+                visible_cells += f'<td>{html.escape(formatted_value)}</td>'
             elif col == 'State': # State column already contains HTML
                  # Ensure value is a string before adding
                  state_html = str(value) if value is not None else 'N/A'
