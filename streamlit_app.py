@@ -416,7 +416,6 @@ filter_options, category_subcategory_map = get_filter_options(lf)
 min_pledged, max_pledged = 0, 1000
 min_goal, max_goal = 0, 10000
 min_raised, max_raised = 0, 500 # Default raised range
-max_raised_display_cap = 5000 # Cap for slider usability
 
 required_minmax_cols = ['Raw Pledged', 'Raw Goal', 'Raw Raised']
 if all(col in lf.schema for col in required_minmax_cols):
@@ -439,7 +438,7 @@ if all(col in lf.schema for col in required_minmax_cols):
         min_raised = int(min_max_vals['min_raised'][0]) if min_max_vals['min_raised'][0] is not None else 0
         max_raised_calc_val = min_max_vals['max_raised_calc'][0]
         # Cap max_raised for the slider range
-        max_raised = int(max_raised_calc_val) if max_raised_calc_val is not None and max_raised_calc_val < max_raised_display_cap else max_raised_display_cap
+        max_raised = int(max_raised_calc_val) 
         print("Min/max ranges calculated.")
     except Exception as e:
         st.error(f"Error calculating min/max filter ranges: {e}. Using defaults.")
