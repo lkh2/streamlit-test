@@ -316,7 +316,7 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
     # Collect unique values only for required columns
     options = {
         'categories': ['All Categories'],
-        'subcategories': ['All Subcategories'],
+        # 'subcategories': ['All Subcategories'], # Remove static list
         'countries': ['All Countries'],
         'states': ['All States'],
         'date_ranges': [
@@ -324,15 +324,57 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
             'Last 5 Years', 'Last 10 Years'
         ]
     }
+    # Add a structure to hold the category -> subcategory mapping
+    category_subcategory_map = {'All Categories': ['All Subcategories']}
 
     try:
+        # Get unique categories first
         if 'Category' in _lf.schema:
             categories_unique = _lf.select(pl.col('Category')).unique().collect()['Category']
-            options['categories'] += sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
+            valid_categories = sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
+            options['categories'] += valid_categories
+            # Initialize map keys
+            for cat in valid_categories:
+                category_subcategory_map[cat] = [] # Start with empty list
 
-        if 'Subcategory' in _lf.schema:
+        # Get unique Category-Subcategory pairs
+        if 'Category' in _lf.schema and 'Subcategory' in _lf.schema:
+             cat_subcat_pairs = _lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect()
+
+             # Populate the map
+             all_subcategories_set = set() # To collect all unique subcats for 'All Categories'
+             for row in cat_subcat_pairs.iter_rows(named=True):
+                  category = row['Category']
+                  subcategory = row['Subcategory']
+                  if category and subcategory and category != "N/A" and subcategory != "N/A":
+                       if category in category_subcategory_map:
+                           category_subcategory_map[category].append(subcategory)
+                       all_subcategories_set.add(subcategory)
+
+             # Add sorted unique subcategories to 'All Categories'
+             category_subcategory_map['All Categories'] += sorted(list(all_subcategories_set))
+
+             # Sort subcategories within each category
+             for cat in category_subcategory_map:
+                 # Keep 'All Subcategories' first if present, sort the rest
+                 subcats = category_subcategory_map[cat]
+                 if 'All Subcategories' in subcats:
+                     prefix = ['All Subcategories']
+                     rest = sorted([s for s in subcats if s != 'All Subcategories'])
+                     category_subcategory_map[cat] = prefix + rest
+                 else:
+                     category_subcategory_map[cat] = sorted(subcats)
+
+        # Handle Subcategories if Category doesn't exist (fallback)
+        elif 'Subcategory' in _lf.schema and 'Category' not in _lf.schema:
              subcategories_unique = _lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
-             options['subcategories'] += sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
+             all_subcats = sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
+             category_subcategory_map['All Categories'] += all_subcats # Add to default
+
+        # Ensure 'All Subcategories' exists if map is otherwise empty for it
+        if not category_subcategory_map['All Categories']:
+             category_subcategory_map['All Categories'] = ['All Subcategories']
+
 
         if 'Country' in _lf.schema:
              countries_unique = _lf.select(pl.col('Country')).unique().collect()['Country']
@@ -356,15 +398,19 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
     except Exception as e:
          st.error(f"Error calculating filter options: {e}")
          # Return default options on error
-         options = {k: v[:1] for k, v in options.items()} # Keep only "All..." options
+         options = {k: v[:1] for k, v in options.items() if k != 'subcategories'} # Keep only "All..." options
          options['date_ranges'] = [ # Restore date ranges
             'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
             'Last 5 Years', 'Last 10 Years'
          ]
-    return options
+         category_subcategory_map = {'All Categories': ['All Subcategories']} # Reset map on error
+
+    # Return both the options dict and the mapping
+    return options, category_subcategory_map
 
 # Calculate filter options using the LazyFrame
-filter_options = get_filter_options(lf) # Now the function is defined above
+# Now unpack two return values
+filter_options, category_subcategory_map = get_filter_options(lf)
 
 # Calculate Min/Max values lazily
 min_pledged, max_pledged = 0, 1000
@@ -408,7 +454,9 @@ try:
     start_collect_time = time.time()
     df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
-    st.success(f"Loaded {len(df_collected)} projects successfully! (Collection took {collect_duration:.2f}s)")
+    loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
+    time.sleep(1.5)
+    loaded.empty()
 except Exception as e:
     st.error(f"Error collecting final DataFrame: {e}")
     df_collected = pl.DataFrame()
@@ -507,6 +555,8 @@ template = f"""
     // RE-ADD user location to JavaScript
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
     window.hasLocation = {json.dumps(bool(user_location))};
+    // ADD category-subcategory mapping
+    window.categorySubcategoryMap = {json.dumps(category_subcategory_map)};
 </script>
 <div class="title-wrapper">
     <span>Explore Successful Projects</span>
@@ -529,8 +579,8 @@ template = f"""
             <span class="filter-label">&</span>
             <div class="multi-select-dropdown">
                 <button id="subcategoryFilterBtn" class="filter-select multi-select-btn">Subcategories</button>
-                <div class="multi-select-content">
-                    {' '.join(f'<div class="subcategory-option" data-value="{opt}">{opt}</div>' for opt in filter_options['subcategories'])}
+                <div class="multi-select-content" id="subcategoryOptionsContainer">
+                    {' '.join(f'<div class="subcategory-option" data-value="{opt}">{opt}</div>' for opt in category_subcategory_map.get('All Categories', ['All Subcategories']))}
                 </div>
             </div>
             <span class="filter-label">Projects On</span>
@@ -1427,11 +1477,13 @@ script = """
 
         initialize() {
             this.setupSearchAndPagination();
-            this.setupFilters();
+            this.setupFilters(); // This will now handle the hierarchical setup
             this.setupRangeSlider();
             this.currentSort = 'popularity';  // Set default sort to popularity
             this.applyAllFilters();
             this.updateTable();
+            // Initial population of subcategories based on default 'All Categories'
+            this.updateSubcategoryOptions(); 
         }
 
         setupSearchAndPagination() {
@@ -1557,27 +1609,28 @@ script = """
             const stateBtn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             stateBtn.textContent = 'All States';
 
-            // Reset subcategory selections
-            const subcategoryOptions = document.querySelectorAll('.subcategory-option');
-            subcategoryOptions.forEach(opt => opt.classList.remove('selected'));
-            const allSubcategoriesOption = document.querySelector('.subcategory-option[data-value="All Subcategories"]');
-            allSubcategoriesOption.classList.add('selected');
-            const subcategoryBtn = subcategoryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
-            subcategoryBtn.textContent = 'All Subcategories';
+            // Reset subcategory selections (will be repopulated by updateSubcategoryOptions)
+            const subcategoryOptionsContainer = document.getElementById('subcategoryOptionsContainer');
+            subcategoryOptionsContainer.innerHTML = ''; // Clear existing options
+            const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
+            if (window.selectedSubcategories) window.selectedSubcategories.clear();
+            if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
+            // Update subcategory options based on the reset category ('All Categories')
+            this.updateSubcategoryOptions(); 
 
             // Reset the stored selections in the Sets
             if (window.selectedCategories) window.selectedCategories.clear();
             if (window.selectedCountries) window.selectedCountries.clear();
             if (window.selectedStates) window.selectedStates.clear();
-            if (window.selectedSubcategories) window.selectedSubcategories.clear();
+            // Subcategories reset done above
 
             // Re-add "All" options to the Sets
             if (window.selectedCategories) window.selectedCategories.add('All Categories');
             if (window.selectedCountries) window.selectedCountries.add('All Countries');
             if (window.selectedStates) window.selectedStates.add('All States');
-            if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
+            // Subcategories reset done above
 
-            // Reset all range sliders and inputs
+            // Reset ranges, search, sort etc. as before ...
             if (this.rangeSliderElements) {
                 const { 
                     fromSlider, toSlider, fromInput, toInput,
@@ -1610,10 +1663,11 @@ script = """
 
             this.searchInput.value = '';
             this.currentSearchTerm = '';
-            this.currentFilters = null;
+            this.currentFilters = null; // Filters will be reapplied by applyAllFilters
             this.currentSort = 'popularity';
+            document.getElementById('sortFilter').value = 'popularity';
             this.visibleRows = this.allRows;
-            this.applyAllFilters();
+            this.applyAllFilters(); // Apply filters which includes the reset subcategory
         }
 
         updateTable() {
@@ -1748,7 +1802,7 @@ script = """
             window.selectedCategories = new Set(['All Categories']);
             window.selectedCountries = new Set(['All Countries']);
             window.selectedStates = new Set(['All States']);
-            window.selectedSubcategories = new Set(['All Subcategories']);
+            window.selectedSubcategories = new Set(['All Subcategories']); // Initialize
 
             // Get button elements by ID
             const categoryBtn = document.getElementById('categoryFilterBtn');
@@ -1756,92 +1810,131 @@ script = """
             const stateBtn = document.getElementById('stateFilterBtn');
             const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
 
-            // Create a single update function for all buttons
-            const updateButtonText = (selectedItems, buttonElement) => {
-                if (!buttonElement) return;
-                
-                const selectedArray = Array.from(selectedItems);
-                if (selectedArray[0] && selectedArray[0].startsWith('All')) {
-                    buttonElement.textContent = selectedArray[0];
-                } else {
-                    const sortedArray = selectedArray.sort((a, b) => a.localeCompare(b));
-                    if (sortedArray.length > 2) {
-                        buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
-                    } else {
-                        buttonElement.textContent = sortedArray.join(', ');
-                    }
-                }
+            // Helper to update button text (generalized)
+            this.updateButtonText = (selectedItems, buttonElement, allValueLabel) => {
+                 if (!buttonElement) return;
+
+                 const selectedArray = Array.from(selectedItems);
+                 // Check if the only selected item is the 'All' option
+                 if (selectedArray.length === 1 && selectedArray[0] === allValueLabel) {
+                     buttonElement.textContent = allValueLabel;
+                 } else if (selectedArray.length === 0 ) { // Handle case where set might be empty temporarily
+                     buttonElement.textContent = allValueLabel; // Default to 'All'
+                 }
+                 else {
+                     // Filter out the 'All' option if other items are selected
+                     const displayItems = selectedArray.filter(item => item !== allValueLabel);
+                     const sortedArray = displayItems.sort((a, b) => a.localeCompare(b));
+
+                     if (sortedArray.length === 0) { // Should not happen if logic is correct, but safe fallback
+                          buttonElement.textContent = allValueLabel;
+                     } else if (sortedArray.length > 2) {
+                          buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
+                     } else {
+                          buttonElement.textContent = sortedArray.join(', ');
+                     }
+                 }
             };
 
-            // Setup multi-select handlers
-            const setupMultiSelect = (options, selectedSet, allValue, buttonElement) => {
-                const allOption = document.querySelector(`[data-value="${allValue}"]`);
-                
+
+            // MODIFIED Setup multi-select handlers
+            // Added triggerSubcategoryUpdate flag
+            this.setupMultiSelect = (options, selectedSet, allValue, buttonElement, triggerSubcategoryUpdate = false) => {
+                const allOption = Array.from(options).find(opt => opt.dataset.value === allValue); // Safer find
+
                 options.forEach(option => {
-                    option.addEventListener('click', (e) => {
+                    // Remove existing listener before adding new one (prevents duplicates)
+                    option.replaceWith(option.cloneNode(true)); // Simple way to remove listeners
+                });
+
+                // Get fresh references after cloning
+                 const freshOptions = buttonElement.nextElementSibling.querySelectorAll('[data-value]');
+                 const freshAllOption = Array.from(freshOptions).find(opt => opt.dataset.value === allValue);
+
+                freshOptions.forEach(option => {
+                     // Add selected class if it's in the current set
+                     if (selectedSet.has(option.dataset.value)) {
+                         option.classList.add('selected');
+                     }
+
+                     option.addEventListener('click', (e) => {
                         const clickedValue = e.target.dataset.value;
-                        
+                        const isCurrentlySelected = e.target.classList.contains('selected');
+
                         if (clickedValue === allValue) {
-                            options.forEach(opt => opt.classList.remove('selected'));
+                            // If 'All' is clicked, clear others and select 'All'
                             selectedSet.clear();
                             selectedSet.add(allValue);
-                            allOption.classList.add('selected');
+                            freshOptions.forEach(opt => opt.classList.remove('selected'));
+                            if(freshAllOption) freshAllOption.classList.add('selected');
                         } else {
-                            allOption.classList.remove('selected');
-                            selectedSet.delete(allValue);
-                            
-                            e.target.classList.toggle('selected');
+                            // If a specific item is clicked
+                            selectedSet.delete(allValue); // Remove 'All' if it exists
+                            if(freshAllOption) freshAllOption.classList.remove('selected');
+
+                            e.target.classList.toggle('selected'); // Toggle the clicked item
                             if (e.target.classList.contains('selected')) {
-                                selectedSet.add(clickedValue);
+                                selectedSet.add(clickedValue); // Add if selected
                             } else {
-                                selectedSet.delete(clickedValue);
+                                selectedSet.delete(clickedValue); // Remove if deselected
                             }
-                            
+
+                            // If nothing is selected, select 'All'
                             if (selectedSet.size === 0) {
-                                allOption.classList.add('selected');
                                 selectedSet.add(allValue);
+                                if(freshAllOption) freshAllOption.classList.add('selected');
                             }
                         }
-                        
-                        updateButtonText(selectedSet, buttonElement);
-                        this.applyFilters();
+
+                        // Update button text using the helper function
+                        this.updateButtonText(selectedSet, buttonElement, allValue);
+
+                        // Trigger subcategory update ONLY if this is the category selector
+                        if (triggerSubcategoryUpdate) {
+                            this.updateSubcategoryOptions(); // Update subcategories
+                        }
+
+                        this.applyFilters(); // Apply all filters including the change
                     });
                 });
 
-                // Initialize button text
-                updateButtonText(selectedSet, buttonElement);
+                // Initialize button text correctly
+                this.updateButtonText(selectedSet, buttonElement, allValue);
             };
 
-            // Setup each multi-select with the correct button element
-            setupMultiSelect(
+            // Setup each multi-select
+            this.setupMultiSelect(
                 document.querySelectorAll('.category-option'),
                 window.selectedCategories,
                 'All Categories',
-                categoryBtn
+                categoryBtn,
+                true // YES, trigger subcategory update from here
             );
 
-            setupMultiSelect(
+            this.setupMultiSelect(
                 document.querySelectorAll('.country-option'),
                 window.selectedCountries,
                 'All Countries',
                 countryBtn
             );
 
-            setupMultiSelect(
+            this.setupMultiSelect(
                 document.querySelectorAll('.state-option'),
                 window.selectedStates,
                 'All States',
                 stateBtn
             );
 
-            setupMultiSelect(
-                document.querySelectorAll('.subcategory-option'),
-                window.selectedSubcategories,
-                'All Subcategories',
-                subcategoryBtn
-            );
+            // Setup subcategory initially (listeners will be re-attached by updateSubcategoryOptions)
+             this.setupMultiSelect(
+                 document.querySelectorAll('.subcategory-option'),
+                 window.selectedSubcategories,
+                 'All Subcategories',
+                 subcategoryBtn
+             );
 
-            // Setup other filters
+
+            // Setup other filters (date, sort)
             const filterIds = ['dateFilter', 'sortFilter'];
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
@@ -1856,8 +1949,8 @@ script = """
                 resetButton.addEventListener('click', () => this.resetFilters());
             }
 
-            // Add range slider initialization
-            this.setupRangeSlider();
+            // Range slider initialization remains the same
+            // this.setupRangeSlider(); // Called in initialize()
         }
 
         setupRangeSlider() {
@@ -2088,6 +2181,64 @@ script = """
             fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
             fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
         }
+
+        // NEW METHOD to update subcategory options
+        updateSubcategoryOptions() {
+            const selectedCategories = window.selectedCategories || new Set(['All Categories']);
+            const subcategoryMap = window.categorySubcategoryMap || {};
+            const subcategoryOptionsContainer = document.getElementById('subcategoryOptionsContainer');
+            const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
+
+            let availableSubcategories = new Set();
+            let isAllCategoriesSelected = selectedCategories.has('All Categories');
+
+            // Determine which subcategories to show
+            if (isAllCategoriesSelected || selectedCategories.size === 0) {
+                 // If 'All Categories' is selected or no category is selected, show all subcategories
+                 (subcategoryMap['All Categories'] || []).forEach(subcat => availableSubcategories.add(subcat));
+            } else {
+                // Otherwise, collect subcategories from the specifically selected categories
+                 availableSubcategories.add('All Subcategories'); // Always include 'All Subcategories'
+                 selectedCategories.forEach(cat => {
+                     (subcategoryMap[cat] || []).forEach(subcat => {
+                         if (subcat !== 'All Subcategories') { // Avoid adding it twice
+                            availableSubcategories.add(subcat);
+                         }
+                     });
+                 });
+            }
+
+            // Sort the subcategories (keeping 'All Subcategories' first)
+            const sortedSubcategories = Array.from(availableSubcategories);
+            sortedSubcategories.sort((a, b) => {
+                if (a === 'All Subcategories') return -1;
+                if (b === 'All Subcategories') return 1;
+                return a.localeCompare(b);
+            });
+
+            // Generate HTML for new options
+            subcategoryOptionsContainer.innerHTML = sortedSubcategories.map(opt =>
+                `<div class="subcategory-option" data-value="${opt}">${opt}</div>`
+            ).join('');
+
+            // Reset current subcategory selection to 'All Subcategories'
+            window.selectedSubcategories = new Set(['All Subcategories']);
+            const allSubcatOption = subcategoryOptionsContainer.querySelector('.subcategory-option[data-value="All Subcategories"]');
+            if (allSubcatOption) {
+                allSubcatOption.classList.add('selected');
+            }
+             this.updateButtonText(window.selectedSubcategories, subcategoryBtn, 'All Subcategories'); // Use helper
+
+
+            // Re-attach event listeners to the *new* subcategory options
+            this.setupMultiSelect(
+                subcategoryOptionsContainer.querySelectorAll('.subcategory-option'),
+                window.selectedSubcategories,
+                'All Subcategories',
+                subcategoryBtn,
+                false // Do not trigger updateSubcategoryOptions from subcategory selection
+            );
+        }
     }
 
     function onRender(event) {
@@ -2098,7 +2249,11 @@ script = """
             // Add resize observer
             const resizeObserver = new ResizeObserver(() => {
                 if (window.tableManager) {
-                    window.tableManager.adjustHeight();
+                    // Debounce adjustHeight slightly for resize events
+                    clearTimeout(window.resizeTimeout);
+                    window.resizeTimeout = setTimeout(() => {
+                         window.tableManager.adjustHeight();
+                    }, 50);
                 }
             });
             const tableWrapper = document.querySelector('.table-wrapper');
@@ -2107,6 +2262,11 @@ script = """
             } else {
                  console.error("Table wrapper not found for ResizeObserver.");
             }
+        } else {
+             // Handle potential re-renders if necessary, maybe re-adjust height
+             if (window.tableManager) {
+                  window.tableManager.adjustHeight();
+             }
         }
     }
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
@@ -2115,4 +2275,5 @@ script = """
 
 # Create and use the component
 table_component = generate_component('searchable_table', template=css + template, script=script)
+table_component(key="kickstarter_table") # Add a key for stability
 table_component(key="kickstarter_table") # Add a key for stability
