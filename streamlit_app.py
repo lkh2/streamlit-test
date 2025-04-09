@@ -1991,70 +1991,110 @@ script = """
 
             const controlFromSlider = (fromSlider, toSlider, fromInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
+                // Check if fromInput exists before trying to access its value
+                const currentFromInputValue = fromInput ? parseInt(fromInput.value) : from; 
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                // Ensure the slider doesn't go past the 'to' slider
                 if (from > to) {
                     fromSlider.value = to;
-                    fromInput.value = to;
+                    if (fromInput) fromInput.value = to; // Update input if it exists
                 } else {
-                    fromInput.value = from;
+                     if (fromInput) fromInput.value = from; // Update input if it exists
                 }
             };
-
+            
             const controlToSlider = (fromSlider, toSlider, toInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
+                 // Check if toInput exists before trying to access its value
+                const currentToInputValue = toInput ? parseInt(toInput.value) : to; 
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                // Ensure the slider doesn't go below the 'from' slider
                 if (from <= to) {
-                    toSlider.value = to;
-                    toInput.value = to;
+                    // toSlider.value = to; // Slider value already set by input event or validateAndUpdateRange
+                    if (toInput) toInput.value = to; // Update input if it exists
                 } else {
-                    toInput.value = from;
-                    toSlider.value = from;
+                    if (toInput) toInput.value = from; // Update input if it exists
+                    toSlider.value = from; // Adjust slider position
                 }
             };
 
             const getParsedValue = (fromSlider, toSlider) => {
-                const from = parseInt(fromSlider.value);
-                const to = parseInt(toSlider.value);
+                // Ensure sliders exist before getting value
+                const from = fromSlider ? parseInt(fromSlider.value) : 0;
+                const to = toSlider ? parseInt(toSlider.value) : 0;
                 return [from, to];
             };
 
             const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
-                const updateValues = () => {
-                    let value = parseInt(input.value);
-                    const minAllowed = parseInt(input.min);
-                    const maxAllowed = parseInt(input.max);
-                    const isGoalInput = input.id.startsWith('goal');
-                    
-                    if (isNaN(value)) {
-                        value = isMin ? minAllowed : maxAllowed;
-                    }
-                    
-                    const fromSlider = isGoalInput ? goalFromSlider : this.rangeSliderElements.fromSlider;
-                    const toSlider = isGoalInput ? goalToSlider : this.rangeSliderElements.toSlider;
-                    
-                    if (isMin) {
-                        const maxValue = parseInt(toSlider.value);
-                        value = Math.max(minAllowed, Math.min(maxValue, value));
-                        fromSlider.value = value;
-                        input.value = value;
-                    } else {
-                        const minValue = parseInt(fromSlider.value);
-                        value = Math.max(minValue, Math.min(maxAllowed, value));
-                        toSlider.value = value;
-                        input.value = value;
-                    }
-                    
-                    fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                    debouncedApplyFilters();
-                };
+                 const updateValues = () => {
+                     // Ensure the input element exists before proceeding
+                     if (!input) {
+                         console.error("validateAndUpdateRange called with null input");
+                         return;
+                     }
+            
+                     let value = parseInt(input.value);
+                     const minAllowed = parseInt(input.min);
+                     const maxAllowed = parseInt(input.max);
+            
+                     // Determine which set of sliders/inputs we are working with
+                     let relevantFromSlider, relevantToSlider, relevantFromInput, relevantToInput;
+                     if (input.id.startsWith('goal')) {
+                         relevantFromSlider = goalFromSlider;
+                         relevantToSlider = goalToSlider;
+                         relevantFromInput = goalFromInput;
+                         relevantToInput = goalToInput;
+                     } else if (input.id.startsWith('raised')) {
+                         relevantFromSlider = raisedFromSlider;
+                         relevantToSlider = raisedToSlider;
+                         relevantFromInput = raisedFromInput;
+                         relevantToInput = raisedToInput;
+                     } else { // Pledged
+                         relevantFromSlider = fromSlider;
+                         relevantToSlider = toSlider;
+                         relevantFromInput = fromInput;
+                         relevantToInput = toInput;
+                     }
+            
+                     // Ensure relevant sliders exist before proceeding
+                     if (!relevantFromSlider || !relevantToSlider) {
+                         console.error("validateAndUpdateRange could not find relevant sliders for input:", input.id);
+                         return;
+                     }
 
-                if (immediate) {
-                    clearTimeout(inputTimeout);
-                    updateValues();
-                } else {
-                    clearTimeout(inputTimeout);
-                    inputTimeout = setTimeout(updateValues, 1000);
-                }
+                     if (isNaN(value)) {
+                         value = isMin ? minAllowed : maxAllowed;
+                     }
+            
+                     if (isMin) {
+                         const maxValue = parseInt(relevantToSlider.value);
+                         value = Math.max(minAllowed, Math.min(maxValue, value));
+                         relevantFromSlider.value = value;
+                         input.value = value; // Update the input itself in case of clamping
+                         // NOW, also update the slider visuals by calling the control function
+                         controlFromSlider(relevantFromSlider, relevantToSlider, relevantFromInput); 
+                     } else {
+                         const minValue = parseInt(relevantFromSlider.value);
+                         value = Math.max(minValue, Math.min(maxAllowed, value));
+                         relevantToSlider.value = value;
+                         input.value = value; // Update the input itself in case of clamping
+                         // NOW, also update the slider visuals by calling the control function
+                         controlToSlider(relevantFromSlider, relevantToSlider, relevantToInput); 
+                     }
+            
+                     // Note: fillSlider is called within controlFromSlider/controlToSlider, 
+                     // so no separate call is needed here.
+                     debouncedApplyFilters();
+                 };
+            
+                 if (immediate) {
+                     clearTimeout(inputTimeout);
+                     updateValues();
+                 } else {
+                     clearTimeout(inputTimeout);
+                     // Reduced timeout for quicker visual feedback from typing
+                     inputTimeout = setTimeout(updateValues, 500); 
+                 }
             };
 
             // Event listeners for pledged amount slider
