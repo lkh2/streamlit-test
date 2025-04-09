@@ -1,7 +1,4 @@
-import datetime
 import time
-from bs4 import BeautifulSoup
-import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import tempfile, os
@@ -22,26 +19,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-def last_updated():
-    date = ""
-    
-    try:
-        url = "https://webrobots.io/kickstarter-datasets/"
-        response = requests.get(url)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        fusion_text_div = soup.find('div', class_='fusion-text')
-        ul = fusion_text_div.find('ul')
-        li = ul.find('li')    
-        date = li.text.split(' ')[0]
-    except Exception:
-        pass
-
-    if date == "":
-        date = datetime.datetime.now().strftime("%Y-%m-%d")
-        
-    return date
 
 def generate_component(name, template="", script=""):
     def html():
@@ -88,10 +65,6 @@ def generate_component(name, template="", script=""):
                 </head>
             <body>
             {template}
-            <footer>
-                <p>All currency amounts are in USD.</p>
-                <p>Last updated: {last_updated}</p>
-            </footer>
             </body>
             <script>
                 {script}
