@@ -173,27 +173,11 @@ if lf is None or temp_parquet_path is None:
      st.error("Failed to load or scan data. Cannot proceed.")
      st.stop() # Stop execution if lf is None
 
-# --- Collect Schema Once (where possible) ---
-try:
-    initial_schema = lf.collect_schema()
-    initial_columns = initial_schema.names()
-    print("Initial LazyFrame Schema Collected:", initial_schema)
-except Exception as e:
-    st.error(f"Error collecting initial schema: {e}. Cannot proceed.")
-    # Clean up temp file before stopping
-    if temp_parquet_path and os.path.exists(temp_parquet_path):
-         try:
-             os.unlink(temp_parquet_path)
-         except OSError as unlink_error:
-             st.warning(f"Error cleaning up temporary file on schema collection error: {unlink_error}")
-    st.stop()
-
-
 # --- Check if LazyFrame is potentially empty ---
 try:
-    # Use the collected schema to check width, head(0) still checks rows
-    schema_check = lf.head(0).collect() # Collect is necessary to check for 0 rows
-    if schema_check.is_empty() and len(initial_columns) == 0 : # Check collected schema width
+    # Apply head(0) lazily, then collect the empty frame with the correct schema
+    schema_check = lf.head(0).collect()
+    if schema_check.is_empty() and schema_check.width == 0 :
          st.error("Loaded data appears empty or schema is invalid. Please check logs and ensure database_download.py ran successfully.")
          # Clean up the temp file before stopping
          if temp_parquet_path and os.path.exists(temp_parquet_path):
@@ -202,7 +186,7 @@ try:
               except OSError as e:
                   st.warning(f"Error cleaning up temporary file on empty schema check: {e}")
          st.stop()
-    # print("LazyFrame Schema:", lf.schema) # Replaced by earlier print
+    print("LazyFrame Schema:", lf.schema)
 except Exception as e:
      st.error(f"Error during initial data check: {e}. Cannot proceed.")
      # Clean up the temp file before stopping
@@ -215,8 +199,8 @@ except Exception as e:
 
 
 # Apply styling to State column (Lazy)
-# Check if 'State' exists in the initial columns
-if 'State' in initial_columns:
+# Check if 'State' exists in the schema
+if 'State' in lf.schema:
     lf = lf.with_columns(
         (
             pl.lit('<div class="state_cell state-')
@@ -227,7 +211,7 @@ if 'State' in initial_columns:
         ).alias('State')
     )
 else:
-    st.warning("Column 'State' not found in the initial schema. Skipping state styling.")
+    st.warning("Column 'State' not found in the schema. Skipping state styling.")
 
 # Add country coordinates by joining country.csv (Lazy)
 @st.cache_data
@@ -244,38 +228,36 @@ def load_country_data() -> pl.DataFrame: # Keep this eager, it's small
 country_data = load_country_data()
 
 # Join with country_data (Lazy) and create latitude/longitude columns
-# Check initial columns for 'Country Code'
-if not country_data.is_empty() and 'Country Code' in initial_columns:
-     lf_after_country_join = lf.join(country_data.lazy(), # Create a new variable for the plan after join
+if not country_data.is_empty() and 'Country Code' in lf.schema:
+     # Convert small country_data to LazyFrame for the join
+     lf = lf.join(country_data.lazy(),
                   left_on='Country Code',
                   right_on='country',
                   how='left')
-     lf_after_latlon_add = lf_after_country_join.with_columns([ # Create another new variable
+     lf = lf.with_columns([
           pl.col('country_lat').fill_null(0.0).alias('latitude'),
           pl.col('country_lon').fill_null(0.0).alias('longitude')
      ])
-     # Check schema *after* modification for dropping
-     cols_to_drop_after_join = [col for col in ['country_lat', 'country_lon'] if col in lf_after_latlon_add.collect_schema().names()]
+     # Drop columns lazily - check schema first
+     cols_to_drop_after_join = [col for col in ['country_lat', 'country_lon'] if col in lf.schema]
      if cols_to_drop_after_join:
-          lf = lf_after_latlon_add.drop(cols_to_drop_after_join) # Assign back to lf
-     else:
-          lf = lf_after_latlon_add # Assign back to lf if no columns were dropped
+          lf = lf.drop(cols_to_drop_after_join)
 else:
-     st.warning("Could not join country data or 'Country Code' column missing in initial schema. Creating default Latitude/Longitude columns (0.0).")
+     st.warning("Could not join country data or 'Country Code' column missing in schema. Creating default Latitude/Longitude columns (0.0).")
      # Add columns lazily
      lf = lf.with_columns([
          pl.lit(0.0).cast(pl.Float64).alias('latitude'),
          pl.lit(0.0).cast(pl.Float64).alias('longitude')
      ])
 
-
 # Prepare filter options (operate lazily as much as possible)
 @st.cache_data
-def get_filter_options(_lf: pl.LazyFrame, column_names: list[str]): # Pass column names
+def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to indicate mutation
     print("Calculating filter options...")
-    # Use passed column names for checks
+    # Collect unique values only for required columns
     options = {
         'categories': ['All Categories'],
+        # 'subcategories': ['All Subcategories'], # Remove static list
         'countries': ['All Countries'],
         'states': ['All States'],
         'date_ranges': [
@@ -283,21 +265,25 @@ def get_filter_options(_lf: pl.LazyFrame, column_names: list[str]): # Pass colum
             'Last 5 Years', 'Last 10 Years'
         ]
     }
+    # Add a structure to hold the category -> subcategory mapping
     category_subcategory_map = {'All Categories': ['All Subcategories']}
 
     try:
-        # Use passed column_names list
-        if 'Category' in column_names:
+        # Get unique categories first
+        if 'Category' in _lf.schema:
             categories_unique = _lf.select(pl.col('Category')).unique().collect()['Category']
             valid_categories = sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
             options['categories'] += valid_categories
+            # Initialize map keys
             for cat in valid_categories:
-                category_subcategory_map[cat] = []
+                category_subcategory_map[cat] = [] # Start with empty list
 
-        # Use passed column_names list
-        if 'Category' in column_names and 'Subcategory' in column_names:
+        # Get unique Category-Subcategory pairs
+        if 'Category' in _lf.schema and 'Subcategory' in _lf.schema:
              cat_subcat_pairs = _lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect()
-             all_subcategories_set = set()
+
+             # Populate the map
+             all_subcategories_set = set() # To collect all unique subcats for 'All Categories'
              for row in cat_subcat_pairs.iter_rows(named=True):
                   category = row['Category']
                   subcategory = row['Subcategory']
@@ -305,9 +291,16 @@ def get_filter_options(_lf: pl.LazyFrame, column_names: list[str]): # Pass colum
                        if category in category_subcategory_map:
                            category_subcategory_map[category].append(subcategory)
                        all_subcategories_set.add(subcategory)
+
+             # Add sorted unique subcategories to 'All Categories'
+             # Ensure 'All Subcategories' is first
              all_sorted_subcats = sorted(list(all_subcategories_set))
              category_subcategory_map['All Categories'] = ['All Subcategories'] + all_sorted_subcats
+
+
+             # Sort subcategories within each category
              for cat in category_subcategory_map:
+                 # Keep 'All Subcategories' first if present, sort the rest
                  subcats = category_subcategory_map[cat]
                  prefix = []
                  rest = []
@@ -315,51 +308,57 @@ def get_filter_options(_lf: pl.LazyFrame, column_names: list[str]): # Pass colum
                      prefix = ['All Subcategories']
                      rest = sorted([s for s in subcats if s != 'All Subcategories'])
                  else:
-                      rest = sorted(subcats)
+                      rest = sorted(subcats) # Sort all if 'All Subcategories' isn't there
+
+                 # Rebuild the list for the category
                  category_subcategory_map[cat] = prefix + rest
 
-        # Use passed column_names list
-        elif 'Subcategory' in column_names and 'Category' not in column_names:
+        # Handle Subcategories if Category doesn't exist (fallback)
+        elif 'Subcategory' in _lf.schema and 'Category' not in _lf.schema:
              subcategories_unique = _lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
              all_subcats = sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
-             category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats
+             category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats # Add to default
 
+        # Ensure 'All Subcategories' exists if map is otherwise empty for it
         if not category_subcategory_map['All Categories']:
              category_subcategory_map['All Categories'] = ['All Subcategories']
 
-        # Use passed column_names list
-        if 'Country' in column_names:
+
+        if 'Country' in _lf.schema:
              countries_unique = _lf.select(pl.col('Country')).unique().collect()['Country']
              options['countries'] += sorted(countries_unique.filter(countries_unique.is_not_null() & (countries_unique != "N/A")).to_list())
 
         # State extraction needs collection first, as str.extract is complex
-        # But check if 'State' column exists first using passed names
-        # We still need the schema type here, so collect_schema is okay *inside* the cache function
-        state_schema_type = _lf.collect_schema().get('State') # Get type specifically
-        if 'State' in column_names and state_schema_type == pl.Utf8:
+        if 'State' in _lf.schema and _lf.schema['State'] == pl.Utf8:
+             # Collect only the State column for processing
              states_collected = _lf.select('State').collect()['State']
+             # Check if the column likely contains the HTML structure on the collected data
              sample_state = states_collected.head(1).to_list()
              if sample_state and sample_state[0] and sample_state[0].startswith('<div class="state_cell state-'):
-                  extracted_states = states_collected.str.extract(r'>(\w+)<', 1).unique().drop_nulls().to_list()
-                  options['states'] += sorted([state.capitalize() for state in extracted_states if state.lower() != 'unknown'])
-             else:
+                  # Perform extraction on the collected Series
+                  extracted_states = states_collected.str.extract(r'>(\w+)<', 1).unique().drop_nulls().to_list() # Extract content
+                  options['states'] += sorted([state.capitalize() for state in extracted_states if state.lower() != 'unknown']) # Capitalize and filter unknown
+             else: # Assume it's plain text if no HTML structure detected
                   plain_states = states_collected.filter(states_collected.is_not_null() & (states_collected != "N/A")).unique().to_list()
                   options['states'] += sorted([s.capitalize() for s in plain_states])
         print("Filter options calculated.")
 
     except Exception as e:
          st.error(f"Error calculating filter options: {e}")
-         options = {k: v[:1] for k, v in options.items() if k != 'subcategories'}
-         options['date_ranges'] = [
+         # Return default options on error
+         options = {k: v[:1] for k, v in options.items() if k != 'subcategories'} # Keep only "All..." options
+         options['date_ranges'] = [ # Restore date ranges
             'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
             'Last 5 Years', 'Last 10 Years'
          ]
-         category_subcategory_map = {'All Categories': ['All Subcategories']}
+         category_subcategory_map = {'All Categories': ['All Subcategories']} # Reset map on error
 
+    # Return both the options dict and the mapping
     return options, category_subcategory_map
 
-# Calculate filter options using the LazyFrame and initial column names
-filter_options, category_subcategory_map = get_filter_options(lf, initial_columns) # Pass initial_columns
+# Calculate filter options using the LazyFrame
+# Now unpack two return values
+filter_options, category_subcategory_map = get_filter_options(lf)
 
 # Calculate Min/Max values lazily
 min_pledged, max_pledged = 0, 1000
@@ -367,11 +366,10 @@ min_goal, max_goal = 0, 10000
 min_raised, max_raised = 0, 500 # Default raised range
 
 required_minmax_cols = ['Raw Pledged', 'Raw Goal', 'Raw Raised']
-# Use initial columns for check
-if all(col in initial_columns for col in required_minmax_cols):
+if all(col in lf.schema for col in required_minmax_cols):
     print("Calculating min/max filter ranges...")
     try:
-        # Compute min/max in a single collect call if possible (this is fine)
+        # Compute min/max in a single collect call if possible
         min_max_vals = lf.select([
             pl.min('Raw Pledged').alias('min_pledged'),
             pl.max('Raw Pledged').alias('max_pledged'),
@@ -393,7 +391,7 @@ if all(col in initial_columns for col in required_minmax_cols):
     except Exception as e:
         st.error(f"Error calculating min/max filter ranges: {e}. Using defaults.")
 else:
-    st.warning("Missing columns required for min/max filter ranges in initial schema. Using defaults.")
+    st.warning("Missing columns required for min/max filter ranges in schema. Using defaults.")
 
 
 # --- Load Precomputed Country Distances ---
@@ -416,6 +414,7 @@ df_country_distances = load_country_distances()
 
 # --- Geolocation Fetching & Country Code Determination ---
 loc = get_geolocation() # This happens *before* the distance assignment section
+st.write(loc)
 user_location = None
 user_country_code = None
 
@@ -425,6 +424,7 @@ if loc and 'coords' in loc:
         print(f"Attempting reverse geocoding for coordinates: {coords}") # Added log
         with st.spinner('Determining your country...'):
             geo_info_list = reverse_geocode.get(coords)
+            st.write(geo_info_list)
             if geo_info_list:
                 geo_info = geo_info_list # Assuming first result is best
                 user_country_code = geo_info.get('country_code')
@@ -466,64 +466,63 @@ else:
 
 # --- Assign Distance based on Country Code (Lazy) ---
 distance_assigned = False # Flag to track if distance was assigned via join
-# Check initial columns for 'Country Code'
-if user_country_code and df_country_distances is not None and 'Country Code' in initial_columns:
+
+if user_country_code and df_country_distances is not None and 'Country Code' in lf.schema:
     print(f"Assigning distances based on user country: {user_country_code}")
     try:
         # Filter precomputed distances for the user's country
         user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
                                              .select(['code_to', 'distance']) \
-                                             .rename({'code_to': 'Country Code', 'distance': 'Distance'})
+                                             .rename({'code_to': 'Country Code', 'distance': 'PrecomputedDistance'}) # Rename to avoid clash temporarily
 
-        if user_distances.height == 0:
-             print(f"Warning: No precomputed distances found for user country code '{user_country_code}'.")
-             st.warning(f"No precomputed distances found for your country ({user_country_code}). Distance sorting may not be accurate.")
-             # Don't add placeholder column here, coalesce below handles it
-
-        if user_distances.height > 0:
-            # Perform the join - this modifies the lazy plan
-            lf = lf.join(
-                user_distances.lazy(),
-                on='Country Code',
-                how='left'
-            )
-            # 'Distance' column might exist now in the plan
-
-        # Add/Fill 'Distance' using coalesce. This works whether the join added the column or not.
-        lf = lf.with_columns(
-            pl.coalesce(pl.col('Distance'), pl.lit(float('inf'))).cast(pl.Float64).alias('Distance')
+        lf = lf.join(
+            user_distances.lazy(),
+            on='Country Code',
+            how='left' # Keep all projects
         )
-        print("Country-based distances assigned/filled in LazyFrame plan.")
-        distance_assigned = True # Mark distance assignment as attempted
+
+        # Now, handle distance assignment:
+        # 1. If project country code matches user country code, distance is 0.
+        # 2. If there's a PrecomputedDistance (from the join), use that.
+        # 3. Otherwise (no match in join, or precomputed was null), distance is infinity.
+        lf = lf.with_columns(
+            pl.when(pl.col('Country Code') == pl.lit(user_country_code))
+            .then(pl.lit(0.0)) # Case 1: User's own country
+            .otherwise(
+                pl.coalesce(pl.col('PrecomputedDistance'), pl.lit(float('inf'))) # Case 2 & 3
+            )
+            .cast(pl.Float64) # Ensure final type
+            .alias('Distance') # Final column name
+        )
+
+        # Drop the temporary column if it exists
+        if 'PrecomputedDistance' in lf.schema:
+            lf = lf.drop('PrecomputedDistance')
+
+        print("Country-based distances assigned/filled in LazyFrame plan (with self-country=0).")
+        distance_assigned = True # Mark distance as assigned
 
     except Exception as e:
         print(f"Error during distance join/assignment: {e}") # Added log
         st.error(f"Error assigning project distances: {e}")
-        # Explicitly add Distance column with infinity if error occurred and it might not exist
-        # Check the *current* plan's schema here
-        current_columns = lf.collect_schema().names()
-        if 'Distance' not in current_columns:
-            print("Error handler: Adding Distance column after exception.")
+        # Explicitly add Distance column with infinity if join failed mid-way and column doesn't exist
+        if 'Distance' not in lf.schema:
             lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
         else: # Ensure type and fill nulls if column exists but might have issues
-            print("Error handler: Ensuring Distance is float and filling nulls after exception.")
             lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
-        distance_assigned = True # Mark as true because we handled the error state by adding the column
 
-# If distance wasn't assigned/attempted by the join logic above
+# If distance wasn't assigned by the join logic above (e.g., prerequisite failed), add it now
 if not distance_assigned:
     if not user_country_code:
          print("User country code not available for distance assignment.")
     if df_country_distances is None:
          print("Precomputed country distances not loaded for distance assignment.")
-    # Check initial columns again
-    if 'Country Code' not in initial_columns:
+    if 'Country Code' not in lf.schema:
          print("'Country Code' column missing in main data schema for distance assignment.")
 
-    print("Setting Distance to infinity (Lazy) as primary assignment because join prerequisites failed.")
-    # Add Distance column lazily if it wasn't added at all (check current plan's schema)
-    current_columns = lf.collect_schema().names()
-    if 'Distance' not in current_columns:
+    print("Setting Distance to infinity (Lazy) as primary assignment because join prerequisites failed or join yielded no distances.")
+    # Add Distance column lazily if it wasn't added at all
+    if 'Distance' not in lf.schema:
         lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
     else:
          # If it somehow exists but flag is false, ensure nulls are filled
@@ -536,23 +535,23 @@ df_collected = None
 try:
     print("Collecting final DataFrame for display...")
     start_collect_time = time.time()
-    # Check if Distance column exists *in the final plan* before collecting
-    final_columns = lf.collect_schema().names()
-    if 'Distance' not in final_columns:
+    # Check if Distance column exists before collecting
+    if 'Distance' not in lf.columns:
          st.error("Critical Error: Distance column was not added to the LazyFrame before collection.")
+         # Attempt to add it now as a fallback, though ideally it should exist
          lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-         print("Fallback: Added Distance column just before collect.")
+         print("Fallback: Added Distance column just before collect.") # Log fallback
 
-    # Use streaming="legacy" to silence deprecation warning
-    df_collected = lf.collect(streaming="legacy")
+    df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
-
     # Check if Distance column actually made it into the collected frame
-    if 'Distance' not in df_collected.columns: # Check eager frame columns
+    if 'Distance' not in df_collected.columns:
         st.error("Critical Error: Distance column is missing in the collected DataFrame.")
+        # Add it here with default values if absolutely necessary, but indicates a prior logic error
         df_collected = df_collected.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-        print("Fallback: Added Distance column to collected DataFrame.")
+        print("Fallback: Added Distance column to collected DataFrame.") # Log fallback
     else:
+        # Optional: Log a sample of distances from the collected frame
         print("Sample distances from collected frame:", df_collected['Distance'].head(5).to_list())
 
     loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
@@ -675,10 +674,6 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
 
 # Generate HTML using the collected DataFrame
 header_html, rows_html = generate_table_html(df_collected)
-
-# --- Add log before template generation ---
-print(f"Final user_location before template generation: {user_location}")
-# -----------------------------------------
 
 # --- HTML Template ---
 # RE-ADD user location (including country code if available)
