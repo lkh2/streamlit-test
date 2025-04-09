@@ -10,6 +10,7 @@ import gzip
 import glob
 import polars as pl
 import reverse_geocode # Import reverse_geocode
+import html # For escaping HTML in table cells
 
 st.set_page_config(layout="wide")
 
@@ -510,80 +511,113 @@ elif loc_info_from_js and 'error' in loc_info_from_js:
 
 # --- Use location data from session state ---
 # Reset the per-run attempt flag *after* checking loc_info_from_js, so it's fresh for the next actual run
-st.session_state.geolocation_attempted_run = False
+# st.session_state.geolocation_attempted_run = False # Keep this commented or remove, managed by session state
 
 user_location = st.session_state.user_location_data # This is now the source of truth
-user_country_code = user_location['country_code'] if user_location and user_location.get('country_code') else None # Safer access
+user_country_code = None
+if user_location and isinstance(user_location, dict) and user_location.get('country_code'):
+    user_country_code = user_location['country_code']
+    print(f"Using location from session state: User Country Code = {user_country_code}")
+else:
+    print(f"Using location from session state: No valid country code found. User location: {user_location}")
 
-print(f"Using location from session state: {user_location}") # Log what's being used
 
 # --- Assign Distance based on Country Code (Lazy) ---
 distance_assigned = False # Flag to track if distance was assigned via join
 
-# Check if we have a country code *from session state* AND distance data is loaded
-if user_country_code and df_country_distances is not None:
+# Check if we have a country code *from session state* AND distance data is loaded AND not empty
+if user_country_code and df_country_distances is not None and not df_country_distances.is_empty():
     print(f"Attempting distance assignment based on user country (from session state): {user_country_code}")
+    # Check if 'Country Code' exists in the main LazyFrame schema
     if 'Country Code' in lf.schema:
         try:
             # Filter precomputed distances for the user's country
+            # Select only needed columns and rename 'code_to' to match join key ('Country Code')
+            # Rename 'distance' to avoid potential name clash during join
+            print(f"Filtering df_country_distances for code_from = {user_country_code}")
             user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
                                                  .select(['code_to', 'distance']) \
                                                  .rename({'code_to': 'Country Code', 'distance': 'PrecomputedDistance'}) # Rename to avoid clash temporarily
 
-            # Perform the join lazily
-            lf = lf.join(
-                user_distances.lazy(), # Join with the filtered distances
-                on='Country Code',
-                how='left' # Keep all projects
-            )
+            if user_distances.is_empty():
+                 print(f"Warning: No precomputed distances found for user country code '{user_country_code}' in country_distances.parquet.")
+                 # Proceed without join, distance will default to infinity later
+            else:
+                 print(f"Found {len(user_distances)} precomputed distances for user country.")
+                 # --- DEBUG: Log schema before join ---
+                 print("Schema LF before distance join:", lf.schema)
+                 print("Schema user_distances before join:", user_distances.schema)
 
-            # Assign distance: 0 if same country, precomputed if available, else inf
-            lf = lf.with_columns(
-                pl.when(pl.col('Country Code') == pl.lit(user_country_code))
-                .then(pl.lit(0.0)) # Case 1: User's own country
-                .otherwise(
-                    pl.coalesce(pl.col('PrecomputedDistance'), pl.lit(float('inf'))) # Case 2 & 3
-                )
-                .cast(pl.Float64) # Ensure final type
-                .alias('Distance') # Final column name
-            )
+                 # Perform the left join lazily
+                 lf = lf.join(
+                     user_distances.lazy(), # Convert filtered eager DF to Lazy for join
+                     on='Country Code',     # Join key in both lf and user_distances
+                     how='left'             # Keep all projects from lf
+                 )
+                 # --- DEBUG: Log schema after join ---
+                 print("Schema LF after distance join:", lf.schema)
 
-            # Drop the temporary column if it exists in the schema after join
-            if 'PrecomputedDistance' in lf.columns: # Check schema after join
-                lf = lf.drop('PrecomputedDistance')
+                 # Assign distance: 0 if same country, precomputed if available, else inf
+                 # Check if 'PrecomputedDistance' column actually exists after the join
+                 if 'PrecomputedDistance' in lf.columns: # Essential check!
+                     print("Assigning Distance column using join results...")
+                     lf = lf.with_columns(
+                         pl.when(pl.col('Country Code') == pl.lit(user_country_code))
+                         .then(pl.lit(0.0)) # Case 1: User's own country
+                         .otherwise(
+                             # Coalesce: Use PrecomputedDistance if not null, otherwise use infinity
+                             pl.coalesce(pl.col('PrecomputedDistance'), pl.lit(float('inf')))
+                         )
+                         .cast(pl.Float64) # Ensure final type is Float64
+                         .alias('Distance') # Final column name
+                     )
+                     # Drop the temporary column
+                     lf = lf.drop('PrecomputedDistance')
+                     print("Country-based distances assigned/filled in LazyFrame plan (with self-country=0).")
+                     distance_assigned = True # Mark distance as assigned via join
+                 else:
+                      # This case indicates the join might not have added the column as expected
+                      print("Warning: 'PrecomputedDistance' column not found after join. Will assign infinity.")
+                      # Distance assignment will be handled by the fallback logic below
+                      distance_assigned = False
 
-            print("Country-based distances assigned/filled in LazyFrame plan (with self-country=0).")
-            distance_assigned = True # Mark distance as assigned
-
+        except pl.ColumnNotFoundError as col_err:
+             print(f"Error during distance join/assignment (Column Not Found): {col_err}. Likely mismatch in 'Country Code' column name or existence.")
+             st.error(f"Error assigning project distances due to missing column: {col_err}")
+             distance_assigned = False # Ensure fallback happens
         except Exception as e:
-            print(f"Error during distance join/assignment: {e}") # Added log
+            print(f"Error during distance join/assignment: {e}") # Log other errors
             st.error(f"Error assigning project distances: {e}")
-            # Fallback: Ensure Distance column exists with infinity if join failed
-            if 'Distance' not in lf.columns:
-                lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-            else: # Ensure type and fill nulls if column exists but might have issues
-                lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
+            distance_assigned = False # Ensure fallback happens
     else:
-         print("'Country Code' column missing in main data schema. Cannot assign country-based distances.")
-         # No distance assigned based on country code
+         print("'Country Code' column missing in main data schema (lf.schema). Cannot assign country-based distances via join.")
+         distance_assigned = False # Ensure fallback happens
 else:
+     # Log exactly why distance assignment is skipped
      if not user_country_code:
-          print("User country code not available in session state for distance assignment.")
+          print("Distance assignment skipped: User country code not available in session state.")
      if df_country_distances is None:
-          print("Precomputed country distances not loaded for distance assignment.")
-     # No need to explicitly check for 'Country Code' here again, handled above
+          print("Distance assignment skipped: Precomputed country distances (df_country_distances) not loaded.")
+     elif df_country_distances is not None and df_country_distances.is_empty():
+           print("Distance assignment skipped: Precomputed country distances (df_country_distances) is empty.")
+     distance_assigned = False # Ensure fallback happens
 
-
-# If distance wasn't assigned by the join logic above, ensure the column exists with infinity
+# Fallback: If distance wasn't successfully assigned by the join logic, ensure the column exists with infinity
 if not distance_assigned:
-    print("Setting Distance to infinity (Lazy) as primary assignment because prerequisites failed or join yielded no distances.")
-    # Add Distance column lazily if it wasn't added at all
-    if 'Distance' not in lf.columns: # Check schema
+    print("Fallback: Setting/Ensuring 'Distance' column exists and is filled with infinity.")
+    # Check if 'Distance' column *already* exists from a previous step or failed join attempt
+    if 'Distance' not in lf.columns:
+        # Add the column if it doesn't exist at all
         lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+        print("Added 'Distance' column with infinity.")
     else:
-         # If it somehow exists but flag is false, ensure nulls are filled
-         print("Warning: Distance column existed but distance_assigned flag was false. Filling nulls with infinity.")
-         lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
+        # If it exists but wasn't assigned via join, ensure nulls are filled with infinity and type is correct
+        print("Ensuring existing 'Distance' column is Float64 and nulls are filled with infinity.")
+        lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
+
+
+# --- DEBUG: Log schema before collect ---
+print("Schema before final collect:", lf.schema)
 
 
 # --- Main Collect and Cleanup ---
