@@ -5,7 +5,7 @@ import tempfile, os
 import json
 import polars as pl
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_icon="📊", page_title="Data Explorer")
 st.markdown(
     """
     <style>
