@@ -90,7 +90,6 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# Replace MongoDB connection with Polars-powered Parquet processing
 @st.cache_data
 def load_data_from_parquet_chunks():
     """
@@ -170,43 +169,33 @@ def load_data_from_parquet_chunks():
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
-# Load pre-processed data using the Polars function
+# Load pre-processed data
 df = load_data_from_parquet_chunks()
 
-# Check if DataFrame is empty after loading
+# Check if DataFrame is empty
 if df.is_empty():
     st.error("Failed to load data. Please check the logs and ensure database_download.py ran successfully.")
-    st.stop() # Stop execution if no data
+    st.stop()
 
-# Convert remaining object columns to string (might not be necessary if handled in download script)
-# object_cols = [col for col in df.columns if df[col].dtype == pl.Object]
-# if object_cols:
-#     print(f"Found object columns: {object_cols}. Attempting cast to Utf8.")
-#     df = df.with_columns([pl.col(col).cast(pl.Utf8, strict=False).fill_null("N/A") for col in object_cols])
-
-# Apply styling to State column using native polars expressions
-# Ensure 'State' column exists before applying styling
+# Apply styling to State column
 if 'State' in df.columns:
     df = df.with_columns(
         (
             pl.lit('<div class="state_cell state-')
-            + pl.col('State').str.to_lowercase().fill_null('unknown') # Handle potential nulls
+            + pl.col('State').str.to_lowercase().fill_null('unknown')
             + pl.lit('">')
             + pl.col('State').str.to_lowercase().fill_null('unknown')
             + pl.lit('</div>')
-        ).alias('State') # Overwrite the existing State column
+        ).alias('State')
     )
 else:
     st.warning("Column 'State' not found in the loaded data. Skipping state styling.")
-    # Optionally create a default styled column if needed downstream
-    # df = df.with_columns(pl.lit('<div class="state_cell state-unknown">unknown</div>').alias('State'))
 
-# Add country coordinates (This join remains here as country.csv is separate)
+# Add country coordinates by joining country.csv
 @st.cache_data
 def load_country_data():
     try:
         country_df = pl.read_csv('country.csv')
-        # Select and rename columns for clarity before join
         country_df = country_df.select(['country', 'latitude', 'longitude']).rename({'latitude': 'country_lat', 'longitude': 'country_lon'})
         return country_df
     except Exception as e:
@@ -215,40 +204,34 @@ def load_country_data():
 
 country_data = load_country_data()
 
-# Only join if country_data is not empty and required columns exist
+# Join with country_data and create latitude/longitude columns
 if not country_data.is_empty() and 'Country Code' in df.columns:
-     # Perform the join, keeping existing lat/lon if available, otherwise use country data
      df = df.join(country_data,
                   left_on='Country Code',
                   right_on='country',
                   how='left')
-
-     # Use project's lat/lon if present (non-zero), otherwise fall back to country's lat/lon
      df = df.with_columns([
-          pl.when(pl.col('latitude') != 0.0).then(pl.col('latitude')).otherwise(pl.col('country_lat')).alias('latitude'),
-          pl.when(pl.col('longitude') != 0.0).then(pl.col('longitude')).otherwise(pl.col('country_lon')).alias('longitude')
-     ]).drop(['country_lat', 'country_lon']) # Drop intermediate columns
-     # Fill any remaining nulls in lat/lon after the join/coalesce
+          pl.col('country_lat').fill_null(0.0).alias('latitude'),
+          pl.col('country_lon').fill_null(0.0).alias('longitude')
+     ])
+     cols_to_drop_after_join = [col for col in ['country_lat', 'country_lon'] if col in df.columns]
+     if cols_to_drop_after_join:
+          df = df.drop(cols_to_drop_after_join)
+else:
+     st.warning("Could not join country data or 'Country Code' column missing. Creating default Latitude/Longitude columns (0.0).")
      df = df.with_columns([
-          pl.col('latitude').fill_null(0.0),
-          pl.col('longitude').fill_null(0.0)
+         pl.lit(0.0).cast(pl.Float64).alias('latitude'),
+         pl.lit(0.0).cast(pl.Float64).alias('longitude')
      ])
 
-elif 'latitude' not in df.columns or 'longitude' not in df.columns:
-     st.warning("Latitude/Longitude columns missing and country data join failed. Setting to 0.")
-     df = df.with_columns([
-         pl.lit(0.0).alias('latitude'),
-         pl.lit(0.0).alias('longitude')
-     ])
-
-# Add geolocation call before data processing
+# --- RE-ADD Geolocation Fetching ---
 loc = get_geolocation()
 user_location = None
 
 if (loc and 'coords' in loc):
     with st.spinner('Updating table with your location...'):
         user_location = {
-            'latitude': loc['coords']['latitude'], 
+            'latitude': loc['coords']['latitude'],
             'longitude': loc['coords']['longitude']
         }
         time.sleep(1)
@@ -256,41 +239,39 @@ if (loc and 'coords' in loc):
     time.sleep(1.5)
     loading_success.empty()
 
-# Add function to calculate distances
+# --- RE-ADD Distance Calculation Function and Logic ---
 def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two points using Haversine formula"""
     R = 6371  # Earth's radius in kilometers
-    
+
     # Ensure inputs are floats before conversion
     try:
         lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
     except (ValueError, TypeError):
         return float('inf') # Return infinity if conversion fails
-    
+
     lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(np.radians, [lat1, lon1, lat2, lon2])
-    
+
     dlat = lat2_rad - lat1_rad
     dlon = lon2_rad - lon1_rad
-    
+
     a = np.sin(dlat/2)**2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon/2)**2
     c = 2 * np.arcsin(np.sqrt(a))
-    
+
     return R * c
 
 # Calculate distances if user location is available
 if user_location and 'latitude' in df.columns and 'longitude' in df.columns:
     print("Calculating distances from user location...")
-    # Ensure user lat/lon are floats
     user_lat = float(user_location['latitude'])
     user_lon = float(user_location['longitude'])
 
     # Apply the distance function row-wise using Polars expressions
-    # This is generally much faster than df.apply with a lambda function
     df = df.with_columns(
-        pl.struct(['latitude', 'longitude']) # Create a struct to pass lat/lon together
+        pl.struct(['latitude', 'longitude'])
         .apply(lambda x: calculate_distance(user_lat, user_lon, x['latitude'], x['longitude']))
         .alias('Distance')
-        .cast(pl.Float64) # Ensure float type
+        .cast(pl.Float64)
     )
     print("Distance calculation complete.")
 
@@ -298,29 +279,23 @@ else:
     print("User location not available or lat/lon columns missing. Setting Distance to infinity.")
     df = df.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
 
-# Sort DataFrame by Distance initially (optional, for verification)
-# df = df.sort('Distance')
-# print(df.select(['Project Name', 'latitude', 'longitude', 'Distance']).head())
-
-# --- Popularity Score Calculation MOVED to database_download.py ---
-
 # --- Generate Table HTML ---
 def generate_table_html(df_display):
-    # Define visible and hidden columns based on final DataFrame structure
+    # Define visible columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
 
-    # Ensure all required columns for data attributes exist
+    # Ensure all required columns for data attributes exist (ADD Distance back)
     required_data_cols = [
         'Category', 'Subcategory', 'Raw Pledged', 'Raw Goal', 'Raw Raised',
         'Raw Date', 'Raw Deadline', 'Backer Count', 'latitude', 'longitude',
-        'Country Code', 'Distance', 'Staff Pick', 'Popularity Score'
+        'Country Code', 'Distance', 'Popularity Score' # ADDED Distance
     ]
     missing_data_cols = [col for col in required_data_cols if col not in df_display.columns]
     if missing_data_cols:
-        st.error(f"Missing required columns for table generation: {missing_data_cols}. Check database_download.py.")
-        return "", "" # Return empty strings
+        st.error(f"Missing required columns for table generation: {missing_data_cols}. Check data processing steps.")
+        return "", ""
 
-     # Ensure visible columns exist
+    # Ensure visible columns exist
     missing_visible_cols = [col for col in visible_columns if col not in df_display.columns]
     if missing_visible_cols:
          st.error(f"Missing visible columns for table: {missing_visible_cols}. Check database_download.py.")
@@ -335,12 +310,10 @@ def generate_table_html(df_display):
 
     # Generate table rows with raw values in data attributes
     rows_html = ''
-    # Convert Polars DataFrame to list of dicts for iteration (efficient for moderate size)
-    # For very large data, consider iterating with select + head/tail if memory becomes an issue
     data_dicts = df_display.to_dicts()
 
     for row in data_dicts:
-         # Safely format data attributes, handling potential None or unexpected types
+         # Safely format data attributes (ADD Distance back)
         data_attrs = f'''
             data-category="{row.get('Category', 'N/A')}"
             data-subcategory="{row.get('Subcategory', 'N/A')}"
@@ -354,7 +327,6 @@ def generate_table_html(df_display):
             data-longitude="{row.get('longitude', 0.0):.6f}"
             data-country-code="{row.get('Country Code', 'N/A')}"
             data-distance="{row.get('Distance', float('inf')):.2f}"
-            data-staff-pick="{str(row.get('Staff Pick', False)).lower()}"
             data-popularity="{row.get('Popularity Score', 0.0):.6f}"
         '''
 
@@ -448,10 +420,12 @@ def get_filter_options(df_filters):
 filter_options = get_filter_options(df)
 
 
-# --- TEMPLATE AND CSS definitions remain the same ---
+# --- TEMPLATE AND CSS definitions ---
+# RE-ADD 'Near Me' sort option conditionally
+# RE-ADD userLocation to script tag
 template = f"""
 <script>
-    // Make user location available to JavaScript
+    // RE-ADD user location to JavaScript
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
     window.hasLocation = {json.dumps(bool(user_location))};
 </script>
@@ -495,7 +469,7 @@ template = f"""
                 <option value="mostfunded">Most Funded</option>
                 <option value="mostbacked">Most Backed</option>
                 <option value="enddate">End Date</option>
-                {'<option value="nearme">Near Me</option>' if user_location else ''} 
+                {'<option value="nearme">Near Me</option>' if user_location else ''}
             </select>
         </div>
         <div class="filter-row">
@@ -596,12 +570,9 @@ template = f"""
         <button id="next-page" class="page-btn" aria-label="Next page">&gt;</button>
     </div>
 </div>
-<script>
-    // Make user location available to JavaScript
-    window.userLocation = {json.dumps(user_location) if user_location else 'null'}; 
-</script>
 """
 
+# CSS remains the same
 css = """
 <style> 
     .title-wrapper {
@@ -1140,10 +1111,8 @@ css = """
 </style>
 """
 
-# --- SCRIPT definition remains the same ---
-# The JavaScript expects the data attributes (data-category, data-pledged, etc.)
-# to be present in the HTML rows, which generate_table_html now ensures
-# based on the pre-processed Polars DataFrame.
+# --- SCRIPT definition ---
+# RE-ADD distance-related logic
 script = """
     // Helper functions
     function debounce(func, wait) {
@@ -1172,20 +1141,20 @@ script = """
         });
     }
 
-    // Add Haversine distance calculation function
+    // RE-ADD Haversine distance function (or confirm it exists)
     function calculateDistance(lat1, lon1, lat2, lon2) {
         const R = 6371; // Earth's radius in kilometers
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = 
+        const a =
             Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
             Math.sin(dLon/2) * Math.sin(dLon/2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         return R * c;
     }
 
-    // Optimize distance calculations with a cache
+    // RE-ADD DistanceCache class (or confirm it exists)
     class DistanceCache {
         constructor() {
             this.userLocation = window.userLocation;
@@ -1196,6 +1165,7 @@ script = """
         }
 
         getDistance(row) {
+            // Assuming distance is pre-calculated and stored in data-distance
             return parseFloat(row.dataset.distance);
         }
     }
@@ -1216,7 +1186,7 @@ script = """
             this.resetFilters();
         }
 
-        // sortRows with async sorting
+        // sortRows - RE-ADD 'nearme' case
         async sortRows(sortType) {
             if (sortType === 'popularity') {
                 // Sort by popularity score
@@ -1231,24 +1201,28 @@ script = """
                     // Sort in descending order
                     return scoreB - scoreA;
                 });
-            } else if (sortType === 'nearme') {
+            } else if (sortType === 'nearme') { // RE-ADD case
                 if (!this.userLocation) {
-                    this.currentSort = 'popularity';
-                    document.getElementById('sortFilter').value = 'popularity';
-                    this.sortRows('popularity');
-                    return;
+                    console.warn("Attempted to sort by 'Near Me' without location. Falling back to popularity.");
+                    // Reset sort dropdown and internal state
+                    const sortSelect = document.getElementById('sortFilter');
+                     if (sortSelect.value === 'nearme') {
+                           sortSelect.value = 'popularity';
+                           this.currentSort = 'popularity';
+                     }
+                    await this.sortRows('popularity'); // Re-sort by popularity
+                    return; // Exit early
                 }
-                
-                // Sort only by distance
+                // Sort by pre-calculated distance stored in data-distance
                 this.visibleRows.sort((a, b) => {
                     const distA = parseFloat(a.dataset.distance);
                     const distB = parseFloat(b.dataset.distance);
-                    
-                    // Handle invalid values
-                    if (isNaN(distA)) return 1;
-                    if (isNaN(distB)) return -1;
-                    
-                    return distA - distB;
+
+                    // Handle NaN or infinite values (put them at the end)
+                    if (isNaN(distA) || !isFinite(distA)) return 1;
+                    if (isNaN(distB) || !isFinite(distB)) return -1;
+
+                    return distA - distB; // Ascending order (nearest first)
                 });
             } else if (sortType === 'enddate') {
                 // Sort by deadline
@@ -1348,9 +1322,27 @@ script = """
                 date: document.getElementById('dateFilter').value
             };
 
+            // Read the CURRENT sort value from the dropdown
             const sortSelect = document.getElementById('sortFilter');
             this.currentSort = sortSelect ? sortSelect.value : 'popularity';
-            
+
+            // Add range filters
+            const rangeFilters = {
+                 pledged: {
+                      min: parseFloat(document.getElementById('fromInput').value),
+                      max: parseFloat(document.getElementById('toInput').value)
+                 },
+                 goal: {
+                      min: parseFloat(document.getElementById('goalFromInput').value),
+                      max: parseFloat(document.getElementById('goalToInput').value)
+                 },
+                 raised: {
+                      min: parseFloat(document.getElementById('raisedFromInput').value),
+                      max: parseFloat(document.getElementById('raisedToInput').value)
+                 }
+            };
+            this.currentFilters.ranges = rangeFilters;
+
             await this.applyAllFilters();
         }
 
@@ -1401,13 +1393,18 @@ script = """
 
             // State filter - Extract state from class name instead of text content
             const stateCell = row.querySelector('.state_cell');
-            const stateMatch = stateCell ? stateCell.className.match(/state-(\w+)/) : null;
-            const state = stateMatch ? stateMatch[1] : '';
-            
+            let state = '';
+            if (stateCell) {
+                for (const cls of stateCell.classList) {
+                    if (cls.startsWith('state-')) {
+                        state = cls.substring(6);
+                        break;
+                    }
+                }
+            }
             if (!filters.states.includes('All States')) {
-                const matchingState = filters.states.find(s => 
-                    s.toLowerCase() === state.toLowerCase()
-                );
+                const stateLower = state.toLowerCase();
+                const matchingState = filters.states.find(s => s.toLowerCase() === stateLower);
                 if (!matchingState) return false;
             }
 
@@ -2018,12 +2015,19 @@ script = """
         if (!window.rendered) {
             window.tableManager = new TableManager();
             window.rendered = true;
-            
-            // Add resize observer to handle dynamic content changes
+
+            // Add resize observer
             const resizeObserver = new ResizeObserver(() => {
-                window.tableManager.adjustHeight();
+                if (window.tableManager) {
+                    window.tableManager.adjustHeight();
+                }
             });
-            resizeObserver.observe(document.querySelector('.table-wrapper'));
+            const tableWrapper = document.querySelector('.table-wrapper');
+            if (tableWrapper) {
+                 resizeObserver.observe(tableWrapper);
+            } else {
+                 console.error("Table wrapper not found for ResizeObserver.");
+            }
         }
     }
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
@@ -2033,5 +2037,3 @@ script = """
 # Create and use the component
 table_component = generate_component('searchable_table', template=css + template, script=script)
 table_component()
-
-# st.dataframe(df.head(100)) # Optional: Display sample of the final dataframe for debugging
