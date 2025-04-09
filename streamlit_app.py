@@ -413,120 +413,176 @@ def load_country_distances() -> pl.DataFrame | None:
 df_country_distances = load_country_distances()
 
 # --- Geolocation Fetching & Country Code Determination ---
-loc = get_geolocation() # This happens *before* the distance assignment section
-st.write(loc)
-user_location = None
-user_country_code = None
 
-if loc and 'coords' in loc:
+# Initialize session state if not already present
+if 'user_location_data' not in st.session_state:
+    st.session_state.user_location_data = None # Will store {'latitude': ..., 'longitude': ..., 'country_code': ...} or None
+if 'geolocation_attempted_run' not in st.session_state:
+    # This flag resets on each full page load/new session
+    st.session_state.geolocation_attempted_run = False
+
+loc_info_from_js = None
+# Only attempt to get geolocation if we haven't successfully gotten it before in this session
+# AND haven't attempted in this specific script run yet (controlled by flag below)
+get_location_this_run = False
+if not st.session_state.user_location_data and not st.session_state.geolocation_attempted_run:
+    st.info("Attempting to retrieve your location for 'Near Me' sorting. Please allow location access if prompted.")
+    st.session_state.geolocation_attempted_run = True # Mark that we will try in this run
+    get_location_this_run = True
+
+# Call get_geolocation conditionally
+if get_location_this_run:
+    # Use a key to potentially help with statefulness across reruns
+    loc_info_from_js = get_geolocation(key="geo_request_1")
+    # It's possible get_geolocation returns immediately with cached denial/error, or None while waiting.
+    # The script might rerun *after* the user interacts.
+
+# Check if the component returned data *this time*
+if loc_info_from_js and 'coords' in loc_info_from_js:
     try:
-        coords = (loc['coords']['latitude'], loc['coords']['longitude'])
-        print(f"Attempting reverse geocoding for coordinates: {coords}") # Added log
+        lat = loc_info_from_js['coords']['latitude']
+        lon = loc_info_from_js['coords']['longitude']
+        coords = (lat, lon)
+        print(f"Received coordinates from get_geolocation: {coords}")
+
+        # Perform reverse geocoding *only if* we get coordinates back
+        user_country_code = None
+        geo_info = None # Initialize geo_info
         with st.spinner('Determining your country...'):
-            geo_info_list = reverse_geocode.get(coords)
-            st.write(geo_info_list)
-            if geo_info_list:
-                geo_info = geo_info_list # Assuming first result is best
-                user_country_code = geo_info.get('country_code')
-                if user_country_code: # Check if code was actually found
-                    print(f"User country code determined: {user_country_code}")
-                    user_location = {
-                        'latitude': loc['coords']['latitude'],
-                        'longitude': loc['coords']['longitude'],
-                        'country_code': user_country_code
-                    }
-                    loading_success = st.success(f"Location ({geo_info.get('city', 'N/A')}, {user_country_code}) received!")
-                    time.sleep(1.5)
-                    loading_success.empty()
-                else:
-                     print("Reverse geocoding successful, but country code not found in result.") # Added log
-                     st.warning("Could not determine country code from coordinates.")
-                     user_location = { # Still store lat/lon
-                         'latitude': loc['coords']['latitude'],
-                         'longitude': loc['coords']['longitude']
-                     }
-            else:
-                 print("Reverse geocoding failed (returned empty list).") # Added log
-                 st.warning("Could not determine country from coordinates.")
-                 user_location = {
-                     'latitude': loc['coords']['latitude'],
-                     'longitude': loc['coords']['longitude']
-                 }
+            try:
+                geo_info_list = reverse_geocode.search(coordinates=[coords]) # Use search for list input
+                if geo_info_list: # Check if list is not empty
+                    geo_info = geo_info_list[0] # Take first result
+                    user_country_code = geo_info.get('country_code')
+            except Exception as rg_e:
+                 print(f"Reverse geocoding library error: {rg_e}")
+                 st.warning("Could not determine country due to a geocoding library error.")
+
+
+        if user_country_code:
+            print(f"User country code determined: {user_country_code}")
+            # Store successful result in session state
+            st.session_state.user_location_data = {
+                'latitude': lat,
+                'longitude': lon,
+                'country_code': user_country_code
+            }
+            # Reset the attempt flag for the next run if needed (though not strictly necessary now)
+            # st.session_state.geolocation_attempted_run = False # We succeeded, no need to try again unless session resets
+            # Display success message temporarily
+            city_name = geo_info.get('city', 'N/A') if geo_info else 'N/A'
+            loading_success = st.success(f"Location ({city_name}, {user_country_code}) received!")
+            time.sleep(1.5)
+            loading_success.empty()
+            # Force a rerun NOW to use the new location data immediately
+            print("Rerunning script after getting location.")
+            st.rerun() # Rerun the script from the top
+        else:
+             print("Reverse geocoding did not find country code.")
+             st.warning("Could not determine country code from coordinates. 'Near Me' sort may be inaccurate.")
+             # Store partial data (lat/lon but no code)
+             st.session_state.user_location_data = {
+                'latitude': lat,
+                'longitude': lon,
+                'country_code': None
+             }
+             # Reset the attempt flag
+             # st.session_state.geolocation_attempted_run = False # Allow retry on next run if desired? Or keep true? Let's reset.
+             # Force rerun to use partial data (map might still work)
+             print("Rerunning script after getting partial location (no country code).")
+             st.rerun() # Rerun to use the partial data
 
     except Exception as e:
-        print(f"Error during reverse geocoding: {e}") # Added log
-        st.error(f"Error during reverse geocoding: {e}")
-        user_location = {
-            'latitude': loc['coords']['latitude'],
-            'longitude': loc['coords']['longitude']
-        }
-else:
-    print("Geolocation data not available or missing coordinates.") # Added log
+        print(f"Error during reverse geocoding or processing location: {e}")
+        st.error(f"Error processing location: {e}")
+        # Ensure state is None if error occurs
+        st.session_state.user_location_data = None
+        # Reset attempt flag so user can potentially try again on refresh
+        st.session_state.geolocation_attempted_run = False
 
+elif loc_info_from_js and 'error' in loc_info_from_js:
+     # Handle specific errors returned by get_geolocation (e.g., permission denied)
+     st.warning(f"Could not get location: {loc_info_from_js['error'].get('message', 'Geolocation permission denied or unavailable')}. 'Near Me' sort unavailable.")
+     # Ensure state is None
+     st.session_state.user_location_data = None
+     # Reset attempt flag for this run; won't try again until full refresh
+     st.session_state.geolocation_attempted_run = True # Keep true for this run to avoid loop if error persists
+
+# --- Use location data from session state ---
+# Reset the per-run attempt flag *after* checking loc_info_from_js, so it's fresh for the next actual run
+st.session_state.geolocation_attempted_run = False
+
+user_location = st.session_state.user_location_data # This is now the source of truth
+user_country_code = user_location['country_code'] if user_location and user_location.get('country_code') else None # Safer access
+
+print(f"Using location from session state: {user_location}") # Log what's being used
 
 # --- Assign Distance based on Country Code (Lazy) ---
 distance_assigned = False # Flag to track if distance was assigned via join
 
-if user_country_code and df_country_distances is not None and 'Country Code' in lf.schema:
-    print(f"Assigning distances based on user country: {user_country_code}")
-    try:
-        # Filter precomputed distances for the user's country
-        user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
-                                             .select(['code_to', 'distance']) \
-                                             .rename({'code_to': 'Country Code', 'distance': 'PrecomputedDistance'}) # Rename to avoid clash temporarily
+# Check if we have a country code *from session state* AND distance data is loaded
+if user_country_code and df_country_distances is not None:
+    print(f"Attempting distance assignment based on user country (from session state): {user_country_code}")
+    if 'Country Code' in lf.schema:
+        try:
+            # Filter precomputed distances for the user's country
+            user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
+                                                 .select(['code_to', 'distance']) \
+                                                 .rename({'code_to': 'Country Code', 'distance': 'PrecomputedDistance'}) # Rename to avoid clash temporarily
 
-        lf = lf.join(
-            user_distances.lazy(),
-            on='Country Code',
-            how='left' # Keep all projects
-        )
-
-        # Now, handle distance assignment:
-        # 1. If project country code matches user country code, distance is 0.
-        # 2. If there's a PrecomputedDistance (from the join), use that.
-        # 3. Otherwise (no match in join, or precomputed was null), distance is infinity.
-        lf = lf.with_columns(
-            pl.when(pl.col('Country Code') == pl.lit(user_country_code))
-            .then(pl.lit(0.0)) # Case 1: User's own country
-            .otherwise(
-                pl.coalesce(pl.col('PrecomputedDistance'), pl.lit(float('inf'))) # Case 2 & 3
+            # Perform the join lazily
+            lf = lf.join(
+                user_distances.lazy(), # Join with the filtered distances
+                on='Country Code',
+                how='left' # Keep all projects
             )
-            .cast(pl.Float64) # Ensure final type
-            .alias('Distance') # Final column name
-        )
 
-        # Drop the temporary column if it exists
-        if 'PrecomputedDistance' in lf.schema:
-            lf = lf.drop('PrecomputedDistance')
+            # Assign distance: 0 if same country, precomputed if available, else inf
+            lf = lf.with_columns(
+                pl.when(pl.col('Country Code') == pl.lit(user_country_code))
+                .then(pl.lit(0.0)) # Case 1: User's own country
+                .otherwise(
+                    pl.coalesce(pl.col('PrecomputedDistance'), pl.lit(float('inf'))) # Case 2 & 3
+                )
+                .cast(pl.Float64) # Ensure final type
+                .alias('Distance') # Final column name
+            )
 
-        print("Country-based distances assigned/filled in LazyFrame plan (with self-country=0).")
-        distance_assigned = True # Mark distance as assigned
+            # Drop the temporary column if it exists in the schema after join
+            if 'PrecomputedDistance' in lf.columns: # Check schema after join
+                lf = lf.drop('PrecomputedDistance')
 
-    except Exception as e:
-        print(f"Error during distance join/assignment: {e}") # Added log
-        st.error(f"Error assigning project distances: {e}")
-        # Explicitly add Distance column with infinity if join failed mid-way and column doesn't exist
-        if 'Distance' not in lf.schema:
-            lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-        else: # Ensure type and fill nulls if column exists but might have issues
-            lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
+            print("Country-based distances assigned/filled in LazyFrame plan (with self-country=0).")
+            distance_assigned = True # Mark distance as assigned
 
-# If distance wasn't assigned by the join logic above (e.g., prerequisite failed), add it now
+        except Exception as e:
+            print(f"Error during distance join/assignment: {e}") # Added log
+            st.error(f"Error assigning project distances: {e}")
+            # Fallback: Ensure Distance column exists with infinity if join failed
+            if 'Distance' not in lf.columns:
+                lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+            else: # Ensure type and fill nulls if column exists but might have issues
+                lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
+    else:
+         print("'Country Code' column missing in main data schema. Cannot assign country-based distances.")
+         # No distance assigned based on country code
+else:
+     if not user_country_code:
+          print("User country code not available in session state for distance assignment.")
+     if df_country_distances is None:
+          print("Precomputed country distances not loaded for distance assignment.")
+     # No need to explicitly check for 'Country Code' here again, handled above
+
+
+# If distance wasn't assigned by the join logic above, ensure the column exists with infinity
 if not distance_assigned:
-    if not user_country_code:
-         print("User country code not available for distance assignment.")
-    if df_country_distances is None:
-         print("Precomputed country distances not loaded for distance assignment.")
-    if 'Country Code' not in lf.schema:
-         print("'Country Code' column missing in main data schema for distance assignment.")
-
-    print("Setting Distance to infinity (Lazy) as primary assignment because join prerequisites failed or join yielded no distances.")
+    print("Setting Distance to infinity (Lazy) as primary assignment because prerequisites failed or join yielded no distances.")
     # Add Distance column lazily if it wasn't added at all
-    if 'Distance' not in lf.schema:
+    if 'Distance' not in lf.columns: # Check schema
         lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
     else:
          # If it somehow exists but flag is false, ensure nulls are filled
-         print("Warning: Distance column existed but distance_assigned flag was false. Filling nulls.")
+         print("Warning: Distance column existed but distance_assigned flag was false. Filling nulls with infinity.")
          lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
 
 
@@ -676,13 +732,13 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
 header_html, rows_html = generate_table_html(df_collected)
 
 # --- HTML Template ---
-# RE-ADD user location (including country code if available)
-# RE-ADD category-subcategory mapping
-# REMOVE conditional for 'Near Me' sort option
+# Pass the location data and status from session state to JavaScript
+# Note: Ensure user_location is the variable derived from session state
 template = f"""
 <script>
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
-    window.hasLocation = {json.dumps(bool(user_location))};
+    // Base hasLocation on presence of latitude (more reliable than just the dict existing)
+    window.hasLocation = {json.dumps(bool(user_location and user_location.get('latitude') is not None))};
     window.categorySubcategoryMap = {json.dumps(category_subcategory_map)};
 </script>
 <div class="title-wrapper">
@@ -762,7 +818,7 @@ template = f"""
                 <div class="range-content">
                     <div class="range-container">
                         <div class="sliders-control">
-                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal}"/> 
+                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal}"/>
                             <input id="goalToSlider" type="range" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
                         </div>
                         <div class="form-control">
@@ -816,7 +872,7 @@ template = f"""
                 <tr>{header_html}</tr>
             </thead>
             <tbody>
-                {rows_html} 
+                {rows_html}
             </tbody>
         </table>
     </div>
