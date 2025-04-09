@@ -182,11 +182,10 @@ def load_data_from_parquet_chunks() -> pl.LazyFrame: # Return LazyFrame
 lf = load_data_from_parquet_chunks()
 
 # --- Check if LazyFrame is potentially empty ---
-# Fetching 1 row is a relatively cheap way to check if the scan is valid
-# and if there's any data, without loading everything.
+# Use head(0).collect() to validate schema without loading data
 try:
-    # Use fetch instead of collect for minimal data loading
-    schema_check = lf.fetch(0) # Fetch 0 rows just to validate schema and connectivity
+    # Apply head(0) lazily, then collect the empty frame with the correct schema
+    schema_check = lf.head(0).collect() # Fetch 0 rows just to validate schema and connectivity
     if schema_check.is_empty() and schema_check.width == 0 : # Check if schema is also empty
          st.error("Failed to load data or data file is empty. Please check logs and ensure database_download.py ran successfully.")
          st.stop()
