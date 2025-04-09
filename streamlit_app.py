@@ -6,7 +6,6 @@ import json
 import polars as pl
 
 st.set_page_config(layout="wide")
-
 st.markdown(
     """
     <style>
@@ -85,39 +84,28 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# --- Main script execution flow ---
-
-# Define the path to your pre-existing Parquet file/directory
-# *** IMPORTANT: Change this if your file/directory name is different ***
+# *** IMPORTANT: Process the Parquet file before running this script (See README.md) ***
 parquet_source_path = "data.parquet" 
 
-# 1. Check if the source Parquet file/directory exists
 if not os.path.exists(parquet_source_path):
     st.error(f"Parquet data source not found at '{parquet_source_path}'. Please ensure the file/directory exists in the project root.")
     st.stop()
 
-# 2. Scan the specified parquet source Lazily.
-lf: pl.LazyFrame | None = None # Add type hint for clarity
+lf: pl.LazyFrame | None = None 
 try:
     print(f"Scanning Parquet source: {parquet_source_path}")
-    # Scan the user-provided Parquet source directly
     lf = pl.scan_parquet(parquet_source_path) 
     print("LazyFrame created successfully from source.")
 except Exception as e:
      st.error(f"Error scanning the Parquet source '{parquet_source_path}': {e}")
-     # Include the context stack if available (Polars often provides this)
-     if hasattr(e, 'context_stack'): # Check if context_stack attribute exists
-         # Access context_stack safely
+     if hasattr(e, 'context_stack'):
          context_info = getattr(e, 'context_stack', 'Not available') 
          st.error(f"Context stack: {context_info}")
      else:
-          st.error("Context stack information not available.") # Fallback message
-     st.stop() # Stop if scanning fails
+          st.error("Context stack information not available.") 
+     st.stop()
 
-
-# --- Check if LazyFrame is potentially empty ---
 try:
-    # Apply head(0) lazily, then collect the empty frame with the correct schema
     schema_check = lf.head(0).collect()
     if schema_check.width == 0 :
          st.error(f"Loaded data from '{parquet_source_path}' appears to have no columns or is invalid. Please check the source file/directory.")
@@ -127,9 +115,6 @@ except Exception as e:
      st.error(f"Error during initial data check on '{parquet_source_path}': {e}. Cannot proceed.")
      st.stop()
 
-
-# Apply styling to State column (Lazy)
-# Check if 'State' exists in the schema
 if 'State' in lf.schema:
     lf = lf.with_columns(
         (
@@ -143,8 +128,7 @@ if 'State' in lf.schema:
 else:
     st.warning("Column 'State' not found in the schema. Skipping state styling.")
 
-# Prepare filter options (operate lazily as much as possible)
-def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame): # Pass schema AND the actual LazyFrame
+def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame):
     print("Calculating filter options...")
     options = {
         'categories': ['All Categories'],
@@ -156,23 +140,17 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame): # Pass schema 
         ]
     }
     category_subcategory_map = {'All Categories': ['All Subcategories']}
-    
-    # Use the passed schema_dict for checks
-    schema_lf = pl.LazyFrame(schema=schema_dict) # Keep this for schema checks
+    schema_lf = pl.LazyFrame(schema=schema_dict) 
 
     try:
-        # Get unique categories first
         if 'Category' in schema_lf.schema:
-            # Use the passed data_lf for collection
             categories_unique = data_lf.select(pl.col('Category')).unique().collect()['Category']
             valid_categories = sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
             options['categories'] += valid_categories
             for cat in valid_categories:
                 category_subcategory_map[cat] = []
 
-        # Get unique Category-Subcategory pairs
         if 'Category' in schema_lf.schema and 'Subcategory' in schema_lf.schema:
-             # Use the passed data_lf for collection
              cat_subcat_pairs = data_lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect()
              all_subcategories_set = set()
              for row in cat_subcat_pairs.iter_rows(named=True):
@@ -198,7 +176,6 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame): # Pass schema 
                  category_subcategory_map[cat] = prefix + rest
 
         elif 'Subcategory' in schema_lf.schema and 'Category' not in schema_lf.schema:
-             # Use the passed data_lf for collection
              subcategories_unique = data_lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
              all_subcats = sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
              category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats
@@ -207,12 +184,10 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame): # Pass schema 
              category_subcategory_map['All Categories'] = ['All Subcategories']
 
         if 'Country' in schema_lf.schema:
-             # Use the passed data_lf for collection
              countries_unique = data_lf.select(pl.col('Country')).unique().collect()['Country']
              options['countries'] += sorted(countries_unique.filter(countries_unique.is_not_null() & (countries_unique != "N/A")).to_list())
 
         if 'State' in schema_lf.schema and schema_lf.schema['State'] == pl.Utf8:
-             # Collect only the State column for processing - use passed data_lf
              states_collected = data_lf.select('State').collect()['State']
              sample_state = states_collected.head(1).to_list()
              if sample_state and sample_state[0] and sample_state[0].startswith('<div class="state_cell state-'):
@@ -225,7 +200,6 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame): # Pass schema 
 
     except Exception as e:
          st.error(f"Error calculating filter options: {e}")
-         # Simplified fallback
          options = {
              'categories': ['All Categories'], 'countries': ['All Countries'], 'states': ['All States'],
              'date_ranges': ['All Time', 'Last Month', 'Last 6 Months', 'Last Year', 'Last 5 Years', 'Last 10 Years']
@@ -234,19 +208,16 @@ def get_filter_options(schema_dict: dict, data_lf: pl.LazyFrame): # Pass schema 
 
     return options, category_subcategory_map
 
-# Calculate filter options using the LazyFrame schema AND the LazyFrame itself
-filter_options, category_subcategory_map = get_filter_options(lf.schema, lf) # Pass lf here
+filter_options, category_subcategory_map = get_filter_options(lf.schema, lf) 
 
-# Calculate Min/Max values lazily
 min_pledged, max_pledged = 0, 1000
 min_goal, max_goal = 0, 10000
-min_raised, max_raised = 0, 500 # Default raised range
+min_raised, max_raised = 0, 500 
 
 required_minmax_cols = ['Raw Pledged', 'Raw Goal', 'Raw Raised']
 if all(col in lf.schema for col in required_minmax_cols):
     print("Calculating min/max filter ranges...")
     try:
-        # Compute min/max in a single collect call if possible
         min_max_vals = lf.select([
             pl.min('Raw Pledged').alias('min_pledged'),
             pl.max('Raw Pledged').alias('max_pledged'),
@@ -254,7 +225,7 @@ if all(col in lf.schema for col in required_minmax_cols):
             pl.max('Raw Goal').alias('max_goal'),
             pl.min('Raw Raised').alias('min_raised'),
             pl.max('Raw Raised').alias('max_raised_calc')
-        ]).collect() # This collect is fine, operates on aggregations
+        ]).collect()
 
         min_pledged = int(min_max_vals['min_pledged'][0]) if min_max_vals['min_pledged'][0] is not None else 0
         max_pledged = int(min_max_vals['max_pledged'][0]) if min_max_vals['max_pledged'][0] is not None else 1000
@@ -262,26 +233,21 @@ if all(col in lf.schema for col in required_minmax_cols):
         max_goal = int(min_max_vals['max_goal'][0]) if min_max_vals['max_goal'][0] is not None else 10000
         min_raised = int(min_max_vals['min_raised'][0]) if min_max_vals['min_raised'][0] is not None else 0
         max_raised_calc_val = min_max_vals['max_raised_calc'][0]
-        # Cap max_raised for the slider range
-        max_raised = int(max_raised_calc_val) if max_raised_calc_val is not None else 500 # Use default if max is None
+        max_raised = int(max_raised_calc_val) if max_raised_calc_val is not None else 500
         print("Min/max ranges calculated.")
     except Exception as e:
         st.error(f"Error calculating min/max filter ranges: {e}. Using defaults.")
 else:
     st.warning("Missing columns required for min/max filter ranges in schema. Using defaults.")
 
-
-
-# --- DEBUG: Log schema before collect ---
 print("Schema before final collect:", lf.schema)
 
-# --- Main Collect and Cleanup ---
 df_collected = None
 try:
     print("Collecting final DataFrame for display...")
     start_collect_time = time.time()
 
-    df_collected = lf.collect(streaming=True) # Collect from the LazyFrame scanning the persistent file
+    df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
     print(f"Data collection took {collect_duration:.2f} seconds.")
 
@@ -290,11 +256,9 @@ try:
     loaded.empty()
 except Exception as e:
     st.error(f"Error collecting final DataFrame: {e}")
-    df_collected = pl.DataFrame() # Ensure it's an empty Polars DF
+    df_collected = pl.DataFrame()
 
-# Check collection result
 if df_collected.is_empty():
-     # Perform a quick check again to differentiate between empty source and collection error
      is_source_empty = False
      try:
          is_source_empty = lf.head(1).collect().is_empty()
@@ -302,25 +266,17 @@ if df_collected.is_empty():
          print(f"Could not check if source is empty after failed collect: {check_err}")
 
      if is_source_empty:
-         # If the source file was valid but had no rows, we might want to proceed and show an empty table
          st.warning("Data source is empty. Displaying empty table.")
-         # Let's create an empty DF with the expected schema if possible
-         # This helps prevent errors later when generating the table HTML
          try:
-             df_collected = lf.head(0).collect() # Get schema
+             df_collected = lf.head(0).collect()
          except Exception:
              st.error("Could not retrieve schema from empty source. Stopping.")
              st.stop()
-         # If we want to stop execution for an empty source, uncomment the next line
-         # st.stop()
      else:
          st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
-         st.stop() # Stop if collection failed for non-empty source
+         st.stop()
 
-
-# --- Generate Table HTML (using collected DataFrame) ---
-def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
-    # Define visible columns
+def generate_table_html(df_display: pl.DataFrame): 
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
 
     required_data_cols = [
@@ -329,32 +285,22 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
     ]
     missing_data_cols = [col for col in required_data_cols if col not in df_display.columns]
     if missing_data_cols:
-        # Make this a more severe error as Distance is fundamental now
         st.error(f"FATAL: Missing required columns for table generation: {missing_data_cols}. Check data processing steps.")
-        # return "", "" # Stop generation if critical columns missing
 
-    # Ensure visible columns exist
     missing_visible_cols = [col for col in visible_columns if col not in df_display.columns]
     if missing_visible_cols:
          st.warning(f"Missing visible columns for table: {missing_visible_cols}. Check database_download.py or initial data processing.")
-         # Attempt to continue with available columns
          visible_columns = [col for col in visible_columns if col in df_display.columns]
          if not visible_columns:
-              return "", "" # Cannot proceed if no visible columns
+              return "", ""
 
-
-    # Generate header for visible columns only
     header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
-
-    # Generate table rows with raw values in data attributes
     rows_html = ''
-    # Convert collected DataFrame to dicts efficiently
-    # Add error handling for to_dicts()
     try:
         data_dicts = df_display.to_dicts()
     except Exception as e:
         st.error(f"Error converting DataFrame to dictionaries: {e}")
-        return header_html, "" # Return header but empty rows
+        return header_html, ""
 
     for row in data_dicts:
         data_attrs = f'''
@@ -368,31 +314,25 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
             data-backers="{row.get('Backer Count', 0)}"
             data-popularity="{row.get('Popularity Score', 0.0):.6f}"
         '''
-        # Create visible cells with special handling for Link column
         visible_cells = ''
         for col in visible_columns:
-            value = row.get(col, 'N/A') # Default value if column somehow missing in dict
+            value = row.get(col, 'N/A') 
             if col == 'Link':
                 url = str(value) if value else '#'
-                # Truncate long URLs for display if needed
                 display_url = url if len(url) < 60 else url[:57] + '...'
                 visible_cells += f'<td><a href="{url}" target="_blank" title="{url}">{display_url}</a></td>'
-            elif col == 'Pledged Amount': # Add this block for Pledged Amount formatting
+            elif col == 'Pledged Amount': 
                 import html
                 try:
-                    # Convert to float first to handle potential string/decimal inputs, then to int
                     amount = int(float(value))
-                    # Format with '$' prefix and comma separators for thousands
                     formatted_value = f"${amount:,}" 
                 except (ValueError, TypeError):
-                    formatted_value = 'N/A' # Fallback for non-numeric data
+                    formatted_value = 'N/A'
                 visible_cells += f'<td>{html.escape(formatted_value)}</td>'
-            elif col == 'State': # State column already contains HTML
-                 # Ensure value is a string before adding
+            elif col == 'State': 
                  state_html = str(value) if value is not None else 'N/A'
                  visible_cells += f'<td>{state_html}</td>'
             else:
-                # Escape potential HTML in other cells
                 import html
                 visible_cells += f'<td>{html.escape(str(value))}</td>'
 
@@ -400,10 +340,8 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
 
     return header_html, rows_html
 
-# Generate HTML using the collected DataFrame
 header_html, rows_html = generate_table_html(df_collected)
 
-# --- HTML Template ---
 template = f"""
 <script>
     window.categorySubcategoryMap = {json.dumps(category_subcategory_map)};
@@ -550,7 +488,6 @@ template = f"""
 </div>
 """
 
-# CSS remains the same
 css = """
 <style> 
     .title-wrapper {
@@ -599,12 +536,12 @@ css = """
     }
 
     /* Column width specifications */
-    th[scope="col"]:nth-child(1) { width: 25%; }  /* Project Name - 2 parts */
-    th[scope="col"]:nth-child(2) { width: 12.5%; }  /* Creator - 1 part */
-    th[scope="col"]:nth-child(3) { width: 120px; }  /* Pledged Amount - fixed */
-    th[scope="col"]:nth-child(4) { width: 25%; }  /* Link - 2 parts */
-    th[scope="col"]:nth-child(5) { width: 12.5%; }  /* Country - 1 part */
-    th[scope="col"]:nth-child(6) { width: 120px; }  /* State - fixed */
+    th[scope="col"]:nth-child(1) { width: 25%; } 
+    th[scope="col"]:nth-child(2) { width: 12.5%; } 
+    th[scope="col"]:nth-child(3) { width: 120px; } 
+    th[scope="col"]:nth-child(4) { width: 25%; } 
+    th[scope="col"]:nth-child(5) { width: 12.5%; } 
+    th[scope="col"]:nth-child(6) { width: 120px; } 
 
     th { 
         background: #ffffff; 
@@ -637,7 +574,7 @@ css = """
     }
     
     td::-webkit-scrollbar {
-        display: none;  /* Safari and Chrome */
+        display: none;
     }
 
     td:last-child { 
@@ -1089,10 +1026,7 @@ css = """
 </style>
 """
 
-# --- SCRIPT definition ---
-# Optional but recommended: Update JS safety check in sortRows
 script = """
-    // Helper functions
     function debounce(func, wait) {
         let timeout;
         return function(...args) {
@@ -1119,35 +1053,6 @@ script = """
         });
     }
 
-    // RE-ADD Haversine distance function (or confirm it exists)
-    function calculateDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371; // Earth's radius in kilometers
-        const dLat = (lat2 - lat1) * Math.PI / 180;
-        const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a =
-            Math.sin(dLat/2) * Math.sin(dLat/2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLon/2) * Math.sin(dLon/2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-        return R * c;
-    }
-
-    // RE-ADD DistanceCache class (or confirm it exists)
-    class DistanceCache {
-        constructor() {
-            this.userLocation = window.userLocation;
-        }
-
-        async initialize() {
-            return window.hasLocation;
-        }
-
-        getDistance(row) {
-            // Assuming distance is pre-calculated and stored in data-distance
-            return parseFloat(row.dataset.distance);
-        }
-    }
-
     class TableManager {
         constructor() {
             this.searchInput = document.getElementById('table-search');
@@ -1164,41 +1069,34 @@ script = """
 
         async sortRows(sortType) {
             if (sortType === 'popularity') {
-                // Sort by popularity score
                 this.visibleRows.sort((a, b) => {
                     const scoreA = parseFloat(a.dataset.popularity);
                     const scoreB = parseFloat(b.dataset.popularity);
                     
-                    // Handle invalid values
                     if (isNaN(scoreA)) return 1;
                     if (isNaN(scoreB)) return -1;
                     
-                    // Sort in descending order
                     return scoreB - scoreA;
                 });
             } else if (sortType === 'enddate') {
-                // Sort by deadline
                 this.visibleRows.sort((a, b) => {
                     const deadlineA = new Date(a.dataset.deadline);
                     const deadlineB = new Date(b.dataset.deadline);
                     return deadlineB - deadlineA; 
                 });
             } else if (sortType === 'mostfunded') {
-                // Sort by pledged amount
                 this.visibleRows.sort((a, b) => {
                     const pledgedA = parseFloat(a.dataset.pledged);
                     const pledgedB = parseFloat(b.dataset.pledged);
-                    return pledgedB - pledgedA;  // Descending order (most funded first)
+                    return pledgedB - pledgedA; 
                 });
             } else if (sortType === 'mostbacked') {
-                // Sort by backer count
                 this.visibleRows.sort((a, b) => {
                     const backersA = parseInt(a.dataset.backers);
                     const backersB = parseInt(b.dataset.backers);
-                    return backersB - backersA;  // Descending order (most backers first)
+                    return backersB - backersA; 
                 });
             } else {
-                // Date-based sorting only
                 this.visibleRows.sort((a, b) => {
                     const dateA = new Date(a.dataset.date);
                     const dateB = new Date(b.dataset.date);
@@ -1210,17 +1108,13 @@ script = """
             this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
             this.visibleRows.forEach(row => tbody.appendChild(row));
             
-            // Update current page and pagination
             this.currentPage = 1;
             this.updateTable();
         }
 
-        // applyAllFilters with async sorting
         async applyAllFilters() {
-            // Start with all rows
             let filteredRows = this.allRows;
 
-            // Apply search if exists
             if (this.currentSearchTerm) {
                 const pattern = createRegexPattern(this.currentSearchTerm);
                 filteredRows = filteredRows.filter(row => {
@@ -1229,43 +1123,33 @@ script = """
                 });
             }
 
-            // Apply filters if they exist
             if (this.currentFilters) {
                 filteredRows = filteredRows.filter(row => {
                     return this.matchesFilters(row, this.currentFilters);
                 });
             }
 
-            // Store filtered results
             this.visibleRows = filteredRows;
 
-            // Apply current sort
             await this.sortRows(this.currentSort);
 
-            // Reset to first page and update display
             this.currentPage = 1;
             this.updateTable();
         }
 
-        // Update applyFilters to handle async
         async applyFilters() {
-            // Get all selected categories
             const selectedCategories = Array.from(document.querySelectorAll('.category-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Get all selected countries
             const selectedCountries = Array.from(document.querySelectorAll('.country-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Get all selected states
             const selectedStates = Array.from(document.querySelectorAll('.state-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Get all selected subcategories
             const selectedSubcategories = Array.from(document.querySelectorAll('.subcategory-option.selected'))
                 .map(option => option.dataset.value);
 
-            // Collect all current filter values
             this.currentFilters = {
                 categories: selectedCategories,
                 subcategories: selectedSubcategories,
@@ -1274,11 +1158,9 @@ script = """
                 date: document.getElementById('dateFilter').value
             };
 
-            // Read the CURRENT sort value from the dropdown
             const sortSelect = document.getElementById('sortFilter');
             this.currentSort = sortSelect ? sortSelect.value : 'popularity';
 
-            // Add range filters
             const rangeFilters = {
                  pledged: {
                       min: parseFloat(document.getElementById('fromInput').value),
@@ -1300,18 +1182,16 @@ script = """
 
         initialize() {
             this.setupSearchAndPagination();
-            this.setupFilters(); // This will now handle the hierarchical setup
+            this.setupFilters(); 
             this.setupRangeSlider();
-            this.currentSort = 'popularity';  // Set default sort to popularity
+            this.currentSort = 'popularity'; 
 
-            this.applyAllFilters(); // This will apply the default 'popularity' sort
+            this.applyAllFilters(); 
             this.updateTable();
-            // Initial population of subcategories based on default 'All Categories'
             this.updateSubcategoryOptions(); 
         }
 
         setupSearchAndPagination() {
-            // Setup search
             const debouncedSearch = debounce((searchTerm) => {
                 this.currentSearchTerm = searchTerm;
                 this.applyAllFilters();
@@ -1321,32 +1201,27 @@ script = """
                 debouncedSearch(e.target.value.trim().toLowerCase());
             });
 
-            // Setup pagination controls
             document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
             document.getElementById('next-page').addEventListener('click', () => this.nextPage());
             window.handlePageClick = (page) => this.goToPage(page);
         }
 
         matchesFilters(row, filters) {
-            // Category filter
             const category = row.dataset.category;
             if (!filters.categories.includes('All Categories') && !filters.categories.includes(category)) {
                 return false;
             }
 
-            // Subcategory filter
             const subcategory = row.dataset.subcategory;
             if (!filters.subcategories.includes('All Subcategories') && !filters.subcategories.includes(subcategory)) {
                 return false;
             }
 
-            // Country filter
             const country = row.querySelector('td:nth-child(5)').textContent.trim();
             if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
                 return false;
             }
 
-            // State filter - Extract state from class name instead of text content
             const stateCell = row.querySelector('.state_cell');
             let state = '';
             if (stateCell) {
@@ -1363,33 +1238,26 @@ script = """
                 if (!matchingState) return false;
             }
 
-            // Get all other values
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
             const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
 
-            // Rest of filter checks
-            // Check pledged range
             const minPledged = parseFloat(document.getElementById('fromInput').value);
             const maxPledged = parseFloat(document.getElementById('toInput').value);
             if (pledged < minPledged || pledged > maxPledged) return false;
 
-            // Check goal range
             const minGoal = parseFloat(document.getElementById('goalFromInput').value);
             const maxGoal = parseFloat(document.getElementById('goalToInput').value);
             if (goal < minGoal || goal > maxGoal) return false;
 
-            // Check raised range
             const minRaised = parseFloat(document.getElementById('raisedFromInput').value);
             const maxRaised = parseFloat(document.getElementById('raisedToInput').value);
             const raisedValue = parseFloat(row.dataset.raised);
             
-            // Handle the case where raised is exactly 0%
             if (raisedValue === 0 && minRaised > 0) return false;
             if (raisedValue < minRaised || raisedValue > maxRaised) return false;
 
-            // Date filter
             if (filters.date !== 'All Time') {
                 const now = new Date();
                 let compareDate = new Date();
@@ -1409,7 +1277,6 @@ script = """
         }
 
         resetFilters() {
-            // Reset category selections
             const categoryOptions = document.querySelectorAll('.category-option');
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
@@ -1417,7 +1284,6 @@ script = """
             const categoryBtn = document.querySelector('.multi-select-btn');
             categoryBtn.textContent = 'All Categories';
 
-            // Reset country selections
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
@@ -1425,7 +1291,6 @@ script = """
             const countryBtn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             countryBtn.textContent = 'All Countries';
 
-            // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
             stateOptions.forEach(opt => opt.classList.remove('selected'));
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
@@ -1433,28 +1298,21 @@ script = """
             const stateBtn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
             stateBtn.textContent = 'All States';
 
-            // Reset subcategory selections (will be repopulated by updateSubcategoryOptions)
             const subcategoryOptionsContainer = document.getElementById('subcategoryOptionsContainer');
-            subcategoryOptionsContainer.innerHTML = ''; // Clear existing options
+            subcategoryOptionsContainer.innerHTML = ''; 
             const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
             if (window.selectedSubcategories) window.selectedSubcategories.clear();
             if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
-            // Update subcategory options based on the reset category ('All Categories')
             this.updateSubcategoryOptions(); 
 
-            // Reset the stored selections in the Sets
             if (window.selectedCategories) window.selectedCategories.clear();
             if (window.selectedCountries) window.selectedCountries.clear();
             if (window.selectedStates) window.selectedStates.clear();
-            // Subcategories reset done above
 
-            // Re-add "All" options to the Sets
             if (window.selectedCategories) window.selectedCategories.add('All Categories');
             if (window.selectedCountries) window.selectedCountries.add('All Countries');
             if (window.selectedStates) window.selectedStates.add('All States');
-            // Subcategories reset done above
 
-            // Reset ranges, search, sort etc. as before ...
             if (this.rangeSliderElements) {
                 const { 
                     fromSlider, toSlider, fromInput, toInput,
@@ -1463,21 +1321,18 @@ script = """
                     fillSlider 
                 } = this.rangeSliderElements;
 
-                // Reset pledged amount range
                 fromSlider.value = fromSlider.min;
                 toSlider.value = toSlider.max;
                 fromInput.value = fromSlider.min;
                 toInput.value = toSlider.max;
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
 
-                // Reset goal amount range
                 goalFromSlider.value = goalFromSlider.min;
                 goalToSlider.value = goalToSlider.max;
                 goalFromInput.value = goalFromSlider.min;
                 goalToInput.value = goalToSlider.max;
                 fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
 
-                // Reset percentage raised range
                 raisedFromSlider.value = raisedFromSlider.min;
                 raisedToSlider.value = raisedToSlider.max;
                 raisedFromInput.value = raisedFromSlider.min;
@@ -1485,29 +1340,25 @@ script = """
                 fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
             }
 
-            // Reset Date Filter
             const dateFilterSelect = document.getElementById('dateFilter');
             if (dateFilterSelect) {
-                dateFilterSelect.value = 'All Time'; // Set to the default value
+                dateFilterSelect.value = 'All Time'; 
             }
             this.searchInput.value = '';
             this.currentSearchTerm = '';
-            this.currentFilters = null; // Filters will be reapplied by applyAllFilters
+            this.currentFilters = null; 
             this.currentSort = 'popularity';
             document.getElementById('sortFilter').value = 'popularity';
             this.visibleRows = this.allRows;
-            this.applyAllFilters(); // Apply filters which includes the reset subcategory
+            this.applyAllFilters(); 
         }
 
         updateTable() {
-            // Hide all rows first
             this.allRows.forEach(row => row.style.display = 'none');
             
-            // Calculate visible range
             const start = (this.currentPage - 1) * this.pageSize;
             const end = Math.min(start + this.pageSize, this.visibleRows.length);
             
-            // Show only rows for current page
             this.visibleRows.slice(start, end).forEach(row => {
                 row.style.display = '';
             });
@@ -1587,29 +1438,24 @@ script = """
 
                 if (!Object.values(elements).every(el => el)) return;
 
-                // Count visible rows in current page
                 const visibleRowCount = this.visibleRows.slice(
                     (this.currentPage - 1) * this.pageSize,
                     this.currentPage * this.pageSize
                 ).length;
 
-                // Constants
-                const rowHeight = 52;        // Height per row including padding
-                const headerHeight = 60;     // Table header height
+                const rowHeight = 52;        
+                const headerHeight = 60;     
                 const controlsHeight = elements.controls.offsetHeight;
                 const paginationHeight = elements.pagination.offsetHeight;
                 const padding = 40;
-                const minTableHeight = 400;  // Minimum table content height
+                const minTableHeight = 400;  
 
-                // Calculate table content height
                 const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
                 const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
 
-                // Set dimensions
                 elements.tableContainer.style.height = `${actualTableHeight}px`;
                 elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
 
-                // Calculate final component height
                 const finalHeight = 
                     elements.titleWrapper.offsetHeight +
                     elements.filterWrapper.offsetHeight +
@@ -1618,7 +1464,6 @@ script = """
                     paginationHeight +
                     padding;
 
-                // Update Streamlit frame height if changed significantly
                 if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
                     this.lastHeight = finalHeight;
                     Streamlit.setFrameHeight(finalHeight);
@@ -1627,35 +1472,30 @@ script = """
         }
 
         setupFilters() {
-            // Initialize global Sets to track selections
             window.selectedCategories = new Set(['All Categories']);
             window.selectedCountries = new Set(['All Countries']);
             window.selectedStates = new Set(['All States']);
-            window.selectedSubcategories = new Set(['All Subcategories']); // Initialize
+            window.selectedSubcategories = new Set(['All Subcategories']); 
 
-            // Get button elements by ID
             const categoryBtn = document.getElementById('categoryFilterBtn');
             const countryBtn = document.getElementById('countryFilterBtn');
             const stateBtn = document.getElementById('stateFilterBtn');
             const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
 
-            // Helper to update button text (generalized)
             this.updateButtonText = (selectedItems, buttonElement, allValueLabel) => {
                  if (!buttonElement) return;
 
                  const selectedArray = Array.from(selectedItems);
-                 // Check if the only selected item is the 'All' option
                  if (selectedArray.length === 1 && selectedArray[0] === allValueLabel) {
                      buttonElement.textContent = allValueLabel;
-                 } else if (selectedArray.length === 0 ) { // Handle case where set might be empty temporarily
-                     buttonElement.textContent = allValueLabel; // Default to 'All'
+                 } else if (selectedArray.length === 0 ) { 
+                     buttonElement.textContent = allValueLabel; 
                  }
                  else {
-                     // Filter out the 'All' option if other items are selected
                      const displayItems = selectedArray.filter(item => item !== allValueLabel);
                      const sortedArray = displayItems.sort((a, b) => a.localeCompare(b));
 
-                     if (sortedArray.length === 0) { // Should not happen if logic is correct, but safe fallback
+                     if (sortedArray.length === 0) { 
                           buttonElement.textContent = allValueLabel;
                      } else if (sortedArray.length > 2) {
                           buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
@@ -1665,23 +1505,17 @@ script = """
                  }
             };
 
-
-            // MODIFIED Setup multi-select handlers
-            // Added triggerSubcategoryUpdate flag
             this.setupMultiSelect = (options, selectedSet, allValue, buttonElement, triggerSubcategoryUpdate = false) => {
-                const allOption = Array.from(options).find(opt => opt.dataset.value === allValue); // Safer find
+                const allOption = Array.from(options).find(opt => opt.dataset.value === allValue); 
 
                 options.forEach(option => {
-                    // Remove existing listener before adding new one (prevents duplicates)
-                    option.replaceWith(option.cloneNode(true)); // Simple way to remove listeners
+                    option.replaceWith(option.cloneNode(true)); 
                 });
 
-                // Get fresh references after cloning
                  const freshOptions = buttonElement.nextElementSibling.querySelectorAll('[data-value]');
                  const freshAllOption = Array.from(freshOptions).find(opt => opt.dataset.value === allValue);
 
                 freshOptions.forEach(option => {
-                     // Add selected class if it's in the current set
                      if (selectedSet.has(option.dataset.value)) {
                          option.classList.add('selected');
                      }
@@ -1691,53 +1525,46 @@ script = """
                         const isCurrentlySelected = e.target.classList.contains('selected');
 
                         if (clickedValue === allValue) {
-                            // If 'All' is clicked, clear others and select 'All'
                             selectedSet.clear();
                             selectedSet.add(allValue);
                             freshOptions.forEach(opt => opt.classList.remove('selected'));
                             if(freshAllOption) freshAllOption.classList.add('selected');
                         } else {
-                            // If a specific item is clicked
-                            selectedSet.delete(allValue); // Remove 'All' if it exists
+                            selectedSet.delete(allValue); 
                             if(freshAllOption) freshAllOption.classList.remove('selected');
 
-                            e.target.classList.toggle('selected'); // Toggle the clicked item
+                            e.target.classList.toggle('selected'); 
                             if (e.target.classList.contains('selected')) {
-                                selectedSet.add(clickedValue); // Add if selected
+                                selectedSet.add(clickedValue); 
                             } else {
-                                selectedSet.delete(clickedValue); // Remove if deselected
+                                selectedSet.delete(clickedValue); 
                             }
 
-                            // If nothing is selected, select 'All'
                             if (selectedSet.size === 0) {
                                 selectedSet.add(allValue);
                                 if(freshAllOption) freshAllOption.classList.add('selected');
                             }
                         }
 
-                        // Update button text using the helper function
                         this.updateButtonText(selectedSet, buttonElement, allValue);
 
-                        // Trigger subcategory update ONLY if this is the category selector
                         if (triggerSubcategoryUpdate) {
-                            this.updateSubcategoryOptions(); // Update subcategories
+                            this.updateSubcategoryOptions(); 
                         }
 
-                        this.applyFilters(); // Apply all filters including the change
+                        this.applyFilters(); 
                     });
                 });
 
-                // Initialize button text correctly
                 this.updateButtonText(selectedSet, buttonElement, allValue);
             };
 
-            // Setup each multi-select
             this.setupMultiSelect(
                 document.querySelectorAll('.category-option'),
                 window.selectedCategories,
                 'All Categories',
                 categoryBtn,
-                true // YES, trigger subcategory update from here
+                true 
             );
 
             this.setupMultiSelect(
@@ -1754,7 +1581,6 @@ script = """
                 stateBtn
             );
 
-            // Setup subcategory initially (listeners will be re-attached by updateSubcategoryOptions)
              this.setupMultiSelect(
                  document.querySelectorAll('.subcategory-option'),
                  window.selectedSubcategories,
@@ -1762,8 +1588,6 @@ script = """
                  subcategoryBtn
              );
 
-
-            // Setup other filters (date, sort)
             const filterIds = ['dateFilter', 'sortFilter'];
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
@@ -1772,30 +1596,24 @@ script = """
                 }
             });
 
-            // Add reset button handler
             const resetButton = document.getElementById('resetFilters');
             if (resetButton) {
                 resetButton.addEventListener('click', () => this.resetFilters());
             }
 
-            // Range slider initialization remains the same
-            // this.setupRangeSlider(); // Called in initialize()
         }
 
         setupRangeSlider() {
-            // Setup for pledged amount slider
             const fromSlider = document.getElementById('fromSlider');
             const toSlider = document.getElementById('toSlider');
             const fromInput = document.getElementById('fromInput');
             const toInput = document.getElementById('toInput');
 
-            // Setup for goal amount slider
             const goalFromSlider = document.getElementById('goalFromSlider');
             const goalToSlider = document.getElementById('goalToSlider');
             const goalFromInput = document.getElementById('goalFromInput');
             const goalToInput = document.getElementById('goalToInput');
 
-            // Setup for percentage raised slider
             const raisedFromSlider = document.getElementById('raisedFromSlider');
             const raisedToSlider = document.getElementById('raisedToSlider');
             const raisedFromInput = document.getElementById('raisedFromInput');
@@ -1821,35 +1639,29 @@ script = """
 
             const controlFromSlider = (fromSlider, toSlider, fromInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
-                // Check if fromInput exists before trying to access its value
                 const currentFromInputValue = fromInput ? parseInt(fromInput.value) : from; 
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                // Ensure the slider doesn't go past the 'to' slider
                 if (from > to) {
                     fromSlider.value = to;
-                    if (fromInput) fromInput.value = to; // Update input if it exists
+                    if (fromInput) fromInput.value = to; 
                 } else {
-                     if (fromInput) fromInput.value = from; // Update input if it exists
+                     if (fromInput) fromInput.value = from; 
                 }
             };
             
             const controlToSlider = (fromSlider, toSlider, toInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
-                 // Check if toInput exists before trying to access its value
                 const currentToInputValue = toInput ? parseInt(toInput.value) : to; 
                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                // Ensure the slider doesn't go below the 'from' slider
                 if (from <= to) {
-                    // toSlider.value = to; // Slider value already set by input event or validateAndUpdateRange
-                    if (toInput) toInput.value = to; // Update input if it exists
+                    if (toInput) toInput.value = to; 
                 } else {
-                    if (toInput) toInput.value = from; // Update input if it exists
-                    toSlider.value = from; // Adjust slider position
+                    if (toInput) toInput.value = from; 
+                    toSlider.value = from; 
                 }
             };
 
             const getParsedValue = (fromSlider, toSlider) => {
-                // Ensure sliders exist before getting value
                 const from = fromSlider ? parseInt(fromSlider.value) : 0;
                 const to = toSlider ? parseInt(toSlider.value) : 0;
                 return [from, to];
@@ -1857,7 +1669,6 @@ script = """
 
             const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
                  const updateValues = () => {
-                     // Ensure the input element exists before proceeding
                      if (!input) {
                          console.error("validateAndUpdateRange called with null input");
                          return;
@@ -1867,7 +1678,6 @@ script = """
                      const minAllowed = parseInt(input.min);
                      const maxAllowed = parseInt(input.max);
             
-                     // Determine which set of sliders/inputs we are working with
                      let relevantFromSlider, relevantToSlider, relevantFromInput, relevantToInput;
                      if (input.id.startsWith('goal')) {
                          relevantFromSlider = goalFromSlider;
@@ -1879,14 +1689,13 @@ script = """
                          relevantToSlider = raisedToSlider;
                          relevantFromInput = raisedFromInput;
                          relevantToInput = raisedToInput;
-                     } else { // Pledged
+                     } else { 
                          relevantFromSlider = fromSlider;
                          relevantToSlider = toSlider;
                          relevantFromInput = fromInput;
                          relevantToInput = toInput;
                      }
             
-                     // Ensure relevant sliders exist before proceeding
                      if (!relevantFromSlider || !relevantToSlider) {
                          console.error("validateAndUpdateRange could not find relevant sliders for input:", input.id);
                          return;
@@ -1900,20 +1709,16 @@ script = """
                          const maxValue = parseInt(relevantToSlider.value);
                          value = Math.max(minAllowed, Math.min(maxValue, value));
                          relevantFromSlider.value = value;
-                         input.value = value; // Update the input itself in case of clamping
-                         // NOW, also update the slider visuals by calling the control function
+                         input.value = value; 
                          controlFromSlider(relevantFromSlider, relevantToSlider, relevantFromInput); 
                      } else {
                          const minValue = parseInt(relevantFromSlider.value);
                          value = Math.max(minValue, Math.min(maxAllowed, value));
                          relevantToSlider.value = value;
-                         input.value = value; // Update the input itself in case of clamping
-                         // NOW, also update the slider visuals by calling the control function
+                         input.value = value; 
                          controlToSlider(relevantFromSlider, relevantToSlider, relevantToInput); 
                      }
             
-                     // Note: fillSlider is called within controlFromSlider/controlToSlider, 
-                     // so no separate call is needed here.
                      debouncedApplyFilters();
                  };
             
@@ -1922,12 +1727,10 @@ script = """
                      updateValues();
                  } else {
                      clearTimeout(inputTimeout);
-                     // Reduced timeout for quicker visual feedback from typing
                      inputTimeout = setTimeout(updateValues, 500); 
                  }
             };
 
-            // Event listeners for pledged amount slider
             fromSlider.addEventListener('input', (e) => {
                 controlFromSlider(fromSlider, toSlider, fromInput);
                 debouncedApplyFilters();
@@ -1938,7 +1741,6 @@ script = """
                 debouncedApplyFilters();
             });
 
-            // Event listeners for goal amount slider
             goalFromSlider.addEventListener('input', (e) => {
                 controlFromSlider(goalFromSlider, goalToSlider, goalFromInput);
                 debouncedApplyFilters();
@@ -1949,7 +1751,6 @@ script = """
                 debouncedApplyFilters();
             });
 
-            // Add event listeners for percentage raised slider
             raisedFromSlider.addEventListener('input', (e) => {
                 controlFromSlider(raisedFromSlider, raisedToSlider, raisedFromInput);
                 debouncedApplyFilters();
@@ -1960,7 +1761,6 @@ script = """
                 debouncedApplyFilters();
             });
 
-            // Input handlers for both sliders
             [fromInput, goalFromInput, raisedFromInput].forEach(input => {
                 input.addEventListener('input', () => {
                     validateAndUpdateRange(input, true, false);
@@ -1973,7 +1773,6 @@ script = """
                 });
             });
 
-            // Add key events for immediate validation on Enter
             fromInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     validateAndUpdateRange(fromInput, true, true);
@@ -1986,7 +1785,6 @@ script = """
                 }
             });
 
-            // Add key events for goal slider inputs
             goalFromInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     validateAndUpdateRange(goalFromInput, true, true);
@@ -1999,7 +1797,6 @@ script = """
                 }
             });
 
-            // Add key events for percentage raised slider inputs
             raisedFromInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
                     validateAndUpdateRange(raisedFromInput, true, true);
@@ -2012,7 +1809,6 @@ script = """
                 }
             });
 
-            // Also handle blur events for immediate validation
             fromInput.addEventListener('blur', () => {
                 validateAndUpdateRange(fromInput, true, true);
             });
@@ -2037,7 +1833,6 @@ script = """
                 validateAndUpdateRange(raisedToInput, false, true);
             });
 
-            // Store references for reset function
             this.rangeSliderElements = {
                 fromSlider, toSlider, fromInput, toInput,
                 goalFromSlider, goalToSlider, goalFromInput, goalToInput,
@@ -2045,13 +1840,11 @@ script = """
                 fillSlider
             };
 
-            // Initial setup
             fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
             fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
             fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
         }
 
-        // NEW METHOD to update subcategory options
         updateSubcategoryOptions() {
             const selectedCategories = window.selectedCategories || new Set(['All Categories']);
             const subcategoryMap = window.categorySubcategoryMap || {};
@@ -2061,23 +1854,19 @@ script = """
             let availableSubcategories = new Set();
             let isAllCategoriesSelected = selectedCategories.has('All Categories');
 
-            // Determine which subcategories to show
             if (isAllCategoriesSelected || selectedCategories.size === 0) {
-                 // If 'All Categories' is selected or no category is selected, show all subcategories
                  (subcategoryMap['All Categories'] || []).forEach(subcat => availableSubcategories.add(subcat));
             } else {
-                // Otherwise, collect subcategories from the specifically selected categories
-                 availableSubcategories.add('All Subcategories'); // Always include 'All Subcategories'
+                 availableSubcategories.add('All Subcategories'); 
                  selectedCategories.forEach(cat => {
                      (subcategoryMap[cat] || []).forEach(subcat => {
-                         if (subcat !== 'All Subcategories') { // Avoid adding it twice
+                         if (subcat !== 'All Subcategories') { 
                             availableSubcategories.add(subcat);
                          }
                      });
                  });
             }
 
-            // Sort the subcategories (keeping 'All Subcategories' first)
             const sortedSubcategories = Array.from(availableSubcategories);
             sortedSubcategories.sort((a, b) => {
                 if (a === 'All Subcategories') return -1;
@@ -2085,27 +1874,24 @@ script = """
                 return a.localeCompare(b);
             });
 
-            // Generate HTML for new options
             subcategoryOptionsContainer.innerHTML = sortedSubcategories.map(opt =>
                 `<div class="subcategory-option" data-value="${opt}">${opt}</div>`
             ).join('');
 
-            // Reset current subcategory selection to 'All Subcategories'
             window.selectedSubcategories = new Set(['All Subcategories']);
             const allSubcatOption = subcategoryOptionsContainer.querySelector('.subcategory-option[data-value="All Subcategories"]');
             if (allSubcatOption) {
                 allSubcatOption.classList.add('selected');
             }
-             this.updateButtonText(window.selectedSubcategories, subcategoryBtn, 'All Subcategories'); // Use helper
+             this.updateButtonText(window.selectedSubcategories, subcategoryBtn, 'All Subcategories'); 
 
 
-            // Re-attach event listeners to the *new* subcategory options
             this.setupMultiSelect(
                 subcategoryOptionsContainer.querySelectorAll('.subcategory-option'),
                 window.selectedSubcategories,
                 'All Subcategories',
                 subcategoryBtn,
-                false // Do not trigger updateSubcategoryOptions from subcategory selection
+                false 
             );
         }
     }
@@ -2115,10 +1901,8 @@ script = """
             window.tableManager = new TableManager();
             window.rendered = true;
 
-            // Add resize observer
             const resizeObserver = new ResizeObserver(() => {
                 if (window.tableManager) {
-                    // Debounce adjustHeight slightly for resize events
                     clearTimeout(window.resizeTimeout);
                     window.resizeTimeout = setTimeout(() => {
                          window.tableManager.adjustHeight();
@@ -2132,7 +1916,6 @@ script = """
                  console.error("Table wrapper not found for ResizeObserver.");
             }
         } else {
-             // Handle potential re-renders if necessary, maybe re-adjust height
              if (window.tableManager) {
                   window.tableManager.adjustHeight();
              }
