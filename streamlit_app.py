@@ -7,6 +7,8 @@ import gzip
 import glob
 import polars as pl
 import atexit
+import shutil 
+import html
 
 st.set_page_config(layout="wide")
 
@@ -112,7 +114,8 @@ def cleanup_temp_file(filepath):
 @st.cache_resource(ttl=3600) # Cache the resource (file path) for 1 hour
 def _get_decompressed_parquet_path() -> str | None:
     """
-    Combines and decompresses parquet chunks into a single persistent temporary file.
+    Combines and decompresses parquet chunks into a single persistent temporary file
+    using chunked I/O to manage memory.
     Returns the path to this file. Cleanup is handled by Streamlit's resource
     caching mechanism and a backup atexit handler.
     """
@@ -130,32 +133,38 @@ def _get_decompressed_parquet_path() -> str | None:
     combined_filename_gz = None
     decompressed_file_obj = None
     decompressed_filename = None
+    BUFFER_SIZE = 128 * 1024  # 128KB buffer for copying
 
     try:
-        # 1. Combine into one temp gzipped file (auto-deleted)
+        # 1. Combine into one temp gzipped file (auto-deleted) using chunked copy
         with tempfile.NamedTemporaryFile(delete=True, suffix='.parquet.gz') as combined_file_gz:
             combined_filename_gz = combined_file_gz.name
             chunk_files = sorted(chunk_files)
             total_chunks = len(chunk_files)
+            status_text.text("Combining chunks...")
             for i, chunk_file in enumerate(chunk_files):
                 try:
-                    with open(chunk_file, 'rb') as f:
-                        combined_file_gz.write(f.read())
+                    with open(chunk_file, 'rb') as f_chunk:
+                        # Copy chunk by chunk to the combined file
+                        shutil.copyfileobj(f_chunk, combined_file_gz, length=BUFFER_SIZE)
                     progress_bar.progress((i + 1) / (total_chunks * 2)) # Progress for combining
-                    status_text.text(f"Combined chunk {i+1}/{total_chunks}")
+                    # Update status less frequently for performance
+                    if (i + 1) % 10 == 0 or (i+1) == total_chunks:
+                         status_text.text(f"Combined chunk {i+1}/{total_chunks}")
                 except Exception as e:
-                    st.warning(f"Error reading chunk {chunk_file}: {str(e)}") # Continue on chunk error?
+                    st.warning(f"Error reading/writing chunk {chunk_file}: {str(e)}")
 
-            combined_file_gz.flush()
+            combined_file_gz.flush() # Ensure all data is written before gzip reads it
 
-            # 2. Decompress into a persistent temp file (delete=False)
+            # 2. Decompress into a persistent temp file (delete=False) using chunked copy
             status_text.text("Decompressing combined file...")
-            # delete=False needed: Streamlit resource manager / atexit handles cleanup
             decompressed_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix='.parquet')
             decompressed_filename = decompressed_file_obj.name
 
+            # Use context manager for the gzip file as well
             with gzip.open(combined_filename_gz, 'rb') as gz_file:
-                decompressed_file_obj.write(gz_file.read())
+                 # Copy chunk by chunk from gzip stream to output file
+                shutil.copyfileobj(gz_file, decompressed_file_obj, length=BUFFER_SIZE)
 
             progress_bar.progress(1.0) # Progress for decompression
             status_text.text("Data pre-processing complete.")
@@ -425,106 +434,119 @@ df_collected = None
 try:
     print("Collecting final DataFrame for display...")
     start_collect_time = time.time()
-
-    df_collected = lf.collect(streaming=True)
+    df_collected = lf.collect(streaming=True) # This still collects all data
     collect_duration = time.time() - start_collect_time
     print(f"Collect duration: {collect_duration:.2f}s")
-
     loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
     time.sleep(1.5)
     loaded.empty()
 except Exception as e:
     st.error(f"Error collecting final DataFrame: {e}")
+    df_collected = pl.DataFrame()
+except MemoryError:
+    st.error("Memory Error during data collection. The dataset might be too large to fit into memory.")
+    st.info("Consider applying more filters before collection if possible, or implementing server-side pagination.")
     df_collected = pl.DataFrame() # Ensure it's an empty Polars DF
 
-# Check collection result
+# Check collection result (can proceed even if empty to show empty table)
 if df_collected.is_empty():
-     # Check if the original lf was likely empty vs collection failure
      try:
-         if lf.head(1).collect().is_empty():
-             st.warning("Original data source seems empty or filtered to empty.")
+         # Check if the original source was likely empty
+         if lf.select(pl.count()).collect()[0,0] == 0:
+              st.warning("Original data source seems empty or filtered to empty.")
          else:
-             st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
+              # Only error if collection likely failed (and wasn't just empty source)
+              st.error("Data collection resulted in an empty DataFrame (potentially due to error or memory issue). Cannot display table.")
      except Exception as head_check_e:
-         st.error(f"Data collection failed, and error occurred during post-check: {head_check_e}")
-
-     # Don't stop here if empty, table generation might handle it or show empty state
-     # st.stop()
+         st.error(f"Data collection failed or resulted in empty, and error occurred during post-check: {head_check_e}")
 
 
-# --- Generate Table HTML (using collected DataFrame) ---
-def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
+# --- Generate Table HTML (Optimize by avoiding to_dicts) ---
+def generate_table_html(df_display: pl.DataFrame):
+    if df_display.is_empty():
+         st.warning("No data to display based on current filters or collection.")
+         return "<th>No Data</th>", "" # Return empty table structure
+
     # Define visible columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
 
+    # Required data columns for data attributes
     required_data_cols = [
         'Category', 'Subcategory', 'Raw Pledged', 'Raw Goal', 'Raw Raised',
         'Raw Date', 'Raw Deadline', 'Backer Count', 'Popularity Score'
-    ]
-    missing_data_cols = [col for col in required_data_cols if col not in df_display.columns]
-    if missing_data_cols:
-        # Make this a more severe error as Distance is fundamental now
-        st.error(f"FATAL: Missing required columns for table generation: {missing_data_cols}. Check data processing steps.")
-        # return "", "" # Stop generation if critical columns missing
+    ] + visible_columns # Ensure visible columns are also checked
 
-    # Ensure visible columns exist
-    missing_visible_cols = [col for col in visible_columns if col not in df_display.columns]
-    if missing_visible_cols:
-         st.warning(f"Missing visible columns for table: {missing_visible_cols}. Check database_download.py or initial data processing.")
-         # Attempt to continue with available columns
-         visible_columns = [col for col in visible_columns if col in df_display.columns]
-         if not visible_columns:
-              return "", "" # Cannot proceed if no visible columns
+    # Check for missing columns (both data and visible)
+    all_required = list(set(required_data_cols)) # Unique list
+    missing_cols = [col for col in all_required if col not in df_display.columns]
+    if missing_cols:
+        st.error(f"FATAL: Missing required columns for table generation: {missing_cols}. Check data processing steps.")
+        return "<th>Error: Missing Columns</th>", ""
 
+    # Filter visible columns to only those that actually exist (redundant if check above passes, but safe)
+    visible_columns = [col for col in visible_columns if col in df_display.columns]
+    if not visible_columns:
+        st.error("FATAL: No visible columns available to display.")
+        return "<th>Error: No Visible Columns</th>", ""
 
-    # Generate header for visible columns only
-    header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
+    # Generate header for available visible columns
+    header_html = ''.join(f'<th scope="col">{col}</th>' for col in visible_columns)
 
-    # Generate table rows with raw values in data attributes
-    rows_html = ''
-    # Convert collected DataFrame to dicts efficiently
-    # Add error handling for to_dicts()
-    try:
-        data_dicts = df_display.to_dicts()
-    except Exception as e:
-        st.error(f"Error converting DataFrame to dictionaries: {e}")
-        return header_html, "" # Return header but empty rows
+    # Generate table rows WITH data attributes by ITERATING (more memory efficient)
+    rows_html_list = []
+    # Use iter_rows for memory efficiency compared to to_dicts()
+    for row_dict in df_display.iter_rows(named=True):
+        # Safely access potentially missing keys using .get() with defaults
+        category = row_dict.get('Category', 'N/A')
+        subcategory = row_dict.get('Subcategory', 'N/A')
+        raw_pledged = row_dict.get('Raw Pledged', 0.0)
+        raw_goal = row_dict.get('Raw Goal', 0.0)
+        raw_raised = row_dict.get('Raw Raised', 0.0)
+        raw_date = row_dict.get('Raw Date') # Handle potential None date
+        raw_deadline = row_dict.get('Raw Deadline') # Handle potential None date
+        backer_count = row_dict.get('Backer Count', 0)
+        popularity = row_dict.get('Popularity Score', 0.0)
 
-    for row in data_dicts:
         data_attrs = f'''
-            data-category="{row.get('Category', 'N/A')}"
-            data-subcategory="{row.get('Subcategory', 'N/A')}"
-            data-pledged="{row.get('Raw Pledged', 0.0):.2f}"
-            data-goal="{row.get('Raw Goal', 0.0):.2f}"
-            data-raised="{row.get('Raw Raised', 0.0):.2f}"
-            data-date="{row.get('Raw Date').strftime('%Y-%m-%d') if row.get('Raw Date') else 'N/A'}"
-            data-deadline="{row.get('Raw Deadline').strftime('%Y-%m-%d') if row.get('Raw Deadline') else 'N/A'}"
-            data-backers="{row.get('Backer Count', 0)}"
-            data-popularity="{row.get('Popularity Score', 0.0):.6f}"
-        '''
-        # Create visible cells with special handling for Link column
-        visible_cells = ''
+            data-category="{html.escape(str(category))}"
+            data-subcategory="{html.escape(str(subcategory))}"
+            data-pledged="{float(raw_pledged):.2f}"
+            data-goal="{float(raw_goal):.2f}"
+            data-raised="{float(raw_raised):.2f}"
+            data-date="{raw_date.strftime('%Y-%m-%d') if raw_date else 'N/A'}"
+            data-deadline="{raw_deadline.strftime('%Y-%m-%d') if raw_deadline else 'N/A'}"
+            data-backers="{int(backer_count)}"
+            data-popularity="{float(popularity):.6f}"
+        ''' # Ensure types are correct for formatting/JS parsing
+
+        visible_cells_list = []
         for col in visible_columns:
-            value = row.get(col, 'N/A') # Default value if column somehow missing in dict
+            value = row_dict.get(col, 'N/A') # Default value if column missing
+            cell_html = ""
             if col == 'Link':
                 url = str(value) if value else '#'
-                # Truncate long URLs for display if needed
-                display_url = url if len(url) < 60 else url[:57] + '...'
-                visible_cells += f'<td><a href="{url}" target="_blank" title="{url}">{display_url}</a></td>'
-            elif col == 'State': # State column already contains HTML
-                 # Ensure value is a string before adding
-                 state_html = str(value) if value is not None else 'N/A'
-                 visible_cells += f'<td>{state_html}</td>'
+                display_url = html.escape(url if len(url) < 60 else url[:57] + '...')
+                cell_html = f'<td><a href="{html.escape(url)}" target="_blank" title="{html.escape(url)}">{display_url}</a></td>'
+            elif col == 'State': # State column already contains HTML (trusting previous step)
+                 state_html = str(value) if value is not None else '<div class="state_cell state-unknown">unknown</div>' # Provide default HTML
+                 cell_html = f'<td>{state_html}</td>' # Assumed safe HTML
+            elif col == 'Pledged Amount': # Ensure numeric columns are formatted if needed
+                 try:
+                      cell_html = f'<td>${float(value):,.2f}</td>' # Example: Format as currency
+                 except (ValueError, TypeError):
+                      cell_html = f'<td>{html.escape(str(value))}</td>' # Fallback
             else:
                 # Escape potential HTML in other cells
-                import html
-                visible_cells += f'<td>{html.escape(str(value))}</td>'
+                cell_html = f'<td>{html.escape(str(value))}</td>'
+            visible_cells_list.append(cell_html)
 
-        rows_html += f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>'
+        visible_cells = "".join(visible_cells_list)
+        rows_html_list.append(f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>')
 
+    rows_html = "\n".join(rows_html_list) # Join the list into a single string
     return header_html, rows_html
 
-# Generate HTML using the collected DataFrame
+# Generate HTML using the collected DataFrame (or empty placeholders if failed)
 header_html, rows_html = generate_table_html(df_collected)
 
 # --- HTML Template ---

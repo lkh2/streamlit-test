@@ -1,5 +1,4 @@
 polars
 psutil
-reverse_geocode
 streamlit
 streamlit_js_eval
