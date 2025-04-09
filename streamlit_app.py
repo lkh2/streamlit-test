@@ -3,12 +3,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import tempfile, os
 import json
-import gzip
-import glob
 import polars as pl
-import atexit
-import shutil 
-import html
 
 st.set_page_config(layout="wide")
 
@@ -90,179 +85,49 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-# --- Helper function for explicit cleanup (safeguard) ---
-_registered_cleanup_files = set() # Global track of files registered for cleanup
+# --- Main script execution flow ---
 
-def cleanup_temp_file(filepath):
-    """Function to delete a temporary file if it exists."""
-    global _registered_cleanup_files
-    if filepath and os.path.exists(filepath):
-        try:
-            print(f"Atexit cleanup: Attempting to delete {filepath}")
-            os.unlink(filepath)
-            if filepath in _registered_cleanup_files:
-                _registered_cleanup_files.remove(filepath)
-            print(f"Atexit cleanup: Successfully deleted {filepath}")
-        except OSError as e:
-            print(f"Atexit cleanup: Error deleting file {filepath}: {e}")
-    elif filepath in _registered_cleanup_files:
-         # Remove from tracking if registered but doesn't exist anymore
-        _registered_cleanup_files.remove(filepath)
+# Define the path to your pre-existing Parquet file/directory
+# *** IMPORTANT: Change this if your file/directory name is different ***
+parquet_source_path = "data.parquet" 
 
-
-# --- Cached Resource Function for Data Preparation ---
-@st.cache_resource(ttl=3600) # Cache the resource (file path) for 1 hour
-def _get_decompressed_parquet_path() -> str | None:
-    """
-    Combines and decompresses parquet chunks into a single persistent temporary file
-    using chunked I/O to manage memory.
-    Returns the path to this file. Cleanup is handled by Streamlit's resource
-    caching mechanism and a backup atexit handler.
-    """
-    global _registered_cleanup_files
-    chunk_files = glob.glob("parquet_gz_chunks/*.part")
-
-    if not chunk_files:
-        st.error("No parquet chunks found in parquet_gz_chunks folder. Please run database_download.py first.")
-        return None
-
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    status_text.text(f"Found {len(chunk_files)} chunk files. Pre-processing data...")
-
-    combined_filename_gz = None
-    decompressed_file_obj = None
-    decompressed_filename = None
-    BUFFER_SIZE = 128 * 1024  # 128KB buffer for copying
-
-    try:
-        # 1. Combine into one temp gzipped file (auto-deleted) using chunked copy
-        with tempfile.NamedTemporaryFile(delete=True, suffix='.parquet.gz') as combined_file_gz:
-            combined_filename_gz = combined_file_gz.name
-            chunk_files = sorted(chunk_files)
-            total_chunks = len(chunk_files)
-            status_text.text("Combining chunks...")
-            for i, chunk_file in enumerate(chunk_files):
-                try:
-                    with open(chunk_file, 'rb') as f_chunk:
-                        # Copy chunk by chunk to the combined file
-                        shutil.copyfileobj(f_chunk, combined_file_gz, length=BUFFER_SIZE)
-                    progress_bar.progress((i + 1) / (total_chunks * 2)) # Progress for combining
-                    # Update status less frequently for performance
-                    if (i + 1) % 10 == 0 or (i+1) == total_chunks:
-                         status_text.text(f"Combined chunk {i+1}/{total_chunks}")
-                except Exception as e:
-                    st.warning(f"Error reading/writing chunk {chunk_file}: {str(e)}")
-
-            combined_file_gz.flush() # Ensure all data is written before gzip reads it
-
-            # 2. Decompress into a persistent temp file (delete=False) using chunked copy
-            status_text.text("Decompressing combined file...")
-            decompressed_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix='.parquet')
-            decompressed_filename = decompressed_file_obj.name
-
-            # Use context manager for the gzip file as well
-            with gzip.open(combined_filename_gz, 'rb') as gz_file:
-                 # Copy chunk by chunk from gzip stream to output file
-                shutil.copyfileobj(gz_file, decompressed_file_obj, length=BUFFER_SIZE)
-
-            progress_bar.progress(1.0) # Progress for decompression
-            status_text.text("Data pre-processing complete.")
-            print(f"Prepared temporary data file: {decompressed_filename}")
-
-            # --- Register for cleanup using atexit as a safeguard ---
-            if decompressed_filename not in _registered_cleanup_files:
-                print(f"Registering atexit cleanup for: {decompressed_filename}")
-                atexit.register(cleanup_temp_file, decompressed_filename)
-                _registered_cleanup_files.add(decompressed_filename)
-            # --- End Cleanup Registration ---
-
-            return decompressed_filename
-
-    except Exception as e:
-        st.error(f"Error during data pre-processing: {str(e)}")
-        # Clean up the decompressed file ONLY if it was created AND an error occurred
-        if decompressed_filename and os.path.exists(decompressed_filename):
-            cleanup_temp_file(decompressed_filename) # Use the cleanup function
-        return None # Indicate error
-    finally:
-        # Ensure the file object is closed, but the file persists
-        if decompressed_file_obj:
-            decompressed_file_obj.close()
-        # Clear progress indicators
-        status_text.empty()
-        progress_bar.empty()
-
-
-# --- Main script execution ---
-
-# Get the path to the prepared data file via the cached resource function
-temp_parquet_path = _get_decompressed_parquet_path()
-
-# Exit if data preparation failed
-if temp_parquet_path is None:
-     st.error("Failed to prepare data. Cannot proceed.")
-     st.stop() # Stop execution
-
-# Check if the file expected from the cache actually exists
-if not os.path.exists(temp_parquet_path):
-    st.error(f"Prepared data file {temp_parquet_path} not found. Cache might be stale.")
-    st.warning("Attempting to clear cache and rerun...")
-    # Clear the specific resource cache entry
-    _get_decompressed_parquet_path.clear()
-    # Rerun the script to force regeneration
-    st.rerun()
-
-
-# Now, scan the prepared parquet file lazily (this is fast)
-lf = None
-try:
-    lf = pl.scan_parquet(temp_parquet_path)
-    print(f"Successfully scanned: {temp_parquet_path}")
-except Exception as e:
-    st.error(f"Error scanning the prepared parquet file {temp_parquet_path}: {e}")
+# 1. Check if the source Parquet file/directory exists
+if not os.path.exists(parquet_source_path):
+    st.error(f"Parquet data source not found at '{parquet_source_path}'. Please ensure the file/directory exists in the project root.")
     st.stop()
 
+# 2. Scan the specified parquet source Lazily.
+lf: pl.LazyFrame | None = None # Add type hint for clarity
+try:
+    print(f"Scanning Parquet source: {parquet_source_path}")
+    # Scan the user-provided Parquet source directly
+    lf = pl.scan_parquet(parquet_source_path) 
+    print("LazyFrame created successfully from source.")
+except Exception as e:
+     st.error(f"Error scanning the Parquet source '{parquet_source_path}': {e}")
+     # Include the context stack if available (Polars often provides this)
+     if hasattr(e, 'context_stack'): # Check if context_stack attribute exists
+         # Access context_stack safely
+         context_info = getattr(e, 'context_stack', 'Not available') 
+         st.error(f"Context stack: {context_info}")
+     else:
+          st.error("Context stack information not available.") # Fallback message
+     st.stop() # Stop if scanning fails
+
 
 # --- Check if LazyFrame is potentially empty ---
 try:
     # Apply head(0) lazily, then collect the empty frame with the correct schema
     schema_check = lf.head(0).collect()
-    if schema_check.is_empty() and schema_check.width == 0 :
-         st.error("Loaded data appears empty or schema is invalid. Please check logs and ensure database_download.py ran successfully.")
-         # No manual file cleanup here - handled by resource cache/atexit
+    if schema_check.width == 0 :
+         st.error(f"Loaded data from '{parquet_source_path}' appears to have no columns or is invalid. Please check the source file/directory.")
          st.stop()
+    elif schema_check.is_empty():
+        # It's okay if the file has a schema but no rows
+         st.info(f"Data source '{parquet_source_path}' loaded successfully, but contains no projects initially.")
     print("LazyFrame Schema:", lf.schema)
 except Exception as e:
-     # This is where the user's original error occurred.
-     st.error(f"Error during initial data check on LazyFrame: {e}")
-     st.error(f"The error occurred while checking the data from file: {temp_parquet_path}")
-     st.error(f"Polars context: {getattr(e, '__context__', 'N/A')}") # Try to get Polars context
-     # No manual file cleanup here
-     st.stop()
-
-# --- Check if LazyFrame is potentially empty ---
-try:
-    # Apply head(0) lazily, then collect the empty frame with the correct schema
-    schema_check = lf.head(0).collect()
-    if schema_check.is_empty() and schema_check.width == 0 :
-         st.error("Loaded data appears empty or schema is invalid. Please check logs and ensure database_download.py ran successfully.")
-         # Clean up the temp file before stopping
-         if temp_parquet_path and os.path.exists(temp_parquet_path):
-              try:
-                  os.unlink(temp_parquet_path)
-              except OSError as e:
-                  st.warning(f"Error cleaning up temporary file on empty schema check: {e}")
-         st.stop()
-    print("LazyFrame Schema:", lf.schema)
-except Exception as e:
-     st.error(f"Error during initial data check: {e}. Cannot proceed.")
-     # Clean up the temp file before stopping
-     if temp_parquet_path and os.path.exists(temp_parquet_path):
-          try:
-              os.unlink(temp_parquet_path)
-          except OSError as unlink_error:
-              st.warning(f"Error cleaning up temporary file on data check error: {unlink_error}")
+     st.error(f"Error during initial data check on '{parquet_source_path}': {e}. Cannot proceed.")
      st.stop()
 
 
@@ -282,13 +147,11 @@ else:
     st.warning("Column 'State' not found in the schema. Skipping state styling.")
 
 # Prepare filter options (operate lazily as much as possible)
-@st.cache_data
-def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to indicate mutation
+@st.cache_data # Caching filter options based on the *schema* might still be useful
+def get_filter_options(_lf_schema: dict): # Pass schema instead of LF to cache effectively
     print("Calculating filter options...")
-    # Collect unique values only for required columns
     options = {
         'categories': ['All Categories'],
-        # 'subcategories': ['All Subcategories'], # Remove static list
         'countries': ['All Countries'],
         'states': ['All States'],
         'date_ranges': [
@@ -296,25 +159,27 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
             'Last 5 Years', 'Last 10 Years'
         ]
     }
-    # Add a structure to hold the category -> subcategory mapping
     category_subcategory_map = {'All Categories': ['All Subcategories']}
+    
+    # Create a dummy LazyFrame with the correct schema just for option calculation
+    # This avoids passing the full lf into the cached function if schema is enough
+    # Or, better, just pass the schema dict and work with that
+    schema_lf = pl.LazyFrame(schema=_lf_schema) 
 
     try:
         # Get unique categories first
-        if 'Category' in _lf.schema:
-            categories_unique = _lf.select(pl.col('Category')).unique().collect()['Category']
+        if 'Category' in schema_lf.schema:
+            # We still need to collect unique values, so we use the *actual* lf here
+            categories_unique = lf.select(pl.col('Category')).unique().collect()['Category']
             valid_categories = sorted(categories_unique.filter(categories_unique.is_not_null() & (categories_unique != "N/A")).to_list())
             options['categories'] += valid_categories
-            # Initialize map keys
             for cat in valid_categories:
-                category_subcategory_map[cat] = [] # Start with empty list
+                category_subcategory_map[cat] = [] 
 
         # Get unique Category-Subcategory pairs
-        if 'Category' in _lf.schema and 'Subcategory' in _lf.schema:
-             cat_subcat_pairs = _lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect()
-
-             # Populate the map
-             all_subcategories_set = set() # To collect all unique subcats for 'All Categories'
+        if 'Category' in schema_lf.schema and 'Subcategory' in schema_lf.schema:
+             cat_subcat_pairs = lf.select(['Category', 'Subcategory']).unique().drop_nulls().collect() # Use actual lf
+             all_subcategories_set = set()
              for row in cat_subcat_pairs.iter_rows(named=True):
                   category = row['Category']
                   subcategory = row['Subcategory']
@@ -323,15 +188,10 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
                            category_subcategory_map[category].append(subcategory)
                        all_subcategories_set.add(subcategory)
 
-             # Add sorted unique subcategories to 'All Categories'
-             # Ensure 'All Subcategories' is first
              all_sorted_subcats = sorted(list(all_subcategories_set))
              category_subcategory_map['All Categories'] = ['All Subcategories'] + all_sorted_subcats
 
-
-             # Sort subcategories within each category
              for cat in category_subcategory_map:
-                 # Keep 'All Subcategories' first if present, sort the rest
                  subcats = category_subcategory_map[cat]
                  prefix = []
                  rest = []
@@ -339,57 +199,46 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
                      prefix = ['All Subcategories']
                      rest = sorted([s for s in subcats if s != 'All Subcategories'])
                  else:
-                      rest = sorted(subcats) # Sort all if 'All Subcategories' isn't there
-
-                 # Rebuild the list for the category
+                      rest = sorted(subcats) 
                  category_subcategory_map[cat] = prefix + rest
 
-        # Handle Subcategories if Category doesn't exist (fallback)
-        elif 'Subcategory' in _lf.schema and 'Category' not in _lf.schema:
-             subcategories_unique = _lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
+        elif 'Subcategory' in schema_lf.schema and 'Category' not in schema_lf.schema:
+             subcategories_unique = lf.select(pl.col('Subcategory')).unique().collect()['Subcategory'] # Use actual lf
              all_subcats = sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
-             category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats # Add to default
+             category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats
 
-        # Ensure 'All Subcategories' exists if map is otherwise empty for it
         if not category_subcategory_map['All Categories']:
              category_subcategory_map['All Categories'] = ['All Subcategories']
 
-
-        if 'Country' in _lf.schema:
-             countries_unique = _lf.select(pl.col('Country')).unique().collect()['Country']
+        if 'Country' in schema_lf.schema:
+             countries_unique = lf.select(pl.col('Country')).unique().collect()['Country'] # Use actual lf
              options['countries'] += sorted(countries_unique.filter(countries_unique.is_not_null() & (countries_unique != "N/A")).to_list())
 
-        # State extraction needs collection first, as str.extract is complex
-        if 'State' in _lf.schema and _lf.schema['State'] == pl.Utf8:
-             # Collect only the State column for processing
-             states_collected = _lf.select('State').collect()['State']
-             # Check if the column likely contains the HTML structure on the collected data
+        if 'State' in schema_lf.schema and schema_lf.schema['State'] == pl.Utf8:
+             # Collect only the State column for processing - use actual lf
+             states_collected = lf.select('State').collect()['State'] 
              sample_state = states_collected.head(1).to_list()
              if sample_state and sample_state[0] and sample_state[0].startswith('<div class="state_cell state-'):
-                  # Perform extraction on the collected Series
-                  extracted_states = states_collected.str.extract(r'>(\w+)<', 1).unique().drop_nulls().to_list() # Extract content
-                  options['states'] += sorted([state.capitalize() for state in extracted_states if state.lower() != 'unknown']) # Capitalize and filter unknown
-             else: # Assume it's plain text if no HTML structure detected
+                  extracted_states = states_collected.str.extract(r'>(\w+)<', 1).unique().drop_nulls().to_list() 
+                  options['states'] += sorted([state.capitalize() for state in extracted_states if state.lower() != 'unknown']) 
+             else: 
                   plain_states = states_collected.filter(states_collected.is_not_null() & (states_collected != "N/A")).unique().to_list()
                   options['states'] += sorted([s.capitalize() for s in plain_states])
         print("Filter options calculated.")
 
     except Exception as e:
          st.error(f"Error calculating filter options: {e}")
-         # Return default options on error
-         options = {k: v[:1] for k, v in options.items() if k != 'subcategories'} # Keep only "All..." options
-         options['date_ranges'] = [ # Restore date ranges
+         options = {k: v[:1] for k, v in options.items() if k != 'subcategories'} 
+         options['date_ranges'] = [ 
             'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
             'Last 5 Years', 'Last 10 Years'
          ]
-         category_subcategory_map = {'All Categories': ['All Subcategories']} # Reset map on error
+         category_subcategory_map = {'All Categories': ['All Subcategories']} 
 
-    # Return both the options dict and the mapping
     return options, category_subcategory_map
 
-# Calculate filter options using the LazyFrame
-# Now unpack two return values
-filter_options, category_subcategory_map = get_filter_options(lf)
+# Calculate filter options using the LazyFrame schema
+filter_options, category_subcategory_map = get_filter_options(lf.schema)
 
 # Calculate Min/Max values lazily
 min_pledged, max_pledged = 0, 1000
@@ -434,119 +283,117 @@ df_collected = None
 try:
     print("Collecting final DataFrame for display...")
     start_collect_time = time.time()
-    df_collected = lf.collect(streaming=True) # This still collects all data
+
+    df_collected = lf.collect(streaming=True) # Collect from the LazyFrame scanning the persistent file
     collect_duration = time.time() - start_collect_time
-    print(f"Collect duration: {collect_duration:.2f}s")
+    print(f"Data collection took {collect_duration:.2f} seconds.")
+
     loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
     time.sleep(1.5)
     loaded.empty()
 except Exception as e:
     st.error(f"Error collecting final DataFrame: {e}")
-    df_collected = pl.DataFrame()
-except MemoryError:
-    st.error("Memory Error during data collection. The dataset might be too large to fit into memory.")
-    st.info("Consider applying more filters before collection if possible, or implementing server-side pagination.")
     df_collected = pl.DataFrame() # Ensure it's an empty Polars DF
 
-# Check collection result (can proceed even if empty to show empty table)
+# Check collection result
 if df_collected.is_empty():
+     # Perform a quick check again to differentiate between empty source and collection error
+     is_source_empty = False
      try:
-         # Check if the original source was likely empty
-         if lf.select(pl.count()).collect()[0,0] == 0:
-              st.warning("Original data source seems empty or filtered to empty.")
-         else:
-              # Only error if collection likely failed (and wasn't just empty source)
-              st.error("Data collection resulted in an empty DataFrame (potentially due to error or memory issue). Cannot display table.")
-     except Exception as head_check_e:
-         st.error(f"Data collection failed or resulted in empty, and error occurred during post-check: {head_check_e}")
+         is_source_empty = lf.head(1).collect().is_empty()
+     except Exception as check_err:
+         print(f"Could not check if source is empty after failed collect: {check_err}")
+
+     if is_source_empty:
+         # If the source file was valid but had no rows, we might want to proceed and show an empty table
+         st.warning("Data source is empty. Displaying empty table.")
+         # Let's create an empty DF with the expected schema if possible
+         # This helps prevent errors later when generating the table HTML
+         try:
+             df_collected = lf.head(0).collect() # Get schema
+         except Exception:
+             st.error("Could not retrieve schema from empty source. Stopping.")
+             st.stop()
+         # If we want to stop execution for an empty source, uncomment the next line
+         # st.stop()
+     else:
+         st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
+         st.stop() # Stop if collection failed for non-empty source
 
 
-# --- Generate Table HTML (Optimize by avoiding to_dicts) ---
-def generate_table_html(df_display: pl.DataFrame):
-    if df_display.is_empty():
-         st.warning("No data to display based on current filters or collection.")
-         return "<th>No Data</th>", "" # Return empty table structure
-
+# --- Generate Table HTML (using collected DataFrame) ---
+def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
     # Define visible columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
 
-    # Required data columns for data attributes
     required_data_cols = [
         'Category', 'Subcategory', 'Raw Pledged', 'Raw Goal', 'Raw Raised',
         'Raw Date', 'Raw Deadline', 'Backer Count', 'Popularity Score'
-    ] + visible_columns # Ensure visible columns are also checked
+    ]
+    missing_data_cols = [col for col in required_data_cols if col not in df_display.columns]
+    if missing_data_cols:
+        # Make this a more severe error as Distance is fundamental now
+        st.error(f"FATAL: Missing required columns for table generation: {missing_data_cols}. Check data processing steps.")
+        # return "", "" # Stop generation if critical columns missing
 
-    # Check for missing columns (both data and visible)
-    all_required = list(set(required_data_cols)) # Unique list
-    missing_cols = [col for col in all_required if col not in df_display.columns]
-    if missing_cols:
-        st.error(f"FATAL: Missing required columns for table generation: {missing_cols}. Check data processing steps.")
-        return "<th>Error: Missing Columns</th>", ""
+    # Ensure visible columns exist
+    missing_visible_cols = [col for col in visible_columns if col not in df_display.columns]
+    if missing_visible_cols:
+         st.warning(f"Missing visible columns for table: {missing_visible_cols}. Check database_download.py or initial data processing.")
+         # Attempt to continue with available columns
+         visible_columns = [col for col in visible_columns if col in df_display.columns]
+         if not visible_columns:
+              return "", "" # Cannot proceed if no visible columns
 
-    # Filter visible columns to only those that actually exist (redundant if check above passes, but safe)
-    visible_columns = [col for col in visible_columns if col in df_display.columns]
-    if not visible_columns:
-        st.error("FATAL: No visible columns available to display.")
-        return "<th>Error: No Visible Columns</th>", ""
 
-    # Generate header for available visible columns
-    header_html = ''.join(f'<th scope="col">{col}</th>' for col in visible_columns)
+    # Generate header for visible columns only
+    header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
 
-    # Generate table rows WITH data attributes by ITERATING (more memory efficient)
-    rows_html_list = []
-    # Use iter_rows for memory efficiency compared to to_dicts()
-    for row_dict in df_display.iter_rows(named=True):
-        # Safely access potentially missing keys using .get() with defaults
-        category = row_dict.get('Category', 'N/A')
-        subcategory = row_dict.get('Subcategory', 'N/A')
-        raw_pledged = row_dict.get('Raw Pledged', 0.0)
-        raw_goal = row_dict.get('Raw Goal', 0.0)
-        raw_raised = row_dict.get('Raw Raised', 0.0)
-        raw_date = row_dict.get('Raw Date') # Handle potential None date
-        raw_deadline = row_dict.get('Raw Deadline') # Handle potential None date
-        backer_count = row_dict.get('Backer Count', 0)
-        popularity = row_dict.get('Popularity Score', 0.0)
+    # Generate table rows with raw values in data attributes
+    rows_html = ''
+    # Convert collected DataFrame to dicts efficiently
+    # Add error handling for to_dicts()
+    try:
+        data_dicts = df_display.to_dicts()
+    except Exception as e:
+        st.error(f"Error converting DataFrame to dictionaries: {e}")
+        return header_html, "" # Return header but empty rows
 
+    for row in data_dicts:
         data_attrs = f'''
-            data-category="{html.escape(str(category))}"
-            data-subcategory="{html.escape(str(subcategory))}"
-            data-pledged="{float(raw_pledged):.2f}"
-            data-goal="{float(raw_goal):.2f}"
-            data-raised="{float(raw_raised):.2f}"
-            data-date="{raw_date.strftime('%Y-%m-%d') if raw_date else 'N/A'}"
-            data-deadline="{raw_deadline.strftime('%Y-%m-%d') if raw_deadline else 'N/A'}"
-            data-backers="{int(backer_count)}"
-            data-popularity="{float(popularity):.6f}"
-        ''' # Ensure types are correct for formatting/JS parsing
-
-        visible_cells_list = []
+            data-category="{row.get('Category', 'N/A')}"
+            data-subcategory="{row.get('Subcategory', 'N/A')}"
+            data-pledged="{row.get('Raw Pledged', 0.0):.2f}"
+            data-goal="{row.get('Raw Goal', 0.0):.2f}"
+            data-raised="{row.get('Raw Raised', 0.0):.2f}"
+            data-date="{row.get('Raw Date').strftime('%Y-%m-%d') if row.get('Raw Date') else 'N/A'}"
+            data-deadline="{row.get('Raw Deadline').strftime('%Y-%m-%d') if row.get('Raw Deadline') else 'N/A'}"
+            data-backers="{row.get('Backer Count', 0)}"
+            data-popularity="{row.get('Popularity Score', 0.0):.6f}"
+        '''
+        # Create visible cells with special handling for Link column
+        visible_cells = ''
         for col in visible_columns:
-            value = row_dict.get(col, 'N/A') # Default value if column missing
-            cell_html = ""
+            value = row.get(col, 'N/A') # Default value if column somehow missing in dict
             if col == 'Link':
                 url = str(value) if value else '#'
-                display_url = html.escape(url if len(url) < 60 else url[:57] + '...')
-                cell_html = f'<td><a href="{html.escape(url)}" target="_blank" title="{html.escape(url)}">{display_url}</a></td>'
-            elif col == 'State': # State column already contains HTML (trusting previous step)
-                 state_html = str(value) if value is not None else '<div class="state_cell state-unknown">unknown</div>' # Provide default HTML
-                 cell_html = f'<td>{state_html}</td>' # Assumed safe HTML
-            elif col == 'Pledged Amount': # Ensure numeric columns are formatted if needed
-                 try:
-                      cell_html = f'<td>${float(value):,.2f}</td>' # Example: Format as currency
-                 except (ValueError, TypeError):
-                      cell_html = f'<td>{html.escape(str(value))}</td>' # Fallback
+                # Truncate long URLs for display if needed
+                display_url = url if len(url) < 60 else url[:57] + '...'
+                visible_cells += f'<td><a href="{url}" target="_blank" title="{url}">{display_url}</a></td>'
+            elif col == 'State': # State column already contains HTML
+                 # Ensure value is a string before adding
+                 state_html = str(value) if value is not None else 'N/A'
+                 visible_cells += f'<td>{state_html}</td>'
             else:
                 # Escape potential HTML in other cells
-                cell_html = f'<td>{html.escape(str(value))}</td>'
-            visible_cells_list.append(cell_html)
+                import html
+                visible_cells += f'<td>{html.escape(str(value))}</td>'
 
-        visible_cells = "".join(visible_cells_list)
-        rows_html_list.append(f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>')
+        rows_html += f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>'
 
-    rows_html = "\n".join(rows_html_list) # Join the list into a single string
     return header_html, rows_html
 
-# Generate HTML using the collected DataFrame (or empty placeholders if failed)
+# Generate HTML using the collected DataFrame
 header_html, rows_html = generate_table_html(df_collected)
 
 # --- HTML Template ---
