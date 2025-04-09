@@ -438,7 +438,7 @@ if all(col in lf.schema for col in required_minmax_cols):
         min_raised = int(min_max_vals['min_raised'][0]) if min_max_vals['min_raised'][0] is not None else 0
         max_raised_calc_val = min_max_vals['max_raised_calc'][0]
         # Cap max_raised for the slider range
-        max_raised = int(max_raised_calc_val) 
+        max_raised = int(max_raised_calc_val)
         print("Min/max ranges calculated.")
     except Exception as e:
         st.error(f"Error calculating min/max filter ranges: {e}. Using defaults.")
@@ -1260,6 +1260,15 @@ script = """
         return new RegExp(escapedWords.map(word => `(?=.*${word})`).join(''), 'i');
     }
 
+    function updateTableRows(rows, currentPage, pageSize) {
+        const start = (currentPage - 1) * pageSize;
+        const end = start + pageSize;
+        
+        rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
+        });
+    }
+
     // RE-ADD Haversine distance function (or confirm it exists)
     function calculateDistance(lat1, lon1, lat2, lon2) {
         const R = 6371; // Earth's radius in kilometers
@@ -1293,7 +1302,7 @@ script = """
         constructor() {
             this.searchInput = document.getElementById('table-search');
             this.allRows = Array.from(document.querySelectorAll('#data-table tbody tr'));
-            this.visibleRows = this.allRows; // Initially, all rows are visible
+            this.visibleRows = this.allRows;
             this.currentPage = 1;
             this.pageSize = 10;
             this.currentSearchTerm = '';
@@ -1302,117 +1311,116 @@ script = """
             this.userLocation = window.userLocation;
             this.distanceCache = new DistanceCache();
             this.initialize();
-            // Removed resetFilters() call here, initialize calls applyAllFilters which handles initial state
+            this.resetFilters();
         }
 
         // sortRows - RE-ADD 'nearme' case
         async sortRows(sortType) {
-            // --- Sorting Logic Start ---
-            // (This part remains the same - sorts this.visibleRows in place)
             if (sortType === 'popularity') {
                 // Sort by popularity score
                 this.visibleRows.sort((a, b) => {
                     const scoreA = parseFloat(a.dataset.popularity);
                     const scoreB = parseFloat(b.dataset.popularity);
+                    
+                    // Handle invalid values
                     if (isNaN(scoreA)) return 1;
                     if (isNaN(scoreB)) return -1;
-                    return scoreB - scoreA; // Descending
+                    
+                    // Sort in descending order
+                    return scoreB - scoreA;
                 });
             } else if (sortType === 'nearme') { // RE-ADD case
                 if (!this.userLocation) {
                     console.warn("Attempted to sort by 'Near Me' without location. Falling back to popularity.");
+                    // Reset sort dropdown and internal state
                     const sortSelect = document.getElementById('sortFilter');
-                     if (sortSelect && sortSelect.value === 'nearme') {
+                     if (sortSelect.value === 'nearme') {
                            sortSelect.value = 'popularity';
                            this.currentSort = 'popularity';
                      }
                     await this.sortRows('popularity'); // Re-sort by popularity
                     return; // Exit early
                 }
+                // Sort by pre-calculated distance stored in data-distance
                 this.visibleRows.sort((a, b) => {
                     const distA = parseFloat(a.dataset.distance);
                     const distB = parseFloat(b.dataset.distance);
+
+                    // Handle NaN or infinite values (put them at the end)
                     if (isNaN(distA) || !isFinite(distA)) return 1;
                     if (isNaN(distB) || !isFinite(distB)) return -1;
-                    return distA - distB; // Ascending
+
+                    return distA - distB; // Ascending order (nearest first)
                 });
             } else if (sortType === 'enddate') {
+                // Sort by deadline
                 this.visibleRows.sort((a, b) => {
                     const deadlineA = new Date(a.dataset.deadline);
                     const deadlineB = new Date(b.dataset.deadline);
-                    return deadlineB - deadlineA; // Descending (newest end date first)
+                    return deadlineB - deadlineA; 
                 });
             } else if (sortType === 'mostfunded') {
+                // Sort by pledged amount
                 this.visibleRows.sort((a, b) => {
                     const pledgedA = parseFloat(a.dataset.pledged);
                     const pledgedB = parseFloat(b.dataset.pledged);
-                    return pledgedB - pledgedA;  // Descending
+                    return pledgedB - pledgedA;  // Descending order (most funded first)
                 });
             } else if (sortType === 'mostbacked') {
+                // Sort by backer count
                 this.visibleRows.sort((a, b) => {
                     const backersA = parseInt(a.dataset.backers);
                     const backersB = parseInt(b.dataset.backers);
-                    return backersB - backersA;  // Descending
+                    return backersB - backersA;  // Descending order (most backers first)
                 });
-            } else { // Date-based sorting (newest/oldest)
+            } else {
+                // Date-based sorting only
                 this.visibleRows.sort((a, b) => {
                     const dateA = new Date(a.dataset.date);
                     const dateB = new Date(b.dataset.date);
                     return sortType === 'newest' ? dateB - dateA : dateA - dateB;
                 });
             }
-            // --- Sorting Logic End ---
-
 
             const tbody = document.querySelector('#data-table tbody');
-            if (!tbody) return; // Guard clause
-
-            // --- Modification Start: Clear and Rebuild tbody ---
-            // Clear the entire table body first to remove any stale rows
-            tbody.innerHTML = '';
-            // Now append only the currently visible (and sorted) rows from the JS array
+            this.visibleRows.forEach(row => row.parentNode && row.parentNode.removeChild(row));
             this.visibleRows.forEach(row => tbody.appendChild(row));
-            // --- Modification End ---
-
+            
             // Update current page and pagination
-            this.currentPage = 1; // Reset to first page after sorting
-            this.updateTable();   // Update display based on new tbody content and page 1
+            this.currentPage = 1;
+            this.updateTable();
         }
 
         // applyAllFilters with async sorting
         async applyAllFilters() {
-            // Start with all rows from the original full set
+            // Start with all rows
             let filteredRows = this.allRows;
 
-            // Apply search filter first
+            // Apply search if exists
             if (this.currentSearchTerm) {
                 const pattern = createRegexPattern(this.currentSearchTerm);
-                if (pattern) {
-                    filteredRows = filteredRows.filter(row => {
-                        const text = row.textContent || row.innerText;
-                        return pattern.test(text);
-                    });
-                }
+                filteredRows = filteredRows.filter(row => {
+                    const text = row.textContent || row.innerText;
+                    return pattern.test(text);
+                });
             }
 
-            // Apply dropdown/range filters
+            // Apply filters if they exist
             if (this.currentFilters) {
                 filteredRows = filteredRows.filter(row => {
                     return this.matchesFilters(row, this.currentFilters);
                 });
             }
 
-            // Update the visibleRows array with the filtered result
+            // Store filtered results
             this.visibleRows = filteredRows;
 
-            // Apply the current sort to the filtered rows
-            // This will also rebuild the tbody with only the filtered/sorted rows
+            // Apply current sort
             await this.sortRows(this.currentSort);
 
-            // Reset to first page (already done in sortRows, but safe to keep here)
-            // this.currentPage = 1;
-            // Update display (already done in sortRows)
-            // this.updateTable();
+            // Reset to first page and update display
+            this.currentPage = 1;
+            this.updateTable();
         }
 
         // Update applyFilters to handle async
@@ -1435,10 +1443,10 @@ script = """
 
             // Collect all current filter values
             this.currentFilters = {
-                categories: selectedCategories.length > 0 ? selectedCategories : ['All Categories'], // Ensure default if empty
-                subcategories: selectedSubcategories.length > 0 ? selectedSubcategories : ['All Subcategories'], // Ensure default
-                countries: selectedCountries.length > 0 ? selectedCountries : ['All Countries'], // Ensure default
-                states: selectedStates.length > 0 ? selectedStates : ['All States'], // Ensure default
+                categories: selectedCategories,
+                subcategories: selectedSubcategories,
+                countries: selectedCountries,
+                states: selectedStates,
                 date: document.getElementById('dateFilter').value
             };
 
@@ -1463,7 +1471,6 @@ script = """
             };
             this.currentFilters.ranges = rangeFilters;
 
-            // Apply all filters and sorting
             await this.applyAllFilters();
         }
 
@@ -1471,19 +1478,18 @@ script = """
             this.setupSearchAndPagination();
             this.setupFilters(); // This will now handle the hierarchical setup
             this.setupRangeSlider();
-            this.currentSort = 'popularity';  // Set default sort
+            this.currentSort = 'popularity';  // Set default sort to popularity
+            this.applyAllFilters();
+            this.updateTable();
             // Initial population of subcategories based on default 'All Categories'
-            this.updateSubcategoryOptions();
-             // Apply initial state (default filters, default sort)
-            this.applyAllFilters(); // This calls sortRows which calls updateTable
-            // this.updateTable(); // No longer needed here, done via applyAllFilters -> sortRows
+            this.updateSubcategoryOptions(); 
         }
 
         setupSearchAndPagination() {
             // Setup search
-            const debouncedSearch = debounce(async (searchTerm) => { // Make async
+            const debouncedSearch = debounce((searchTerm) => {
                 this.currentSearchTerm = searchTerm;
-                await this.applyAllFilters(); // Apply search and other filters
+                this.applyAllFilters();
             }, 300);
 
             this.searchInput.addEventListener('input', (e) => {
@@ -1493,7 +1499,6 @@ script = """
             // Setup pagination controls
             document.getElementById('prev-page').addEventListener('click', () => this.previousPage());
             document.getElementById('next-page').addEventListener('click', () => this.nextPage());
-            // Make handlePageClick global or attach differently if needed in dynamic HTML
             window.handlePageClick = (page) => this.goToPage(page);
         }
 
@@ -1511,69 +1516,59 @@ script = """
             }
 
             // Country filter
-            // Read from data attribute for consistency if available, otherwise fallback to cell text
-            const countryCode = row.dataset.countryCode; // Assume 'Country Code' is reliable
-            // We need the country *name* for filtering against the dropdown options
-            const countryName = row.querySelector('td:nth-child(5)')?.textContent.trim(); // Get displayed country name
-             if (!filters.countries.includes('All Countries') && countryName && !filters.countries.includes(countryName)) {
-                 return false;
-             }
+            const country = row.querySelector('td:nth-child(5)').textContent.trim();
+            if (!filters.countries.includes('All Countries') && !filters.countries.includes(country)) {
+                return false;
+            }
 
-
-            // State filter - Extract state from class name
+            // State filter - Extract state from class name instead of text content
             const stateCell = row.querySelector('.state_cell');
-            let state = 'unknown'; // Default if no state cell found or class missing
+            let state = '';
             if (stateCell) {
                 for (const cls of stateCell.classList) {
                     if (cls.startsWith('state-')) {
-                        state = cls.substring(6); // e.g., 'successful'
+                        state = cls.substring(6);
                         break;
                     }
                 }
             }
-            // Compare against the capitalized state names used in the filter options
             if (!filters.states.includes('All States')) {
                 const stateLower = state.toLowerCase();
-                // Find a match ignoring case (filters.states contains capitalized versions)
                 const matchingState = filters.states.find(s => s.toLowerCase() === stateLower);
                 if (!matchingState) return false;
             }
 
-
-            // Get numeric/date values
+            // Get all other values
             const pledged = parseFloat(row.dataset.pledged);
             const goal = parseFloat(row.dataset.goal);
-            const raised = parseFloat(row.dataset.raised); // This is percentage
+            const raised = parseFloat(row.dataset.raised);
             const date = new Date(row.dataset.date);
 
+            // Rest of filter checks
             // Check pledged range
-             const minPledged = filters.ranges?.pledged?.min ?? 0;
-             const maxPledged = filters.ranges?.pledged?.max ?? Infinity;
-             if (isNaN(pledged) || pledged < minPledged || pledged > maxPledged) return false;
+            const minPledged = parseFloat(document.getElementById('fromInput').value);
+            const maxPledged = parseFloat(document.getElementById('toInput').value);
+            if (pledged < minPledged || pledged > maxPledged) return false;
 
-             // Check goal range
-             const minGoal = filters.ranges?.goal?.min ?? 0;
-             const maxGoal = filters.ranges?.goal?.max ?? Infinity;
-             if (isNaN(goal) || goal < minGoal || goal > maxGoal) return false;
+            // Check goal range
+            const minGoal = parseFloat(document.getElementById('goalFromInput').value);
+            const maxGoal = parseFloat(document.getElementById('goalToInput').value);
+            if (goal < minGoal || goal > maxGoal) return false;
 
-            // Check raised percentage range
-             const minRaised = filters.ranges?.raised?.min ?? 0;
-             const maxRaised = filters.ranges?.raised?.max ?? Infinity;
-             // Handle NaN for raised percentage - treat as not matching any specific range unless min is 0
-             if (isNaN(raised)) {
-                 if (minRaised > 0) return false; // Cannot match if min > 0 and value is NaN
-             } else {
-                 // Handle the case where raised is exactly 0%
-                 if (raised === 0 && minRaised > 0) return false;
-                 if (raised < minRaised || raised > maxRaised) return false;
-             }
+            // Check raised range
+            const minRaised = parseFloat(document.getElementById('raisedFromInput').value);
+            const maxRaised = parseFloat(document.getElementById('raisedToInput').value);
+            const raisedValue = parseFloat(row.dataset.raised);
+            
+            // Handle the case where raised is exactly 0%
+            if (raisedValue === 0 && minRaised > 0) return false;
+            if (raisedValue < minRaised || raisedValue > maxRaised) return false;
 
             // Date filter
             if (filters.date !== 'All Time') {
                 const now = new Date();
                 let compareDate = new Date();
-                compareDate.setHours(0, 0, 0, 0); // Start of day for comparison
-
+                
                 switch(filters.date) {
                     case 'Last Month': compareDate.setMonth(now.getMonth() - 1); break;
                     case 'Last 6 Months': compareDate.setMonth(now.getMonth() - 6); break;
@@ -1581,59 +1576,66 @@ script = """
                     case 'Last 5 Years': compareDate.setFullYear(now.getFullYear() - 5); break;
                     case 'Last 10 Years': compareDate.setFullYear(now.getFullYear() - 10); break;
                 }
-
-                 // Check if the row's date is valid and before the comparison date
-                 if (isNaN(date.getTime()) || date < compareDate) return false;
+                
+                if (date < compareDate) return false;
             }
 
-            return true; // Row matches all active filters
+            return true;
         }
 
-        async resetFilters() { // Make async
+        resetFilters() {
             // Reset category selections
             const categoryOptions = document.querySelectorAll('.category-option');
             categoryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCategoriesOption = document.querySelector('.category-option[data-value="All Categories"]');
-            if (allCategoriesOption) allCategoriesOption.classList.add('selected');
-            window.selectedCategories = new Set(['All Categories']); // Reset JS Set
-            const categoryBtn = document.getElementById('categoryFilterBtn');
-            this.updateButtonText(window.selectedCategories, categoryBtn, 'All Categories');
-
+            allCategoriesOption.classList.add('selected');
+            const categoryBtn = document.querySelector('.multi-select-btn');
+            categoryBtn.textContent = 'All Categories';
 
             // Reset country selections
             const countryOptions = document.querySelectorAll('.country-option');
             countryOptions.forEach(opt => opt.classList.remove('selected'));
             const allCountriesOption = document.querySelector('.country-option[data-value="All Countries"]');
-             if (allCountriesOption) allCountriesOption.classList.add('selected');
-            window.selectedCountries = new Set(['All Countries']); // Reset JS Set
-            const countryBtn = document.getElementById('countryFilterBtn');
-             this.updateButtonText(window.selectedCountries, countryBtn, 'All Countries');
+            allCountriesOption.classList.add('selected');
+            const countryBtn = countryOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            countryBtn.textContent = 'All Countries';
 
             // Reset state selections
             const stateOptions = document.querySelectorAll('.state-option');
             stateOptions.forEach(opt => opt.classList.remove('selected'));
             const allStatesOption = document.querySelector('.state-option[data-value="All States"]');
-             if (allStatesOption) allStatesOption.classList.add('selected');
-            window.selectedStates = new Set(['All States']); // Reset JS Set
-            const stateBtn = document.getElementById('stateFilterBtn');
-             this.updateButtonText(window.selectedStates, stateBtn, 'All States');
-
+            allStatesOption.classList.add('selected');
+            const stateBtn = stateOptions[0].closest('.multi-select-dropdown').querySelector('.multi-select-btn');
+            stateBtn.textContent = 'All States';
 
             // Reset subcategory selections (will be repopulated by updateSubcategoryOptions)
+            const subcategoryOptionsContainer = document.getElementById('subcategoryOptionsContainer');
+            subcategoryOptionsContainer.innerHTML = ''; // Clear existing options
             const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
-             window.selectedSubcategories = new Set(['All Subcategories']); // Reset JS Set
+            if (window.selectedSubcategories) window.selectedSubcategories.clear();
+            if (window.selectedSubcategories) window.selectedSubcategories.add('All Subcategories');
             // Update subcategory options based on the reset category ('All Categories')
-             this.updateSubcategoryOptions(); // This now resets the UI and button text internally
-             // No need to call updateButtonText for subcategory here, updateSubcategoryOptions handles it
+            this.updateSubcategoryOptions(); 
 
+            // Reset the stored selections in the Sets
+            if (window.selectedCategories) window.selectedCategories.clear();
+            if (window.selectedCountries) window.selectedCountries.clear();
+            if (window.selectedStates) window.selectedStates.clear();
+            // Subcategories reset done above
 
-            // Reset ranges
+            // Re-add "All" options to the Sets
+            if (window.selectedCategories) window.selectedCategories.add('All Categories');
+            if (window.selectedCountries) window.selectedCountries.add('All Countries');
+            if (window.selectedStates) window.selectedStates.add('All States');
+            // Subcategories reset done above
+
+            // Reset ranges, search, sort etc. as before ...
             if (this.rangeSliderElements) {
-                const {
+                const { 
                     fromSlider, toSlider, fromInput, toInput,
                     goalFromSlider, goalToSlider, goalFromInput, goalToInput,
                     raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
-                    fillSlider
+                    fillSlider 
                 } = this.rangeSliderElements;
 
                 // Reset pledged amount range
@@ -1658,122 +1660,70 @@ script = """
                 fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
             }
 
-            // Reset search
             this.searchInput.value = '';
             this.currentSearchTerm = '';
-
-            // Reset date dropdown
-            document.getElementById('dateFilter').value = 'All Time';
-
-            // Reset sort dropdown
+            this.currentFilters = null; // Filters will be reapplied by applyAllFilters
+            this.currentSort = 'popularity';
             document.getElementById('sortFilter').value = 'popularity';
-            this.currentSort = 'popularity'; // Ensure internal state matches UI
-
-            // Reset internal filter object
-            this.currentFilters = null; // Will be rebuilt by applyFilters
-
-            // Re-apply all filters and sorting with the reset state
-            // This will set visibleRows correctly based on allRows and default filters/sort
-            await this.applyAllFilters();
+            this.visibleRows = this.allRows;
+            this.applyAllFilters(); // Apply filters which includes the reset subcategory
         }
-
 
         updateTable() {
-             // The tbody should already contain exactly the rows in this.visibleRows,
-             // thanks to the clear/rebuild logic in sortRows.
-             // We just need to apply pagination display styles.
-             const tbody = document.querySelector('#data-table tbody');
-             if (!tbody) return;
+            // Hide all rows first
+            this.allRows.forEach(row => row.style.display = 'none');
+            
+            // Calculate visible range
+            const start = (this.currentPage - 1) * this.pageSize;
+            const end = Math.min(start + this.pageSize, this.visibleRows.length);
+            
+            // Show only rows for current page
+            this.visibleRows.slice(start, end).forEach(row => {
+                row.style.display = '';
+            });
 
-             // Get rows currently in the DOM (which should match this.visibleRows)
-             const rowsInTbody = Array.from(tbody.children);
-
-             // Safety check (optional)
-             // if (rowsInTbody.length !== this.visibleRows.length) {
-             //     console.warn("Mismatch between visibleRows array and tbody children count. A full refresh might be needed if issues persist.");
-             //     // Could potentially force a full re-render here by calling applyAllFilters again
-             // }
-
-             const start = (this.currentPage - 1) * this.pageSize;
-             const end = start + this.pageSize;
-
-             // Show/hide rows based on current page
-             rowsInTbody.forEach((row, index) => {
-                 // Check if the index is within the current page range
-                 row.style.display = (index >= start && index < end) ? '' : 'none';
-             });
-
-             this.updatePagination(); // Update page numbers/buttons
-             this.adjustHeight();     // Adjust component height
+            this.updatePagination();
+            this.adjustHeight();
         }
 
-
         updatePagination() {
-            // Calculate total pages based on the *currently visible* rows count
             const totalPages = Math.max(1, Math.ceil(this.visibleRows.length / this.pageSize));
             const pageNumbers = this.generatePageNumbers(totalPages);
             const container = document.getElementById('page-numbers');
-            if (!container) return;
-
+            
             container.innerHTML = pageNumbers.map(page => {
                 if (page === '...') {
                     return '<span class="page-ellipsis">...</span>';
                 }
-                // Ensure page numbers are treated as numbers for comparison
-                const pageNum = Number(page);
-                return `<button class="page-number ${pageNum === this.currentPage ? 'active' : ''}"
-                    ${pageNum === this.currentPage ? 'disabled' : ''}
-                    onclick="handlePageClick(${pageNum})">${pageNum}</button>`;
+                return `<button class="page-number ${page === this.currentPage ? 'active' : ''}"
+                    ${page === this.currentPage ? 'disabled' : ''} 
+                    onclick="handlePageClick(${page})">${page}</button>`;
             }).join('');
 
-            // Disable prev/next buttons appropriately
-             const prevButton = document.getElementById('prev-page');
-             const nextButton = document.getElementById('next-page');
-             if (prevButton) prevButton.disabled = this.currentPage <= 1;
-             if (nextButton) nextButton.disabled = this.currentPage >= totalPages;
+            document.getElementById('prev-page').disabled = this.currentPage <= 1;
+            document.getElementById('next-page').disabled = this.currentPage >= totalPages;
         }
 
         generatePageNumbers(totalPages) {
             let pages = [];
-            const currentPage = this.currentPage; // Use current page
-            const maxPagesToShow = 7; // Max number of direct page links (excluding ellipsis)
-
-            if (totalPages <= maxPagesToShow + 2) { // Show all if not many pages
+            if (totalPages <= 10) {
                 pages = Array.from({length: totalPages}, (_, i) => i + 1);
             } else {
-                // Determine start and end range around current page
-                let startPage, endPage;
-                 if (currentPage <= Math.ceil(maxPagesToShow / 2)) {
-                     startPage = 1;
-                     endPage = maxPagesToShow;
-                     pages = [...Array.from({length: endPage}, (_, i) => i + 1), '...', totalPages];
-                 } else if (currentPage + Math.floor(maxPagesToShow / 2) >= totalPages) {
-                     startPage = totalPages - maxPagesToShow + 1;
-                     endPage = totalPages;
-                     pages = [1, '...', ...Array.from({length: maxPagesToShow}, (_, i) => startPage + i)];
-                 } else {
-                     startPage = currentPage - Math.floor(maxPagesToShow / 2);
-                     endPage = currentPage + Math.floor(maxPagesToShow / 2);
-                      // Adjust if maxPagesToShow is even
-                     if (maxPagesToShow % 2 === 0) {
-                          startPage = currentPage - (maxPagesToShow / 2) + 1;
-                          endPage = currentPage + (maxPagesToShow / 2);
-                     } else {
-                          startPage = currentPage - Math.floor(maxPagesToShow / 2);
-                          endPage = currentPage + Math.floor(maxPagesToShow / 2);
-                     }
-
-                     pages = [1, '...', ...Array.from({length: endPage - startPage + 1}, (_, i) => startPage + i), '...', totalPages];
-                 }
+                if (this.currentPage <= 7) {
+                    pages = [...Array.from({length: 7}, (_, i) => i + 1), '...', totalPages - 1, totalPages];
+                } else if (this.currentPage >= totalPages - 6) {
+                    pages = [1, 2, '...', ...Array.from({length: 7}, (_, i) => totalPages - 6 + i)];
+                } else {
+                    pages = [1, 2, '...', this.currentPage - 1, this.currentPage, this.currentPage + 1, '...', totalPages - 1, totalPages];
+                }
             }
             return pages;
         }
 
-
         previousPage() {
             if (this.currentPage > 1) {
                 this.currentPage--;
-                this.updateTable(); // Just update display for the new page
+                this.updateTable();
             }
         }
 
@@ -1781,17 +1731,15 @@ script = """
             const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
             if (this.currentPage < totalPages) {
                 this.currentPage++;
-                this.updateTable(); // Just update display for the new page
+                this.updateTable();
             }
         }
 
         goToPage(page) {
             const totalPages = Math.ceil(this.visibleRows.length / this.pageSize);
-            // Ensure page is a number and within valid range
-             const pageNum = Number(page);
-            if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-                this.currentPage = pageNum;
-                this.updateTable(); // Just update display for the new page
+            if (page >= 1 && page <= totalPages) {
+                this.currentPage = page;
+                this.updateTable();
             }
         }
 
@@ -1807,55 +1755,46 @@ script = """
                     pagination: document.querySelector('.pagination-controls')
                 };
 
-                // Ensure all crucial elements are found
-                if (!elements.titleWrapper || !elements.filterWrapper || !elements.tableWrapper || !elements.tableContainer || !elements.table || !elements.controls || !elements.pagination) {
-                    console.error("One or more elements needed for height adjustment not found.");
-                    // Optional: Attempt to set a default height or skip adjustment
-                    // Streamlit.setFrameHeight(800); // Example fallback
-                    return;
-                }
+                if (!Object.values(elements).every(el => el)) return;
 
-
-                // Get rows currently displayed on the page (not just visible in the array)
-                 const rowsInTbody = Array.from(elements.tableContainer.querySelectorAll('tbody tr'));
-                 const displayedRowCount = rowsInTbody.filter(row => row.style.display !== 'none').length;
-
+                // Count visible rows in current page
+                const visibleRowCount = this.visibleRows.slice(
+                    (this.currentPage - 1) * this.pageSize,
+                    this.currentPage * this.pageSize
+                ).length;
 
                 // Constants
-                 const rowHeightEstimate = 52; // Approximate height per row (adjust if needed)
-                 const headerHeight = elements.table.querySelector('thead')?.offsetHeight ?? 60; // Actual or estimated header height
-                 const controlsHeight = elements.controls.offsetHeight;
-                 const paginationHeight = elements.pagination.offsetHeight;
-                 const basePadding = 40; // Padding around components
-                 const minTableContentHeight = 200; // Minimum height for table content area
+                const rowHeight = 52;        // Height per row including padding
+                const headerHeight = 60;     // Table header height
+                const controlsHeight = elements.controls.offsetHeight;
+                const paginationHeight = elements.pagination.offsetHeight;
+                const padding = 40;
+                const minTableHeight = 400;  // Minimum table content height
 
-                // Calculate desired height for table content based on displayed rows
-                 const tableContentHeight = Math.max(minTableContentHeight, displayedRowCount * rowHeightEstimate + headerHeight);
+                // Calculate table content height
+                const tableContentHeight = (visibleRowCount * rowHeight) + headerHeight;
+                const actualTableHeight = Math.max(tableContentHeight, minTableHeight);
 
-                // Set dynamic heights
-                 elements.tableContainer.style.height = `${tableContentHeight}px`;
-                 // Calculate wrapper height based on dynamic table container + controls + pagination
-                 const tableWrapperHeight = tableContentHeight + controlsHeight + paginationHeight;
-                 elements.tableWrapper.style.height = `${tableWrapperHeight}px`;
+                // Set dimensions
+                elements.tableContainer.style.height = `${actualTableHeight}px`;
+                elements.tableWrapper.style.height = `${actualTableHeight + controlsHeight + paginationHeight}px`;
 
-                // Calculate final component height including title and filters
-                const finalHeight =
+                // Calculate final component height
+                const finalHeight = 
                     elements.titleWrapper.offsetHeight +
                     elements.filterWrapper.offsetHeight +
-                    tableWrapperHeight + // Use calculated wrapper height
-                    basePadding;
-
+                    actualTableHeight +
+                    controlsHeight +
+                    paginationHeight +
+                    padding;
 
                 // Update Streamlit frame height if changed significantly
                 if (!this.lastHeight || Math.abs(this.lastHeight - finalHeight) > 10) {
                     this.lastHeight = finalHeight;
-                     // Add a minimum height safeguard
-                     const safeHeight = Math.max(600, finalHeight); // Ensure minimum height of 600px
-                    Streamlit.setFrameHeight(safeHeight);
+                    Streamlit.setFrameHeight(finalHeight);
                 }
             });
         }
-
 
         setupFilters() {
             // Initialize global Sets to track selections
@@ -1875,16 +1814,18 @@ script = """
                  if (!buttonElement) return;
 
                  const selectedArray = Array.from(selectedItems);
-                 // Check if 'All' is selected or if the set is empty
-                 if (selectedItems.has(allValueLabel) || selectedArray.length === 0) {
+                 // Check if the only selected item is the 'All' option
+                 if (selectedArray.length === 1 && selectedArray[0] === allValueLabel) {
                      buttonElement.textContent = allValueLabel;
+                 } else if (selectedArray.length === 0 ) { // Handle case where set might be empty temporarily
+                     buttonElement.textContent = allValueLabel; // Default to 'All'
                  }
                  else {
-                     // Filter out the 'All' option if other items are selected (shouldn't be needed if logic is correct, but safe)
+                     // Filter out the 'All' option if other items are selected
                      const displayItems = selectedArray.filter(item => item !== allValueLabel);
                      const sortedArray = displayItems.sort((a, b) => a.localeCompare(b));
 
-                     if (sortedArray.length === 0) { // Fallback if only 'All' was present but somehow missed above
+                     if (sortedArray.length === 0) { // Should not happen if logic is correct, but safe fallback
                           buttonElement.textContent = allValueLabel;
                      } else if (sortedArray.length > 2) {
                           buttonElement.textContent = `${sortedArray[0]}, ${sortedArray[1]} +${sortedArray.length - 2}`;
@@ -1897,70 +1838,72 @@ script = """
 
             // MODIFIED Setup multi-select handlers
             // Added triggerSubcategoryUpdate flag
-             this.setupMultiSelect = (optionsQuerySelector, selectedSet, allValue, buttonElement, triggerSubcategoryUpdate = false) => {
-                 const contentDiv = buttonElement?.nextElementSibling;
-                 if (!contentDiv) return;
+            this.setupMultiSelect = (options, selectedSet, allValue, buttonElement, triggerSubcategoryUpdate = false) => {
+                const allOption = Array.from(options).find(opt => opt.dataset.value === allValue); // Safer find
 
-                 // Use event delegation on the content div
-                 contentDiv.addEventListener('click', async (e) => { // Make async
-                     const targetOption = e.target.closest('[data-value]'); // Find the option element clicked
-                     if (!targetOption) return; // Clicked outside an option
+                options.forEach(option => {
+                    // Remove existing listener before adding new one (prevents duplicates)
+                    option.replaceWith(option.cloneNode(true)); // Simple way to remove listeners
+                });
 
-                     const clickedValue = targetOption.dataset.value;
-                     const isCurrentlySelected = targetOption.classList.contains('selected');
-                     const allOption = contentDiv.querySelector(`[data-value="${allValue}"]`);
+                // Get fresh references after cloning
+                 const freshOptions = buttonElement.nextElementSibling.querySelectorAll('[data-value]');
+                 const freshAllOption = Array.from(freshOptions).find(opt => opt.dataset.value === allValue);
 
-                     if (clickedValue === allValue) {
-                         // If 'All' is clicked, clear others and select 'All'
-                         selectedSet.clear();
-                         selectedSet.add(allValue);
-                         contentDiv.querySelectorAll('[data-value]').forEach(opt => opt.classList.remove('selected'));
-                         if (allOption) allOption.classList.add('selected');
-                     } else {
-                         // If a specific item is clicked
-                         selectedSet.delete(allValue); // Remove 'All' if it exists
-                         if (allOption) allOption.classList.remove('selected');
-
-                         targetOption.classList.toggle('selected'); // Toggle the clicked item
-                         if (targetOption.classList.contains('selected')) {
-                             selectedSet.add(clickedValue); // Add if selected
-                         } else {
-                             selectedSet.delete(clickedValue); // Remove if deselected
-                         }
-
-                         // If nothing is selected, select 'All'
-                         if (selectedSet.size === 0) {
-                             selectedSet.add(allValue);
-                             if (allOption) allOption.classList.add('selected');
-                         }
-                     }
-
-                     // Update button text using the helper function
-                     this.updateButtonText(selectedSet, buttonElement, allValue);
-
-                     // Trigger subcategory update ONLY if this is the category selector
-                     if (triggerSubcategoryUpdate) {
-                         this.updateSubcategoryOptions(); // Update subcategories
-                     }
-
-                     await this.applyFilters(); // Apply all filters including the change (make sure it's awaited)
-                 });
-
-                 // Initial setup: Ensure existing options reflect the set state and button text is correct
-                 contentDiv.querySelectorAll('[data-value]').forEach(option => {
+                freshOptions.forEach(option => {
+                     // Add selected class if it's in the current set
                      if (selectedSet.has(option.dataset.value)) {
                          option.classList.add('selected');
-                     } else {
-                         option.classList.remove('selected');
                      }
-                 });
-                 this.updateButtonText(selectedSet, buttonElement, allValue);
-             };
 
+                     option.addEventListener('click', (e) => {
+                        const clickedValue = e.target.dataset.value;
+                        const isCurrentlySelected = e.target.classList.contains('selected');
 
-            // Setup each multi-select using query selectors
+                        if (clickedValue === allValue) {
+                            // If 'All' is clicked, clear others and select 'All'
+                            selectedSet.clear();
+                            selectedSet.add(allValue);
+                            freshOptions.forEach(opt => opt.classList.remove('selected'));
+                            if(freshAllOption) freshAllOption.classList.add('selected');
+                        } else {
+                            // If a specific item is clicked
+                            selectedSet.delete(allValue); // Remove 'All' if it exists
+                            if(freshAllOption) freshAllOption.classList.remove('selected');
+
+                            e.target.classList.toggle('selected'); // Toggle the clicked item
+                            if (e.target.classList.contains('selected')) {
+                                selectedSet.add(clickedValue); // Add if selected
+                            } else {
+                                selectedSet.delete(clickedValue); // Remove if deselected
+                            }
+
+                            // If nothing is selected, select 'All'
+                            if (selectedSet.size === 0) {
+                                selectedSet.add(allValue);
+                                if(freshAllOption) freshAllOption.classList.add('selected');
+                            }
+                        }
+
+                        // Update button text using the helper function
+                        this.updateButtonText(selectedSet, buttonElement, allValue);
+
+                        // Trigger subcategory update ONLY if this is the category selector
+                        if (triggerSubcategoryUpdate) {
+                            this.updateSubcategoryOptions(); // Update subcategories
+                        }
+
+                        this.applyFilters(); // Apply all filters including the change
+                    });
+                });
+
+                // Initialize button text correctly
+                this.updateButtonText(selectedSet, buttonElement, allValue);
+            };
+
+            // Setup each multi-select
             this.setupMultiSelect(
-                '.category-option', // Use selector string
+                document.querySelectorAll('.category-option'),
                 window.selectedCategories,
                 'All Categories',
                 categoryBtn,
@@ -1968,30 +1911,26 @@ script = """
             );
 
             this.setupMultiSelect(
-                '.country-option', // Use selector string
+                document.querySelectorAll('.country-option'),
                 window.selectedCountries,
                 'All Countries',
                 countryBtn
             );
 
             this.setupMultiSelect(
-                '.state-option', // Use selector string
+                document.querySelectorAll('.state-option'),
                 window.selectedStates,
                 'All States',
                 stateBtn
             );
 
-            // Setup subcategory initially - listeners attached via delegation above
-            // We still need to call updateButtonText initially for subcategories
-             this.updateButtonText(window.selectedSubcategories, subcategoryBtn, 'All Subcategories');
-             // Attach the listener for subcategories (it needs its own call to setupMultiSelect)
-              this.setupMultiSelect(
-                  '.subcategory-option', // Use selector string
-                  window.selectedSubcategories,
-                  'All Subcategories',
-                  subcategoryBtn,
-                  false // Do NOT trigger update from subcategory selection
-              );
+            // Setup subcategory initially (listeners will be re-attached by updateSubcategoryOptions)
+             this.setupMultiSelect(
+                 document.querySelectorAll('.subcategory-option'),
+                 window.selectedSubcategories,
+                 'All Subcategories',
+                 subcategoryBtn
+             );
 
 
             // Setup other filters (date, sort)
@@ -1999,22 +1938,18 @@ script = """
             filterIds.forEach(id => {
                 const element = document.getElementById(id);
                 if (element) {
-                    // Remove previous listener if any (safer)
-                     element.removeEventListener('change', this.boundApplyFilters);
-                     // Store the bound function reference to remove it later if needed
-                     this.boundApplyFilters = this.applyFilters.bind(this);
-                    element.addEventListener('change', this.boundApplyFilters);
+                    element.addEventListener('change', () => this.applyFilters());
                 }
             });
 
             // Add reset button handler
             const resetButton = document.getElementById('resetFilters');
             if (resetButton) {
-                 // Ensure only one listener is attached
-                 resetButton.removeEventListener('click', this.boundResetFilters);
-                 this.boundResetFilters = this.resetFilters.bind(this); // Bind 'this'
-                resetButton.addEventListener('click', this.boundResetFilters);
+                resetButton.addEventListener('click', () => this.resetFilters());
             }
+
+            // Range slider initialization remains the same
+            // this.setupRangeSlider(); // Called in initialize()
         }
 
         setupRangeSlider() {
@@ -2036,214 +1971,215 @@ script = """
             const raisedFromInput = document.getElementById('raisedFromInput');
             const raisedToInput = document.getElementById('raisedToInput');
 
-             // Check if all elements exist before proceeding
-            if (!fromSlider || !toSlider || !fromInput || !toInput ||
-                !goalFromSlider || !goalToSlider || !goalFromInput || !goalToInput ||
-                !raisedFromSlider || !raisedToSlider || !raisedFromInput || !raisedToInput) {
-                 console.error("One or more range slider elements not found. Skipping setup.");
-                 this.rangeSliderElements = null; // Indicate sliders are not set up
-                 return;
-            }
+            let inputTimeout;
 
-
-            let inputTimeout; // Timeout for debouncing input changes
-
-            // Function to visually fill the slider track
             const fillSlider = (from, to, sliderColor, rangeColor, controlSlider) => {
                 const rangeDistance = controlSlider.max - controlSlider.min;
-                 // Prevent division by zero if min equals max
-                 if (rangeDistance === 0) {
-                     controlSlider.style.background = rangeColor; // Fill completely if range is zero
-                     return;
-                 }
                 const fromPosition = from.value - controlSlider.min;
                 const toPosition = to.value - controlSlider.min;
-                // Calculate percentages safely
-                 const fromPercent = (fromPosition / rangeDistance) * 100;
-                 const toPercent = (toPosition / rangeDistance) * 100;
-
                 controlSlider.style.background = `linear-gradient(
                     to right,
                     ${sliderColor} 0%,
-                    ${sliderColor} ${fromPercent}%,
-                    ${rangeColor} ${fromPercent}%,
-                    ${rangeColor} ${toPercent}%,
-                    ${sliderColor} ${toPercent}%,
+                    ${sliderColor} ${(fromPosition)/(rangeDistance)*100}%,
+                    ${rangeColor} ${((fromPosition)/(rangeDistance))*100}%,
+                    ${rangeColor} ${(toPosition)/(rangeDistance)*100}%, 
+                    ${sliderColor} ${(toPosition)/(rangeDistance)*100}%, 
                     ${sliderColor} 100%)`;
-            };
+            }
 
-             // Debounced version of applyFilters specifically for sliders
-             const debouncedSliderApplyFilters = debounce(async () => await this.applyFilters(), 350); // Slightly longer debounce for sliders
+            const debouncedApplyFilters = debounce(() => this.applyFilters(), 100);
 
-
-             // Helper to control the 'from' slider handle
             const controlFromSlider = (fromSlider, toSlider, fromInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
-                 // Ensure 'from' doesn't cross 'to'
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
                 if (from > to) {
-                    fromSlider.value = to; // Snap 'from' to 'to's value
-                    // Don't update fromInput here, let the input handler do it if needed
-                    return; // Exit early as value didn't really change logically
+                    fromSlider.value = to;
+                    fromInput.value = to;
+                } else {
+                    fromInput.value = from;
                 }
-                fromInput.value = from; // Update input to match slider
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider); // Update visual fill
-                 debouncedSliderApplyFilters(); // Apply filters after a delay
             };
 
-             // Helper to control the 'to' slider handle
             const controlToSlider = (fromSlider, toSlider, toInput) => {
                 const [from, to] = getParsedValue(fromSlider, toSlider);
-                 // Ensure 'to' doesn't cross 'from'
-                if (to < from) {
-                    toSlider.value = from; // Snap 'to' to 'from's value
-                    // Don't update toInput here
-                    return; // Exit early
+                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                if (from <= to) {
+                    toSlider.value = to;
+                    toInput.value = to;
+                } else {
+                    toInput.value = from;
+                    toSlider.value = from;
                 }
-                toInput.value = to; // Update input to match slider
-                fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider); // Update visual fill
-                 debouncedSliderApplyFilters(); // Apply filters after a delay
             };
 
-
-            // Helper to get parsed integer values from a pair of sliders
-            const getParsedValue = (slider1, slider2) => {
-                const val1 = parseInt(slider1.value, 10);
-                const val2 = parseInt(slider2.value, 10);
-                // Return in [min, max] order regardless of which slider was passed first
-                 return [Math.min(val1, val2), Math.max(val1, val2)];
+            const getParsedValue = (fromSlider, toSlider) => {
+                const from = parseInt(fromSlider.value);
+                const to = parseInt(toSlider.value);
+                return [from, to];
             };
 
-            // Generic handler for slider input events
-             const handleSliderInput = (e) => {
-                 const slider = e.target;
-                 const isFromSlider = slider.id.includes('From');
-                 // Identify the corresponding elements based on slider group (pledged, goal, raised)
-                 const groupPrefix = slider.id.replace('FromSlider', '').replace('ToSlider', '');
-                 const fromS = document.getElementById(`${groupPrefix}FromSlider`);
-                 const toS = document.getElementById(`${groupPrefix}ToSlider`);
-                 const fromI = document.getElementById(`${groupPrefix}FromInput`);
-                 const toI = document.getElementById(`${groupPrefix}ToInput`);
+            const validateAndUpdateRange = (input, isMin = true, immediate = false) => {
+                const updateValues = () => {
+                    let value = parseInt(input.value);
+                    const minAllowed = parseInt(input.min);
+                    const maxAllowed = parseInt(input.max);
+                    const isGoalInput = input.id.startsWith('goal');
+                    
+                    if (isNaN(value)) {
+                        value = isMin ? minAllowed : maxAllowed;
+                    }
+                    
+                    const fromSlider = isGoalInput ? goalFromSlider : this.rangeSliderElements.fromSlider;
+                    const toSlider = isGoalInput ? goalToSlider : this.rangeSliderElements.toSlider;
+                    
+                    if (isMin) {
+                        const maxValue = parseInt(toSlider.value);
+                        value = Math.max(minAllowed, Math.min(maxValue, value));
+                        fromSlider.value = value;
+                        input.value = value;
+                    } else {
+                        const minValue = parseInt(fromSlider.value);
+                        value = Math.max(minValue, Math.min(maxAllowed, value));
+                        toSlider.value = value;
+                        input.value = value;
+                    }
+                    
+                    fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+                    debouncedApplyFilters();
+                };
 
-                 if (isFromSlider) {
-                     controlFromSlider(fromS, toS, fromI);
-                 } else {
-                     controlToSlider(fromS, toS, toI);
-                 }
-             };
-
-            // Generic handler for number input changes (debounced)
-            const handleNumberInput = (e) => {
-                 clearTimeout(inputTimeout);
-                 inputTimeout = setTimeout(async () => { // Make async
-                    const input = e.target;
-                    const isFromInput = input.id.includes('From');
-                    const groupPrefix = input.id.replace('FromInput', '').replace('ToInput', '');
-                    const fromS = document.getElementById(`${groupPrefix}FromSlider`);
-                    const toS = document.getElementById(`${groupPrefix}ToSlider`);
-                    const fromI = document.getElementById(`${groupPrefix}FromInput`);
-                    const toI = document.getElementById(`${groupPrefix}ToInput`);
-
-                    let value = parseInt(input.value, 10);
-                    const minAllowed = parseInt(input.min, 10);
-                    const maxAllowed = parseInt(input.max, 10);
-
-                    // Basic validation
-                     if (isNaN(value)) {
-                         value = isFromInput ? minAllowed : maxAllowed; // Default to min/max if invalid
-                     }
-                     value = Math.max(minAllowed, Math.min(maxAllowed, value)); // Clamp within min/max attributes
-
-                    // Cross-validation with the other input/slider
-                     if (isFromInput) {
-                         const maxValue = parseInt(toS.value, 10);
-                         if (value > maxValue) value = maxValue; // Don't allow 'from' to exceed 'to'
-                         fromS.value = value; // Update slider
-                         input.value = value; // Update input (might have been clamped)
-                         controlFromSlider(fromS, toS, fromI); // Update fill and trigger filter (debounced)
-                     } else { // is To Input
-                         const minValue = parseInt(fromS.value, 10);
-                         if (value < minValue) value = minValue; // Don't allow 'to' to go below 'from'
-                         toS.value = value; // Update slider
-                         input.value = value; // Update input
-                         controlToSlider(fromS, toS, toI); // Update fill and trigger filter (debounced)
-                     }
-                     // No need to call applyFilters here, control*Slider handles it (debounced)
-                 }, 750); // Debounce input validation slightly longer
+                if (immediate) {
+                    clearTimeout(inputTimeout);
+                    updateValues();
+                } else {
+                    clearTimeout(inputTimeout);
+                    inputTimeout = setTimeout(updateValues, 1000);
+                }
             };
 
-            // Generic handler for Enter key press or blur on number inputs
-             const handleInputValidationTrigger = (e) => {
-                 // Trigger immediate validation only on Enter or blur
-                 if (e.type === 'keydown' && e.key !== 'Enter') return;
-
-                 clearTimeout(inputTimeout); // Clear any pending debounced update
-                 // Immediately validate and potentially update slider and filters
-                 const input = e.target;
-                 const isFromInput = input.id.includes('From');
-                 const groupPrefix = input.id.replace('FromInput', '').replace('ToInput', '');
-                 const fromS = document.getElementById(`${groupPrefix}FromSlider`);
-                 const toS = document.getElementById(`${groupPrefix}ToSlider`);
-                 const fromI = document.getElementById(`${groupPrefix}FromInput`);
-                 const toI = document.getElementById(`${groupPrefix}ToInput`);
-
-                  let value = parseInt(input.value, 10);
-                  const minAllowed = parseInt(input.min, 10);
-                  const maxAllowed = parseInt(input.max, 10);
-
-                  if (isNaN(value)) {
-                       value = isFromInput ? minAllowed : maxAllowed;
-                  }
-                  value = Math.max(minAllowed, Math.min(maxAllowed, value));
-
-                  if (isFromInput) {
-                       const maxValue = parseInt(toS.value, 10);
-                       if (value > maxValue) value = maxValue;
-                       fromS.value = value;
-                       input.value = value; // Ensure input reflects validated value
-                       controlFromSlider(fromS, toS, fromI); // Update visuals
-                  } else {
-                       const minValue = parseInt(fromS.value, 10);
-                       if (value < minValue) value = minValue;
-                       toS.value = value;
-                       input.value = value; // Ensure input reflects validated value
-                       controlToSlider(fromS, toS, toI); // Update visuals
-                  }
-                  // Explicitly apply filters immediately on Enter/Blur after validation
-                   this.applyFilters(); // Await not strictly needed here
-             };
-
-
-            // Attach listeners using the generic handlers
-            const sliders = [fromSlider, toSlider, goalFromSlider, goalToSlider, raisedFromSlider, raisedToSlider];
-            const inputs = [fromInput, toInput, goalFromInput, goalToInput, raisedFromInput, raisedToInput];
-
-            sliders.forEach(slider => {
-                slider.addEventListener('input', handleSliderInput);
+            // Event listeners for pledged amount slider
+            fromSlider.addEventListener('input', (e) => {
+                controlFromSlider(fromSlider, toSlider, fromInput);
+                debouncedApplyFilters();
             });
 
-            inputs.forEach(input => {
-                input.addEventListener('input', handleNumberInput); // Debounced update on typing
-                 input.addEventListener('keydown', handleInputValidationTrigger); // Immediate update on Enter
-                 input.addEventListener('blur', handleInputValidationTrigger); // Immediate update on blur
+            toSlider.addEventListener('input', (e) => {
+                controlToSlider(fromSlider, toSlider, toInput);
+                debouncedApplyFilters();
             });
 
+            // Event listeners for goal amount slider
+            goalFromSlider.addEventListener('input', (e) => {
+                controlFromSlider(goalFromSlider, goalToSlider, goalFromInput);
+                debouncedApplyFilters();
+            });
 
-            // Store references for reset function IF setup was successful
-             this.rangeSliderElements = {
-                 fromSlider, toSlider, fromInput, toInput,
-                 goalFromSlider, goalToSlider, goalFromInput, goalToInput,
-                 raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
-                 fillSlider // Keep reference to the helper
-             };
+            goalToSlider.addEventListener('input', (e) => {
+                controlToSlider(goalFromSlider, goalToSlider, goalToInput);
+                debouncedApplyFilters();
+            });
 
-            // Initial visual setup for all sliders
-            if (this.rangeSliderElements) {
-                 fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
-                 fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
-                 fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
-            }
+            // Add event listeners for percentage raised slider
+            raisedFromSlider.addEventListener('input', (e) => {
+                controlFromSlider(raisedFromSlider, raisedToSlider, raisedFromInput);
+                debouncedApplyFilters();
+            });
+
+            raisedToSlider.addEventListener('input', (e) => {
+                controlToSlider(raisedFromSlider, raisedToSlider, raisedToInput);
+                debouncedApplyFilters();
+            });
+
+            // Input handlers for both sliders
+            [fromInput, goalFromInput, raisedFromInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    validateAndUpdateRange(input, true, false);
+                });
+            });
+
+            [toInput, goalToInput, raisedToInput].forEach(input => {
+                input.addEventListener('input', () => {
+                    validateAndUpdateRange(input, false, false);
+                });
+            });
+
+            // Add key events for immediate validation on Enter
+            fromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(fromInput, true, true);
+                }
+            });
+
+            toInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(toInput, false, true);
+                }
+            });
+
+            // Add key events for goal slider inputs
+            goalFromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(goalFromInput, true, true);
+                }
+            });
+
+            goalToInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(goalToInput, false, true);
+                }
+            });
+
+            // Add key events for percentage raised slider inputs
+            raisedFromInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(raisedFromInput, true, true);
+                }
+            });
+
+            raisedToInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    validateAndUpdateRange(raisedToInput, false, true);
+                }
+            });
+
+            // Also handle blur events for immediate validation
+            fromInput.addEventListener('blur', () => {
+                validateAndUpdateRange(fromInput, true, true);
+            });
+
+            toInput.addEventListener('blur', () => {
+                validateAndUpdateRange(toInput, false, true);
+            });
+
+            goalFromInput.addEventListener('blur', () => {
+                validateAndUpdateRange(goalFromInput, true, true);
+            });
+
+            goalToInput.addEventListener('blur', () => {
+                validateAndUpdateRange(goalToInput, false, true);
+            });
+
+            raisedFromInput.addEventListener('blur', () => {
+                validateAndUpdateRange(raisedFromInput, true, true);
+            });
+
+            raisedToInput.addEventListener('blur', () => {
+                validateAndUpdateRange(raisedToInput, false, true);
+            });
+
+            // Store references for reset function
+            this.rangeSliderElements = {
+                fromSlider, toSlider, fromInput, toInput,
+                goalFromSlider, goalToSlider, goalFromInput, goalToInput,
+                raisedFromSlider, raisedToSlider, raisedFromInput, raisedToInput,
+                fillSlider
+            };
+
+            // Initial setup
+            fillSlider(fromSlider, toSlider, '#C6C6C6', '#5932EA', toSlider);
+            fillSlider(goalFromSlider, goalToSlider, '#C6C6C6', '#5932EA', goalToSlider);
+            fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
         }
-
 
         // NEW METHOD to update subcategory options
         updateSubcategoryOptions() {
@@ -2252,136 +2188,90 @@ script = """
             const subcategoryOptionsContainer = document.getElementById('subcategoryOptionsContainer');
             const subcategoryBtn = document.getElementById('subcategoryFilterBtn');
 
-             if (!subcategoryOptionsContainer || !subcategoryBtn) {
-                  console.error("Subcategory container or button not found.");
-                  return; // Cannot update if elements are missing
-             }
-
             let availableSubcategories = new Set();
             let isAllCategoriesSelected = selectedCategories.has('All Categories');
 
             // Determine which subcategories to show
             if (isAllCategoriesSelected || selectedCategories.size === 0) {
-                 // If 'All Categories' is selected or no category selected, use the special 'All Categories' list from the map
-                 (subcategoryMap['All Categories'] || ['All Subcategories']).forEach(subcat => availableSubcategories.add(subcat));
+                 // If 'All Categories' is selected or no category is selected, show all subcategories
+                 (subcategoryMap['All Categories'] || []).forEach(subcat => availableSubcategories.add(subcat));
             } else {
                 // Otherwise, collect subcategories from the specifically selected categories
                  availableSubcategories.add('All Subcategories'); // Always include 'All Subcategories'
                  selectedCategories.forEach(cat => {
-                     // Ensure we access the map correctly and handle potential undefined categories
                      (subcategoryMap[cat] || []).forEach(subcat => {
-                         if (subcat && subcat !== 'All Subcategories') { // Check subcat is valid and avoid adding 'All' twice
+                         if (subcat !== 'All Subcategories') { // Avoid adding it twice
                             availableSubcategories.add(subcat);
                          }
                      });
                  });
             }
 
-
             // Sort the subcategories (keeping 'All Subcategories' first)
             const sortedSubcategories = Array.from(availableSubcategories);
             sortedSubcategories.sort((a, b) => {
                 if (a === 'All Subcategories') return -1;
                 if (b === 'All Subcategories') return 1;
-                // LocaleCompare is good for string sorting
-                 if (a && b) return a.localeCompare(b);
-                 return 0; // Handle potential null/undefined if data is messy
+                return a.localeCompare(b);
             });
 
-            // --- Efficiently update options ---
-            const currentOptions = new Map();
-             subcategoryOptionsContainer.querySelectorAll('.subcategory-option').forEach(opt => {
-                 currentOptions.set(opt.dataset.value, opt);
-             });
+            // Generate HTML for new options
+            subcategoryOptionsContainer.innerHTML = sortedSubcategories.map(opt =>
+                `<div class="subcategory-option" data-value="${opt}">${opt}</div>`
+            ).join('');
 
-             let lastAppendedNode = null; // Keep track for inserting new nodes
-
-             // Iterate through sorted list, update existing or add new
-             sortedSubcategories.forEach(subcatValue => {
-                 if (currentOptions.has(subcatValue)) {
-                     // Option exists, ensure it's in the right place relative to the last node
-                     const existingNode = currentOptions.get(subcatValue);
-                     if (lastAppendedNode && lastAppendedNode.nextSibling !== existingNode) {
-                         subcategoryOptionsContainer.insertBefore(existingNode, lastAppendedNode.nextSibling);
-                     }
-                     lastAppendedNode = existingNode;
-                     currentOptions.delete(subcatValue); // Mark as processed
-                 } else {
-                     // Option is new, create and insert it
-                     const newOption = document.createElement('div');
-                     newOption.className = 'subcategory-option';
-                     newOption.dataset.value = subcatValue;
-                     newOption.textContent = subcatValue;
-                      // Add special class for styling 'All' option
-                      if (subcatValue === 'All Subcategories') {
-                           newOption.classList.add('all-subcategories-option'); // Add a class if needed for styling break etc.
-                      }
-                     subcategoryOptionsContainer.insertBefore(newOption, lastAppendedNode ? lastAppendedNode.nextSibling : subcategoryOptionsContainer.firstChild);
-                     lastAppendedNode = newOption;
-                 }
-             });
-
-             // Remove any old options that are no longer needed
-             currentOptions.forEach(oldNode => {
-                 subcategoryOptionsContainer.removeChild(oldNode);
-             });
-            // --- End efficient update ---
-
-
-            // Reset current subcategory selection to 'All Subcategories' in the JS Set
+            // Reset current subcategory selection to 'All Subcategories'
             window.selectedSubcategories = new Set(['All Subcategories']);
+            const allSubcatOption = subcategoryOptionsContainer.querySelector('.subcategory-option[data-value="All Subcategories"]');
+            if (allSubcatOption) {
+                allSubcatOption.classList.add('selected');
+            }
+             this.updateButtonText(window.selectedSubcategories, subcategoryBtn, 'All Subcategories'); // Use helper
 
-             // Update the 'selected' class in the DOM
-             subcategoryOptionsContainer.querySelectorAll('.subcategory-option').forEach(opt => {
-                 opt.classList.toggle('selected', opt.dataset.value === 'All Subcategories');
-             });
 
-            // Update the subcategory button text
-            this.updateButtonText(window.selectedSubcategories, subcategoryBtn, 'All Subcategories');
-
-             // Re-attach/confirm event listeners are handled by delegation set up in setupFilters
-             // No need to call setupMultiSelect here again if delegation is used.
+            // Re-attach event listeners to the *new* subcategory options
+            this.setupMultiSelect(
+                subcategoryOptionsContainer.querySelectorAll('.subcategory-option'),
+                window.selectedSubcategories,
+                'All Subcategories',
+                subcategoryBtn,
+                false // Do not trigger updateSubcategoryOptions from subcategory selection
+            );
         }
-
-    } // End of TableManager class
+    }
 
     function onRender(event) {
         if (!window.rendered) {
-            window.tableManager = new TableManager(); // Creates and initializes the table
+            window.tableManager = new TableManager();
             window.rendered = true;
 
-            // Add resize observer for dynamic height adjustment
+            // Add resize observer
             const resizeObserver = new ResizeObserver(() => {
                 if (window.tableManager) {
                     // Debounce adjustHeight slightly for resize events
                     clearTimeout(window.resizeTimeout);
                     window.resizeTimeout = setTimeout(() => {
                          window.tableManager.adjustHeight();
-                    }, 100); // Increased debounce for resize
+                    }, 50);
                 }
             });
-            // Observe the main component wrapper or a suitable parent element
-            const componentRoot = document.body; // Observe body or a specific container if available
-            if (componentRoot) {
-                 resizeObserver.observe(componentRoot);
+            const tableWrapper = document.querySelector('.table-wrapper');
+            if (tableWrapper) {
+                 resizeObserver.observe(tableWrapper);
             } else {
-                 console.error("Component root not found for ResizeObserver.");
+                 console.error("Table wrapper not found for ResizeObserver.");
             }
         } else {
-             // Handle potential re-renders if necessary (e.g., Streamlit updates component args)
-             // For now, just ensure height is adjusted on re-render
+             // Handle potential re-renders if necessary, maybe re-adjust height
              if (window.tableManager) {
                   window.tableManager.adjustHeight();
              }
         }
     }
-
-    // Initial setup listeners
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
     Streamlit.setComponentReady();
 """
 
 # Create and use the component
 table_component = generate_component('searchable_table', template=css + template, script=script)
-# Add a key for stability if needed (especially if component args change)
-table_component(key="kickstarter_table_v2")
+table_component(key="kickstarter_table") # Add a key for stability
