@@ -433,7 +433,7 @@ if not st.session_state.user_location_data and not st.session_state.geolocation_
 # Call get_geolocation conditionally
 if get_location_this_run:
     # Use a key to potentially help with statefulness across reruns
-    loc_info_from_js = get_geolocation(key="geo_request_1")
+    loc_info_from_js = get_geolocation()
     # It's possible get_geolocation returns immediately with cached denial/error, or None while waiting.
     # The script might rerun *after* the user interacts.
 
