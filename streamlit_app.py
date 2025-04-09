@@ -418,108 +418,102 @@ df_country_distances = load_country_distances()
 # Initialize session state if not already present
 if 'user_location_data' not in st.session_state:
     st.session_state.user_location_data = None # Will store {'latitude': ..., 'longitude': ..., 'country_code': ...} or None
-if 'geolocation_attempted_run' not in st.session_state:
-    # This flag resets on each full page load/new session
-    st.session_state.geolocation_attempted_run = False
+# REMOVED: No need for geolocation_attempted_run flag anymore
 
 loc_info_from_js = None
-# Only attempt to get geolocation if we haven't successfully gotten it before in this session
-# AND haven't attempted in this specific script run yet (controlled by flag below)
 get_location_this_run = False
-if not st.session_state.user_location_data and not st.session_state.geolocation_attempted_run:
+
+# Determine if we need to *attempt* to get location in this run.
+# We attempt if we don't have valid data (specifically latitude) stored yet.
+needs_location_fetch = True
+if isinstance(st.session_state.user_location_data, dict) and \
+   st.session_state.user_location_data.get('latitude') is not None:
+    needs_location_fetch = False
+
+if needs_location_fetch:
+    # Display the info message only if we are actually going to call the component
     st.info("Attempting to retrieve your location for 'Near Me' sorting. Please allow location access if prompted.")
-    st.session_state.geolocation_attempted_run = True # Mark that we will try in this run
     get_location_this_run = True
 
-# Call get_geolocation conditionally
+# Call get_geolocation conditionally. Add a key for stability.
 if get_location_this_run:
-    # Use a key to potentially help with statefulness across reruns
-    loc_info_from_js = get_geolocation()
-    # It's possible get_geolocation returns immediately with cached denial/error, or None while waiting.
-    # The script might rerun *after* the user interacts.
+    loc_info_from_js = get_geolocation(key="geo_locator")
 
-# Check if the component returned data *this time*
-if loc_info_from_js and 'coords' in loc_info_from_js:
-    try:
-        lat = loc_info_from_js['coords']['latitude']
-        lon = loc_info_from_js['coords']['longitude']
-        coords = (lat, lon)
-        print(f"Received coordinates from get_geolocation: {coords}")
+# Check if the component returned data *this time*.
+# This block will now execute on the rerun triggered by the component sending data back.
+if loc_info_from_js: # Check if it's not None or empty
+    if 'coords' in loc_info_from_js:
+        try:
+            lat = loc_info_from_js['coords']['latitude']
+            lon = loc_info_from_js['coords']['longitude']
+            coords = (lat, lon)
+            print(f"Received coordinates from get_geolocation: {coords}")
 
-        # Perform reverse geocoding *only if* we get coordinates back
-        user_country_code = None
-        geo_info = None # Initialize geo_info
-        with st.spinner('Determining your country...'):
-            try:
-                geo_info_list = reverse_geocode.search(coordinates=[coords]) # Use search for list input
-                if geo_info_list: # Check if list is not empty
-                    geo_info = geo_info_list[0] # Take first result
-                    user_country_code = geo_info.get('country_code')
-            except Exception as rg_e:
-                 print(f"Reverse geocoding library error: {rg_e}")
-                 st.warning("Could not determine country due to a geocoding library error.")
+            user_country_code = None
+            geo_info = None
+            with st.spinner('Determining your country...'):
+                try:
+                    geo_info_list = reverse_geocode.search(coordinates=[coords])
+                    if geo_info_list:
+                        geo_info = geo_info_list[0]
+                        user_country_code = geo_info.get('country_code')
+                except Exception as rg_e:
+                     print(f"Reverse geocoding library error: {rg_e}")
+                     st.warning("Could not determine country due to a geocoding library error.")
 
-
-        if user_country_code:
-            print(f"User country code determined: {user_country_code}")
-            # Store successful result in session state
+            # Store the result (partial or full) in session state IMMEDIATELY
             st.session_state.user_location_data = {
                 'latitude': lat,
                 'longitude': lon,
-                'country_code': user_country_code
+                'country_code': user_country_code # Store None if not found
             }
-            # Reset the attempt flag for the next run if needed (though not strictly necessary now)
-            # st.session_state.geolocation_attempted_run = False # We succeeded, no need to try again unless session resets
-            # Display success message temporarily
-            city_name = geo_info.get('city', 'N/A') if geo_info else 'N/A'
-            loading_success = st.success(f"Location ({city_name}, {user_country_code}) received!")
-            time.sleep(1.5)
-            loading_success.empty()
-            # Force a rerun NOW to use the new location data immediately
-            print("Rerunning script after getting location.")
-            st.rerun() # Rerun the script from the top
-        else:
-             print("Reverse geocoding did not find country code.")
-             st.warning("Could not determine country code from coordinates. 'Near Me' sort may be inaccurate.")
-             # Store partial data (lat/lon but no code)
-             st.session_state.user_location_data = {
-                'latitude': lat,
-                'longitude': lon,
-                'country_code': None
-             }
-             # Reset the attempt flag
-             # st.session_state.geolocation_attempted_run = False # Allow retry on next run if desired? Or keep true? Let's reset.
-             # Force rerun to use partial data (map might still work)
-             print("Rerunning script after getting partial location (no country code).")
-             st.rerun() # Rerun to use the partial data
+            print(f"Stored location in session state: {st.session_state.user_location_data}")
 
-    except Exception as e:
-        print(f"Error during reverse geocoding or processing location: {e}")
-        st.error(f"Error processing location: {e}")
-        # Ensure state is None if error occurs
-        st.session_state.user_location_data = None
-        # Reset attempt flag so user can potentially try again on refresh
-        st.session_state.geolocation_attempted_run = False
+            # Optional: Display temporary success message only if country code was found
+            if user_country_code:
+                city_name = geo_info.get('city', 'N/A') if geo_info else 'N/A'
+                loading_success = st.success(f"Location ({city_name}, {user_country_code}) received!")
+                time.sleep(1.5)
+                loading_success.empty()
+            else:
+                 # Warning if country code still couldn't be determined
+                 st.warning("Could not determine country code from coordinates. 'Near Me' sort may be inaccurate.")
 
-elif loc_info_from_js and 'error' in loc_info_from_js:
-     # Handle specific errors returned by get_geolocation (e.g., permission denied)
-     st.warning(f"Could not get location: {loc_info_from_js['error'].get('message', 'Geolocation permission denied or unavailable')}. 'Near Me' sort unavailable.")
-     # Ensure state is None
-     st.session_state.user_location_data = None
-     # Reset attempt flag for this run; won't try again until full refresh
-     st.session_state.geolocation_attempted_run = True # Keep true for this run to avoid loop if error persists
+            # Force a rerun NOW to use the newly stored session state data
+            print("Rerunning script after processing location data received from component.")
+            # --- CRITICAL --- Ensure rerun happens *after* state update
+            st.rerun() 
+
+        except Exception as e:
+            print(f"Error during reverse geocoding or processing location: {e}")
+            st.error(f"Error processing location: {e}")
+            st.session_state.user_location_data = None # Reset state on error
+
+    elif 'error' in loc_info_from_js:
+         error_message = loc_info_from_js['error'].get('message', 'Geolocation permission denied or unavailable')
+         st.warning(f"Could not get location: {error_message}. 'Near Me' sort unavailable.")
+         st.session_state.user_location_data = None # Reset state on error
+         # Optionally set a "denied" flag here if you want to stop asking
+         # st.session_state.location_permission_denied = True
+         # No rerun needed here, the UI will update on the next natural interaction or refresh
+
 
 # --- Use location data from session state ---
-# Reset the per-run attempt flag *after* checking loc_info_from_js, so it's fresh for the next actual run
-# st.session_state.geolocation_attempted_run = False # Keep this commented or remove, managed by session state
-
-user_location = st.session_state.user_location_data # This is now the source of truth
+# This part now correctly reads the state possibly updated by the block above
+user_location = st.session_state.user_location_data
 user_country_code = None
+
+# Derive hasLocation status *here* based on the potentially updated session state
+has_location_for_js = bool(user_location and user_location.get('latitude') is not None)
+
 if user_location and isinstance(user_location, dict) and user_location.get('country_code'):
     user_country_code = user_location['country_code']
     print(f"Using location from session state: User Country Code = {user_country_code}")
+elif has_location_for_js:
+    print(f"Using location from session state: Lat/Lon available, but no country code. User location: {user_location}")
 else:
-    print(f"Using location from session state: No valid country code found. User location: {user_location}")
+    # This case covers initial load (None) or errors/denials
+    print(f"Using location from session state: No valid location data found. User location: {user_location}")
 
 
 # --- Assign Distance based on Country Code (Lazy) ---
@@ -766,13 +760,12 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
 header_html, rows_html = generate_table_html(df_collected)
 
 # --- HTML Template ---
-# Pass the location data and status from session state to JavaScript
-# Note: Ensure user_location is the variable derived from session state
+# Pass the location data and status derived *after* the update logic
 template = f"""
 <script>
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
-    // Base hasLocation on presence of latitude (more reliable than just the dict existing)
-    window.hasLocation = {json.dumps(bool(user_location and user_location.get('latitude') is not None))};
+    // Base hasLocation on the value derived *after* potential update and rerun
+    window.hasLocation = {json.dumps(has_location_for_js)};
     window.categorySubcategoryMap = {json.dumps(category_subcategory_map)};
 </script>
 <div class="title-wrapper">
@@ -1458,10 +1451,7 @@ css = """
 """
 
 # --- SCRIPT definition ---
-# No changes needed here, as the 'nearme' sort uses data-distance,
-# which is now populated with country-level distance by Python.
-# The check `if (!this.userLocation)` still correctly handles the
-# case where location permission wasn't granted.
+# Optional but recommended: Update JS safety check in sortRows
 script = """
     // Helper functions
     function debounce(func, wait) {
@@ -1552,16 +1542,16 @@ script = """
                     return scoreB - scoreA;
                 });
             } else if (sortType === 'nearme') { // RE-ADD case
-                if (!this.userLocation) {
-                    console.warn("Attempted to sort by 'Near Me' without location. Falling back to popularity.");
-                    // Reset sort dropdown and internal state
-                    const sortSelect = document.getElementById('sortFilter');
-                     if (sortSelect.value === 'nearme') {
-                           sortSelect.value = 'popularity';
-                           this.currentSort = 'popularity';
+                 // Align check with the variable used for disabling the option
+                 // This is now primarily a safety net, as the option should be disabled if false
+                if (!this.hasLocation) { 
+                    console.warn("Safety Check: Attempted to sort by 'Near Me' when location is not marked as available. Aborting sort.");
+                     // Reset sort dropdown just in case it visually changed
+                     const sortSelect = document.getElementById('sortFilter');
+                     if (sortSelect && sortSelect.value === 'nearme') {
+                           sortSelect.value = this.currentSort || 'popularity'; // Revert to previous or default sort
                      }
-                    await this.sortRows('popularity'); // Re-sort by popularity
-                    return; // Exit early
+                    return; // Exit sorting function
                 }
                 // Sort by pre-calculated distance stored in data-distance
                 this.visibleRows.sort((a, b) => {
@@ -1705,14 +1695,20 @@ script = """
             // Disable 'Near Me' option if location is not available
             const sortSelect = document.getElementById('sortFilter');
             const nearMeOption = sortSelect ? sortSelect.querySelector('option[value="nearme"]') : null;
-            if (nearMeOption && !this.hasLocation) {
-                 nearMeOption.disabled = true;
-                 // Optional: Add a title to explain why it's disabled
-                 nearMeOption.title = "Location not available"; 
-                 console.log("Near Me sort option disabled as location is unavailable.");
+            if (nearMeOption) { // Check if option exists first
+                if (!this.hasLocation) {
+                     nearMeOption.disabled = true;
+                     nearMeOption.title = "Location not available or permission denied."; 
+                     console.log("Near Me sort option disabled as location is unavailable.");
+                } else {
+                     // Ensure it's enabled if location *is* available (covers case where it might have been disabled previously)
+                     nearMeOption.disabled = false;
+                     nearMeOption.title = ""; // Clear any previous title
+                }
             }
 
-            this.applyAllFilters();
+
+            this.applyAllFilters(); // This will apply the default 'popularity' sort
             this.updateTable();
             // Initial population of subcategories based on default 'All Categories'
             this.updateSubcategoryOptions(); 
