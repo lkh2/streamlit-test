@@ -1529,7 +1529,8 @@ script = """
             this.currentSearchTerm = '';
             this.currentFilters = null;
             this.currentSort = 'popularity';
-            this.userLocation = window.userLocation;
+            this.userLocation = window.userLocation; // Read from global scope
+            this.hasLocation = window.hasLocation; // Read from global scope
             this.distanceCache = new DistanceCache();
             this.initialize();
             this.resetFilters();
@@ -1700,6 +1701,17 @@ script = """
             this.setupFilters(); // This will now handle the hierarchical setup
             this.setupRangeSlider();
             this.currentSort = 'popularity';  // Set default sort to popularity
+
+            // Disable 'Near Me' option if location is not available
+            const sortSelect = document.getElementById('sortFilter');
+            const nearMeOption = sortSelect ? sortSelect.querySelector('option[value="nearme"]') : null;
+            if (nearMeOption && !this.hasLocation) {
+                 nearMeOption.disabled = true;
+                 // Optional: Add a title to explain why it's disabled
+                 nearMeOption.title = "Location not available"; 
+                 console.log("Near Me sort option disabled as location is unavailable.");
+            }
+
             this.applyAllFilters();
             this.updateTable();
             // Initial population of subcategories based on default 'All Categories'
