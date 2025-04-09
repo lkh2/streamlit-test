@@ -413,80 +413,118 @@ def load_country_distances() -> pl.DataFrame | None:
 df_country_distances = load_country_distances()
 
 # --- Geolocation Fetching & Country Code Determination ---
-loc = get_geolocation()
+loc = get_geolocation() # This happens *before* the distance assignment section
 user_location = None
 user_country_code = None
 
 if loc and 'coords' in loc:
     try:
         coords = (loc['coords']['latitude'], loc['coords']['longitude'])
-        # Add a spinner while reverse geocoding
+        print(f"Attempting reverse geocoding for coordinates: {coords}") # Added log
         with st.spinner('Determining your country...'):
-            geo_info_list = reverse_geocode.get(coords) # Returns a list
-            if geo_info_list: # Check if the list is not empty
-                 geo_info = geo_info_list # Take the first result
-                 user_country_code = geo_info.get('country_code')
-                 print(f"User country code determined: {user_country_code}")
-                 # Still store precise location for potential future use / JS check
-                 user_location = {
-                     'latitude': loc['coords']['latitude'],
-                     'longitude': loc['coords']['longitude'],
-                     'country_code': user_country_code # Add country code here
-                 }
-                 loading_success = st.success(f"Location ({geo_info.get('city', 'N/A')}, {user_country_code}) received!")
-                 time.sleep(1.5)
-                 loading_success.empty()
+            geo_info_list = reverse_geocode.get(coords)
+            if geo_info_list:
+                geo_info = geo_info_list # Assuming first result is best
+                user_country_code = geo_info.get('country_code')
+                if user_country_code: # Check if code was actually found
+                    print(f"User country code determined: {user_country_code}")
+                    user_location = {
+                        'latitude': loc['coords']['latitude'],
+                        'longitude': loc['coords']['longitude'],
+                        'country_code': user_country_code
+                    }
+                    loading_success = st.success(f"Location ({geo_info.get('city', 'N/A')}, {user_country_code}) received!")
+                    time.sleep(1.5)
+                    loading_success.empty()
+                else:
+                     print("Reverse geocoding successful, but country code not found in result.") # Added log
+                     st.warning("Could not determine country code from coordinates.")
+                     user_location = { # Still store lat/lon
+                         'latitude': loc['coords']['latitude'],
+                         'longitude': loc['coords']['longitude']
+                     }
             else:
+                 print("Reverse geocoding failed (returned empty list).") # Added log
                  st.warning("Could not determine country from coordinates.")
-                 # Keep user_location with just lat/lon if reverse geocoding fails
                  user_location = {
                      'latitude': loc['coords']['latitude'],
                      'longitude': loc['coords']['longitude']
                  }
 
     except Exception as e:
+        print(f"Error during reverse geocoding: {e}") # Added log
         st.error(f"Error during reverse geocoding: {e}")
-         # Keep user_location with just lat/lon if reverse geocoding fails
         user_location = {
             'latitude': loc['coords']['latitude'],
             'longitude': loc['coords']['longitude']
         }
+else:
+    print("Geolocation data not available or missing coordinates.") # Added log
+
 
 # --- Assign Distance based on Country Code (Lazy) ---
+distance_assigned = False # Flag to track if distance was assigned via join
+
 if user_country_code and df_country_distances is not None and 'Country Code' in lf.schema:
     print(f"Assigning distances based on user country: {user_country_code}")
-    # Filter precomputed distances for the user's country
-    user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
-                                         .select(['code_to', 'distance']) \
-                                         .rename({'code_to': 'Country Code', 'distance': 'Distance'}) # Rename for join
+    try:
+        # Filter precomputed distances for the user's country
+        user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
+                                             .select(['code_to', 'distance']) \
+                                             .rename({'code_to': 'Country Code', 'distance': 'Distance'})
 
-    # Join the main LazyFrame with the filtered distances
-    lf = lf.join(
-        user_distances.lazy(),
-        on='Country Code',
-        how='left' # Keep all projects, assign null distance if country code doesn't match
-    )
+        # Check if user_distances is empty (e.g., user country not in the distance file)
+        if user_distances.height == 0: # Use .height for eager check on small frame
+             print(f"Warning: No precomputed distances found for user country code '{user_country_code}'.")
+             st.warning(f"No precomputed distances found for your country ({user_country_code}). Distance sorting may not be accurate.")
+             # Even if no distances found, proceed to add the column below with fill_null
+             # Ensure the Distance column exists conceptually for the join/fill logic
+             lf = lf.with_columns(pl.lit(None).cast(pl.Float64).alias('Distance_placeholder_for_null_fill')) # Add a temporary column to ensure join target exists if needed, then fill null below. Not ideal, check logic below
+             # Let's rethink this part slightly. The join should add the column if matches found, or not add it if user_distances is empty.
+             # The fill_null below handles the case where the column *was* added by the join but some rows didn't match.
 
-    # Fill missing distances with infinity and ensure correct type
-    lf = lf.with_columns(
-        pl.col('Distance').fill_null(float('inf')).cast(pl.Float64)
-    )
-    print("Country-based distances assigned to LazyFrame plan.")
+        # Perform the join only if there are distances to join
+        if user_distances.height > 0:
+            lf = lf.join(
+                user_distances.lazy(),
+                on='Country Code',
+                how='left' # Keep all projects
+            )
+            # Now, 'Distance' column exists if the join happened and had matches.
 
-else:
+        # Fill missing distances (projects from countries not in user_distances, join mismatches, or if user_distances was empty)
+        # and ensure correct type. Use `coalesce` to add the column if it doesn't exist OR fill nulls if it does.
+        lf = lf.with_columns(
+            pl.coalesce(pl.col('Distance'), pl.lit(float('inf'))).cast(pl.Float64).alias('Distance')
+        )
+        print("Country-based distances assigned/filled in LazyFrame plan.")
+        distance_assigned = True # Mark distance as assigned (or attempted)
+
+    except Exception as e:
+        print(f"Error during distance join/assignment: {e}") # Added log
+        st.error(f"Error assigning project distances: {e}")
+        # Explicitly add Distance column with infinity if join failed mid-way and column doesn't exist
+        if 'Distance' not in lf.schema:
+            lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+        else: # Ensure type and fill nulls if column exists but might have issues
+            lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
+
+# If distance wasn't assigned by the join logic above (e.g., prerequisite failed), add it now
+if not distance_assigned:
     if not user_country_code:
-         print("User country code not available.")
+         print("User country code not available for distance assignment.")
     if df_country_distances is None:
-         print("Precomputed country distances not loaded.")
+         print("Precomputed country distances not loaded for distance assignment.")
     if 'Country Code' not in lf.schema:
-         print("'Country Code' column missing in main data schema.")
+         print("'Country Code' column missing in main data schema for distance assignment.")
 
-    print("Setting Distance to infinity (Lazy).")
-    # Add Distance column lazily if it wasn't added/filled above
+    print("Setting Distance to infinity (Lazy) as primary assignment because join prerequisites failed or join yielded no distances.")
+    # Add Distance column lazily if it wasn't added at all
     if 'Distance' not in lf.schema:
         lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
     else:
-         # Ensure it's float and fill nulls if join failed partially
+         # If it somehow exists but flag is false, ensure nulls are filled
+         print("Warning: Distance column existed but distance_assigned flag was false. Filling nulls.")
          lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
 
 
@@ -500,6 +538,7 @@ try:
          st.error("Critical Error: Distance column was not added to the LazyFrame before collection.")
          # Attempt to add it now as a fallback, though ideally it should exist
          lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+         print("Fallback: Added Distance column just before collect.") # Log fallback
 
     df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
@@ -508,8 +547,11 @@ try:
         st.error("Critical Error: Distance column is missing in the collected DataFrame.")
         # Add it here with default values if absolutely necessary, but indicates a prior logic error
         df_collected = df_collected.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+        print("Fallback: Added Distance column to collected DataFrame.") # Log fallback
+    else:
+        # Optional: Log a sample of distances from the collected frame
+        print("Sample distances from collected frame:", df_collected['Distance'].head(5).to_list())
 
-    print(f"Collect duration: {collect_duration:.2f} seconds")
     loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
     time.sleep(1.5)
     loaded.empty()
@@ -584,6 +626,11 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
         distance_val = row.get('Distance', float('inf'))
         # Ensure distance is finite for formatting, default to large number if inf
         display_distance = distance_val if np.isfinite(distance_val) else 9999999.0
+        # --- DEBUG LOG ---
+        # Uncomment below to log specific project distances during HTML generation
+        # if row.get('Country Code') == user_country_code: # Log projects matching user country for distance check
+        #      print(f"DEBUG HTML Gen: Project: {row.get('Project Name')} ({row.get('Country Code')}), Raw Distance: {distance_val}, Display Distance: {display_distance}")
+        # ---------------
 
         data_attrs = f'''
             data-category="{row.get('Category', 'N/A')}"
