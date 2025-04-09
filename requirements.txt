@@ -1,8 +1,7 @@
 numpy
 pandas
+polars
 psutil
-pymongo[tls,srv]==3.11.1
+reverse_geocode
 streamlit
 streamlit_js_eval
-polars
-reverse_geocode

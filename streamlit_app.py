@@ -9,6 +9,7 @@ import numpy as np
 import gzip
 import glob
 import polars as pl
+import reverse_geocode # Import reverse_geocode
 
 st.set_page_config(layout="wide")
 
@@ -264,51 +265,6 @@ if (loc and 'coords' in loc):
     time.sleep(1.5)
     loading_success.empty()
 
-# --- RE-ADD Distance Calculation Function and Logic (Lazy) ---
-def calculate_distance(lat1, lon1, lat2, lon2):
-    """Calculate distance between two points using Haversine formula"""
-    R = 6371  # Earth's radius in kilometers
-
-    # Ensure inputs are floats before conversion
-    try:
-        lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
-    except (ValueError, TypeError):
-        return float('inf') # Return infinity if conversion fails
-
-    lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(np.radians, [lat1, lon1, lat2, lon2])
-
-    dlat = lat2_rad - lat1_rad
-    dlon = lon2_rad - lon1_rad
-
-    a = np.sin(dlat/2)**2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon/2)**2
-    c = 2 * np.arcsin(np.sqrt(a))
-
-    return R * c
-
-# Calculate distances if user location is available (Lazy)
-if user_location and 'latitude' in lf.schema and 'longitude' in lf.schema:
-    print("Adding distance calculation to LazyFrame plan...")
-    user_lat = float(user_location['latitude'])
-    user_lon = float(user_location['longitude'])
-
-    # Apply the distance function lazily using Polars expressions
-    lf = lf.with_columns(
-        pl.struct(['latitude', 'longitude'])
-        # The apply function here will be executed when .collect() is called
-        .apply(lambda x: calculate_distance(user_lat, user_lon, x['latitude'], x['longitude']),
-               return_dtype=pl.Float64) # Specify return type for apply in lazy mode
-        .alias('Distance')
-    )
-    print("Distance calculation added to plan.")
-
-else:
-    print("User location not available or lat/lon columns missing in schema. Setting Distance to infinity (Lazy).")
-    # Add Distance column lazily
-    lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-
-
-# --- Calculate Filter Options and Min/Max (More Efficiently) ---
-
 # Prepare filter options (operate lazily as much as possible)
 @st.cache_data
 def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to indicate mutation
@@ -352,24 +308,31 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
                        all_subcategories_set.add(subcategory)
 
              # Add sorted unique subcategories to 'All Categories'
-             category_subcategory_map['All Categories'] += sorted(list(all_subcategories_set))
+             # Ensure 'All Subcategories' is first
+             all_sorted_subcats = sorted(list(all_subcategories_set))
+             category_subcategory_map['All Categories'] = ['All Subcategories'] + all_sorted_subcats
+
 
              # Sort subcategories within each category
              for cat in category_subcategory_map:
                  # Keep 'All Subcategories' first if present, sort the rest
                  subcats = category_subcategory_map[cat]
+                 prefix = []
+                 rest = []
                  if 'All Subcategories' in subcats:
                      prefix = ['All Subcategories']
                      rest = sorted([s for s in subcats if s != 'All Subcategories'])
-                     category_subcategory_map[cat] = prefix + rest
                  else:
-                     category_subcategory_map[cat] = sorted(subcats)
+                      rest = sorted(subcats) # Sort all if 'All Subcategories' isn't there
+
+                 # Rebuild the list for the category
+                 category_subcategory_map[cat] = prefix + rest
 
         # Handle Subcategories if Category doesn't exist (fallback)
         elif 'Subcategory' in _lf.schema and 'Category' not in _lf.schema:
              subcategories_unique = _lf.select(pl.col('Subcategory')).unique().collect()['Subcategory']
              all_subcats = sorted(subcategories_unique.filter(subcategories_unique.is_not_null() & (subcategories_unique != "N/A")).to_list())
-             category_subcategory_map['All Categories'] += all_subcats # Add to default
+             category_subcategory_map['All Categories'] = ['All Subcategories'] + all_subcats # Add to default
 
         # Ensure 'All Subcategories' exists if map is otherwise empty for it
         if not category_subcategory_map['All Categories']:
@@ -388,8 +351,8 @@ def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to ind
              sample_state = states_collected.head(1).to_list()
              if sample_state and sample_state[0] and sample_state[0].startswith('<div class="state_cell state-'):
                   # Perform extraction on the collected Series
-                  extracted_states = states_collected.str.extract(r'state-(\w+)', 1).unique().drop_nulls().to_list()
-                  options['states'] += sorted([state.capitalize() for state in extracted_states if state != 'unknown'])
+                  extracted_states = states_collected.str.extract(r'>(\w+)<', 1).unique().drop_nulls().to_list() # Extract content
+                  options['states'] += sorted([state.capitalize() for state in extracted_states if state.lower() != 'unknown']) # Capitalize and filter unknown
              else: # Assume it's plain text if no HTML structure detected
                   plain_states = states_collected.filter(states_collected.is_not_null() & (states_collected != "N/A")).unique().to_list()
                   options['states'] += sorted([s.capitalize() for s in plain_states])
@@ -438,12 +401,108 @@ if all(col in lf.schema for col in required_minmax_cols):
         min_raised = int(min_max_vals['min_raised'][0]) if min_max_vals['min_raised'][0] is not None else 0
         max_raised_calc_val = min_max_vals['max_raised_calc'][0]
         # Cap max_raised for the slider range
-        max_raised = int(max_raised_calc_val)
+        max_raised = int(max_raised_calc_val) if max_raised_calc_val is not None else 500 # Use default if max is None
         print("Min/max ranges calculated.")
     except Exception as e:
         st.error(f"Error calculating min/max filter ranges: {e}. Using defaults.")
 else:
-    st.error("Missing columns required for min/max filter ranges in schema. Using defaults.")
+    st.warning("Missing columns required for min/max filter ranges in schema. Using defaults.")
+
+
+# --- Load Precomputed Country Distances ---
+@st.cache_data
+def load_country_distances() -> pl.DataFrame | None:
+    path = 'country_distances.parquet'
+    if not os.path.exists(path):
+        st.error(f"{path} not found. Please run compute_country_distances.py first.")
+        return None
+    try:
+        print("Loading precomputed country distances...")
+        df_dist = pl.read_parquet(path)
+        print("Country distances loaded.")
+        return df_dist
+    except Exception as e:
+        st.error(f"Error loading {path}: {e}")
+        return None
+
+df_country_distances = load_country_distances()
+
+# --- Geolocation Fetching & Country Code Determination ---
+loc = get_geolocation()
+user_location = None
+user_country_code = None
+
+if loc and 'coords' in loc:
+    try:
+        coords = (loc['coords']['latitude'], loc['coords']['longitude'])
+        # Add a spinner while reverse geocoding
+        with st.spinner('Determining your country...'):
+            geo_info_list = reverse_geocode.get(coords) # Returns a list
+            if geo_info_list: # Check if the list is not empty
+                 geo_info = geo_info_list # Take the first result
+                 user_country_code = geo_info.get('country_code')
+                 print(f"User country code determined: {user_country_code}")
+                 # Still store precise location for potential future use / JS check
+                 user_location = {
+                     'latitude': loc['coords']['latitude'],
+                     'longitude': loc['coords']['longitude'],
+                     'country_code': user_country_code # Add country code here
+                 }
+                 loading_success = st.success(f"Location ({geo_info.get('city', 'N/A')}, {user_country_code}) received!")
+                 time.sleep(1.5)
+                 loading_success.empty()
+            else:
+                 st.warning("Could not determine country from coordinates.")
+                 # Keep user_location with just lat/lon if reverse geocoding fails
+                 user_location = {
+                     'latitude': loc['coords']['latitude'],
+                     'longitude': loc['coords']['longitude']
+                 }
+
+    except Exception as e:
+        st.error(f"Error during reverse geocoding: {e}")
+         # Keep user_location with just lat/lon if reverse geocoding fails
+        user_location = {
+            'latitude': loc['coords']['latitude'],
+            'longitude': loc['coords']['longitude']
+        }
+
+# --- Assign Distance based on Country Code (Lazy) ---
+if user_country_code and df_country_distances is not None and 'Country Code' in lf.schema:
+    print(f"Assigning distances based on user country: {user_country_code}")
+    # Filter precomputed distances for the user's country
+    user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
+                                         .select(['code_to', 'distance']) \
+                                         .rename({'code_to': 'Country Code', 'distance': 'Distance'}) # Rename for join
+
+    # Join the main LazyFrame with the filtered distances
+    lf = lf.join(
+        user_distances.lazy(),
+        on='Country Code',
+        how='left' # Keep all projects, assign null distance if country code doesn't match
+    )
+
+    # Fill missing distances with infinity and ensure correct type
+    lf = lf.with_columns(
+        pl.col('Distance').fill_null(float('inf')).cast(pl.Float64)
+    )
+    print("Country-based distances assigned to LazyFrame plan.")
+
+else:
+    if not user_country_code:
+         print("User country code not available.")
+    if df_country_distances is None:
+         print("Precomputed country distances not loaded.")
+    if 'Country Code' not in lf.schema:
+         print("'Country Code' column missing in main data schema.")
+
+    print("Setting Distance to infinity (Lazy).")
+    # Add Distance column lazily if it wasn't added/filled above
+    if 'Distance' not in lf.schema:
+        lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+    else:
+         # Ensure it's float and fill nulls if join failed partially
+         lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
 
 
 # --- Main Collect and Cleanup ---
@@ -451,14 +510,27 @@ df_collected = None
 try:
     print("Collecting final DataFrame for display...")
     start_collect_time = time.time()
+    # Check if Distance column exists before collecting
+    if 'Distance' not in lf.columns:
+         st.error("Critical Error: Distance column was not added to the LazyFrame before collection.")
+         # Attempt to add it now as a fallback, though ideally it should exist
+         lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+
     df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
+    # Check if Distance column actually made it into the collected frame
+    if 'Distance' not in df_collected.columns:
+        st.error("Critical Error: Distance column is missing in the collected DataFrame.")
+        # Add it here with default values if absolutely necessary, but indicates a prior logic error
+        df_collected = df_collected.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
+
+    print(f"Collect duration: {collect_duration:.2f} seconds")
     loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
     time.sleep(1.5)
     loaded.empty()
 except Exception as e:
     st.error(f"Error collecting final DataFrame: {e}")
-    df_collected = pl.DataFrame()
+    df_collected = pl.DataFrame() # Ensure it's an empty Polars DF
 finally:
     # --- IMPORTANT: Clean up the temporary file AFTER collect attempt ---
     if temp_parquet_path and os.path.exists(temp_parquet_path):
@@ -470,7 +542,11 @@ finally:
 
 # Check collection result
 if df_collected.is_empty():
-     st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
+     # Check if the original lf was likely empty vs collection failure
+     if lf.head(1).collect().is_empty():
+         st.warning("Original data source seems empty or filtered to empty.")
+     else:
+         st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
      st.stop()
 
 
@@ -479,25 +555,29 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
     # Define visible columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
 
-    # Ensure all required columns for data attributes exist (ADD Distance back)
+    # Ensure all required columns for data attributes exist (Distance should be present now)
     required_data_cols = [
         'Category', 'Subcategory', 'Raw Pledged', 'Raw Goal', 'Raw Raised',
         'Raw Date', 'Raw Deadline', 'Backer Count', 'latitude', 'longitude',
-        'Country Code', 'Distance', 'Popularity Score' # ADDED Distance
+        'Country Code', 'Distance', 'Popularity Score' # Distance is crucial
     ]
     missing_data_cols = [col for col in required_data_cols if col not in df_display.columns]
     if missing_data_cols:
-        st.error(f"Missing required columns for table generation: {missing_data_cols}. Check data processing steps.")
-        return "", ""
+        # Make this a more severe error as Distance is fundamental now
+        st.error(f"FATAL: Missing required columns for table generation: {missing_data_cols}. Check data processing steps, especially Distance assignment.")
+        # Add a dummy Distance column to prevent crashing html generation, but data will be wrong
+        if 'Distance' in missing_data_cols and 'Distance' not in df_display.columns:
+             df_display = df_display.with_columns(pl.lit(float('inf')).alias('Distance'))
+        # return "", "" # Stop generation if critical columns missing
 
     # Ensure visible columns exist
     missing_visible_cols = [col for col in visible_columns if col not in df_display.columns]
     if missing_visible_cols:
-         st.error(f"Missing visible columns for table: {missing_visible_cols}. Check database_download.py.")
+         st.warning(f"Missing visible columns for table: {missing_visible_cols}. Check database_download.py or initial data processing.")
          # Attempt to continue with available columns
          visible_columns = [col for col in visible_columns if col in df_display.columns]
          if not visible_columns:
-              return "", ""
+              return "", "" # Cannot proceed if no visible columns
 
 
     # Generate header for visible columns only
@@ -506,10 +586,20 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
     # Generate table rows with raw values in data attributes
     rows_html = ''
     # Convert collected DataFrame to dicts efficiently
-    data_dicts = df_display.to_dicts()
+    # Add error handling for to_dicts()
+    try:
+        data_dicts = df_display.to_dicts()
+    except Exception as e:
+        st.error(f"Error converting DataFrame to dictionaries: {e}")
+        return header_html, "" # Return header but empty rows
+
 
     for row in data_dicts:
-         # Safely format data attributes (ADD Distance back)
+         # Safely format data attributes (Check Distance exists in the row dict)
+        distance_val = row.get('Distance', float('inf'))
+        # Ensure distance is finite for formatting, default to large number if inf
+        display_distance = distance_val if np.isfinite(distance_val) else 9999999.0
+
         data_attrs = f'''
             data-category="{row.get('Category', 'N/A')}"
             data-subcategory="{row.get('Subcategory', 'N/A')}"
@@ -522,7 +612,7 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
             data-latitude="{row.get('latitude', 0.0):.6f}"
             data-longitude="{row.get('longitude', 0.0):.6f}"
             data-country-code="{row.get('Country Code', 'N/A')}"
-            data-distance="{row.get('Distance', float('inf')):.2f}"
+            data-distance="{display_distance:.2f}"
             data-popularity="{row.get('Popularity Score', 0.0):.6f}"
         '''
 
@@ -536,7 +626,9 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
                 display_url = url if len(url) < 60 else url[:57] + '...'
                 visible_cells += f'<td><a href="{url}" target="_blank" title="{url}">{display_url}</a></td>'
             elif col == 'State': # State column already contains HTML
-                 visible_cells += f'<td>{value}</td>'
+                 # Ensure value is a string before adding
+                 state_html = str(value) if value is not None else 'N/A'
+                 visible_cells += f'<td>{state_html}</td>'
             else:
                 # Escape potential HTML in other cells
                 import html
@@ -549,12 +641,14 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
 # Generate HTML using the collected DataFrame
 header_html, rows_html = generate_table_html(df_collected)
 
+# --- HTML Template ---
+# RE-ADD user location (including country code if available)
+# RE-ADD category-subcategory mapping
+# REMOVE conditional for 'Near Me' sort option
 template = f"""
 <script>
-    // RE-ADD user location to JavaScript
     window.userLocation = {json.dumps(user_location) if user_location else 'null'};
     window.hasLocation = {json.dumps(bool(user_location))};
-    // ADD category-subcategory mapping
     window.categorySubcategoryMap = {json.dumps(category_subcategory_map)};
 </script>
 <div class="title-wrapper">
@@ -597,7 +691,7 @@ template = f"""
                 <option value="mostfunded">Most Funded</option>
                 <option value="mostbacked">Most Backed</option>
                 <option value="enddate">End Date</option>
-                {'<option value="nearme">Near Me</option>' if user_location else ''}
+                <option value="nearme">Near Me</option>
             </select>
         </div>
         <div class="filter-row">
@@ -1240,7 +1334,10 @@ css = """
 """
 
 # --- SCRIPT definition ---
-# RE-ADD distance-related logic
+# No changes needed here, as the 'nearme' sort uses data-distance,
+# which is now populated with country-level distance by Python.
+# The check `if (!this.userLocation)` still correctly handles the
+# case where location permission wasn't granted.
 script = """
     // Helper functions
     function debounce(func, wait) {
@@ -1660,6 +1757,11 @@ script = """
                 fillSlider(raisedFromSlider, raisedToSlider, '#C6C6C6', '#5932EA', raisedToSlider);
             }
 
+            // Reset Date Filter
+            const dateFilterSelect = document.getElementById('dateFilter');
+            if (dateFilterSelect) {
+                dateFilterSelect.value = 'All Time'; // Set to the default value
+            }
             this.searchInput.value = '';
             this.currentSearchTerm = '';
             this.currentFilters = null; // Filters will be reapplied by applyAllFilters
@@ -2314,4 +2416,4 @@ script = """
 
 # Create and use the component
 table_component = generate_component('searchable_table', template=css + template, script=script)
-table_component(key="kickstarter_table") # Add a key for stability
+table_component(key="kickstarter_table")
