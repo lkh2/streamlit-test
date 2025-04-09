@@ -91,7 +91,7 @@ def generate_component(name, template="", script=""):
     return f
 
 # *** IMPORTANT: Process the Parquet file before running this script (See README.md) ***
-parquet_source_path = "data.parquet" 
+parquet_source_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.parquet")
 
 if not os.path.exists(parquet_source_path):
     st.error(f"Parquet data source not found at '{parquet_source_path}'. Please ensure the file/directory exists in the project root.")
