@@ -2,13 +2,11 @@ import time
 import streamlit as st
 import streamlit.components.v1 as components
 import tempfile, os
-import pandas as pd
 import json
-import numpy as np
 import gzip
 import glob
 import polars as pl
-import html # For escaping HTML in table cells
+import atexit
 
 st.set_page_config(layout="wide")
 
@@ -90,87 +88,149 @@ def generate_component(name, template="", script=""):
         return component_value
     return f
 
-@st.cache_data
-def load_data_from_parquet_chunks() -> tuple[pl.LazyFrame | None, str | None]: # Return LazyFrame and temp file path
+# --- Helper function for explicit cleanup (safeguard) ---
+_registered_cleanup_files = set() # Global track of files registered for cleanup
+
+def cleanup_temp_file(filepath):
+    """Function to delete a temporary file if it exists."""
+    global _registered_cleanup_files
+    if filepath and os.path.exists(filepath):
+        try:
+            print(f"Atexit cleanup: Attempting to delete {filepath}")
+            os.unlink(filepath)
+            if filepath in _registered_cleanup_files:
+                _registered_cleanup_files.remove(filepath)
+            print(f"Atexit cleanup: Successfully deleted {filepath}")
+        except OSError as e:
+            print(f"Atexit cleanup: Error deleting file {filepath}: {e}")
+    elif filepath in _registered_cleanup_files:
+         # Remove from tracking if registered but doesn't exist anymore
+        _registered_cleanup_files.remove(filepath)
+
+
+# --- Cached Resource Function for Data Preparation ---
+@st.cache_resource(ttl=3600) # Cache the resource (file path) for 1 hour
+def _get_decompressed_parquet_path() -> str | None:
     """
-    Scan data from compressed parquet chunks lazily.
-    Combines chunks first, then scans the resulting file.
-    Returns a tuple: (LazyFrame, temp_file_path_to_delete_later)
+    Combines and decompresses parquet chunks into a single persistent temporary file.
+    Returns the path to this file. Cleanup is handled by Streamlit's resource
+    caching mechanism and a backup atexit handler.
     """
+    global _registered_cleanup_files
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
 
     if not chunk_files:
         st.error("No parquet chunks found in parquet_gz_chunks folder. Please run database_download.py first.")
-        return None, None # Indicate error
+        return None
 
     progress_bar = st.progress(0)
     status_text = st.empty()
-    status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
+    status_text.text(f"Found {len(chunk_files)} chunk files. Pre-processing data...")
 
-    combined_filename = None
-    decompressed_file_obj = None # To hold the file object
-    decompressed_filename = None # To hold the file path
-    lf = None
+    combined_filename_gz = None
+    decompressed_file_obj = None
+    decompressed_filename = None
 
     try:
-        # Create a temporary file for the combined chunks (deleted automatically on close)
-        with tempfile.NamedTemporaryFile(delete=True, suffix='.parquet.gz') as combined_file:
-            combined_filename = combined_file.name # Get path for potential logging
+        # 1. Combine into one temp gzipped file (auto-deleted)
+        with tempfile.NamedTemporaryFile(delete=True, suffix='.parquet.gz') as combined_file_gz:
+            combined_filename_gz = combined_file_gz.name
             chunk_files = sorted(chunk_files)
+            total_chunks = len(chunk_files)
             for i, chunk_file in enumerate(chunk_files):
                 try:
                     with open(chunk_file, 'rb') as f:
-                        combined_file.write(f.read())
-                    progress_bar.progress((i + 1) / (2 * len(chunk_files)))
-                    status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
+                        combined_file_gz.write(f.read())
+                    progress_bar.progress((i + 1) / (total_chunks * 2)) # Progress for combining
+                    status_text.text(f"Combined chunk {i+1}/{total_chunks}")
                 except Exception as e:
-                    st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
+                    st.warning(f"Error reading chunk {chunk_file}: {str(e)}") # Continue on chunk error?
 
-            combined_file.flush() # Ensure all data is written before gzip reads it
+            combined_file_gz.flush()
 
+            # 2. Decompress into a persistent temp file (delete=False)
             status_text.text("Decompressing combined file...")
-            # Create the decompressed file - IMPORTANT: delete=False
+            # delete=False needed: Streamlit resource manager / atexit handles cleanup
             decompressed_file_obj = tempfile.NamedTemporaryFile(delete=False, suffix='.parquet')
-            decompressed_filename = decompressed_file_obj.name # Store the path
+            decompressed_filename = decompressed_file_obj.name
 
-            with gzip.open(combined_filename, 'rb') as gz_file:
-                 # Write decompressed data to the persistent temp file
+            with gzip.open(combined_filename_gz, 'rb') as gz_file:
                 decompressed_file_obj.write(gz_file.read())
-            decompressed_file_obj.close() # Close the file handle, but file persists
 
+            progress_bar.progress(1.0) # Progress for decompression
+            status_text.text("Data pre-processing complete.")
+            print(f"Prepared temporary data file: {decompressed_filename}")
 
-        # Scan the decompressed parquet file using Polars Lazily
-        status_text.text("Scanning pre-processed parquet data...")
-        progress_bar.progress(0.75)
+            # --- Register for cleanup using atexit as a safeguard ---
+            if decompressed_filename not in _registered_cleanup_files:
+                print(f"Registering atexit cleanup for: {decompressed_filename}")
+                atexit.register(cleanup_temp_file, decompressed_filename)
+                _registered_cleanup_files.add(decompressed_filename)
+            # --- End Cleanup Registration ---
 
-        lf = pl.scan_parquet(decompressed_filename)
+            return decompressed_filename
 
-        progress_bar.progress(1.0)
+    except Exception as e:
+        st.error(f"Error during data pre-processing: {str(e)}")
+        # Clean up the decompressed file ONLY if it was created AND an error occurred
+        if decompressed_filename and os.path.exists(decompressed_filename):
+            cleanup_temp_file(decompressed_filename) # Use the cleanup function
+        return None # Indicate error
+    finally:
+        # Ensure the file object is closed, but the file persists
+        if decompressed_file_obj:
+            decompressed_file_obj.close()
+        # Clear progress indicators
         status_text.empty()
         progress_bar.empty()
 
-        # Return the LazyFrame and the path to the temp file that needs deletion later
-        return lf, decompressed_filename
 
-    except Exception as e:
-        st.error(f"Error processing parquet file for scanning: {str(e)}")
-         # Clean up the decompressed file if it exists and an error occurred
-        if decompressed_filename and os.path.exists(decompressed_filename):
-            try:
-                os.unlink(decompressed_filename)
-            except OSError as unlink_error:
-                st.warning(f"Error cleaning up temporary decompressed file on error: {unlink_error}")
-        return None, None # Indicate error
-    # No finally block needed here for decompressed_filename, as we return its path
+# --- Main script execution ---
+
+# Get the path to the prepared data file via the cached resource function
+temp_parquet_path = _get_decompressed_parquet_path()
+
+# Exit if data preparation failed
+if temp_parquet_path is None:
+     st.error("Failed to prepare data. Cannot proceed.")
+     st.stop() # Stop execution
+
+# Check if the file expected from the cache actually exists
+if not os.path.exists(temp_parquet_path):
+    st.error(f"Prepared data file {temp_parquet_path} not found. Cache might be stale.")
+    st.warning("Attempting to clear cache and rerun...")
+    # Clear the specific resource cache entry
+    _get_decompressed_parquet_path.clear()
+    # Rerun the script to force regeneration
+    st.rerun()
 
 
-# Load pre-processed data lazily
-lf, temp_parquet_path = load_data_from_parquet_chunks()
+# Now, scan the prepared parquet file lazily (this is fast)
+lf = None
+try:
+    lf = pl.scan_parquet(temp_parquet_path)
+    print(f"Successfully scanned: {temp_parquet_path}")
+except Exception as e:
+    st.error(f"Error scanning the prepared parquet file {temp_parquet_path}: {e}")
+    st.stop()
 
-# Exit if loading failed
-if lf is None or temp_parquet_path is None:
-     st.error("Failed to load or scan data. Cannot proceed.")
-     st.stop() # Stop execution if lf is None
+
+# --- Check if LazyFrame is potentially empty ---
+try:
+    # Apply head(0) lazily, then collect the empty frame with the correct schema
+    schema_check = lf.head(0).collect()
+    if schema_check.is_empty() and schema_check.width == 0 :
+         st.error("Loaded data appears empty or schema is invalid. Please check logs and ensure database_download.py ran successfully.")
+         # No manual file cleanup here - handled by resource cache/atexit
+         st.stop()
+    print("LazyFrame Schema:", lf.schema)
+except Exception as e:
+     # This is where the user's original error occurred.
+     st.error(f"Error during initial data check on LazyFrame: {e}")
+     st.error(f"The error occurred while checking the data from file: {temp_parquet_path}")
+     st.error(f"Polars context: {getattr(e, '__context__', 'N/A')}") # Try to get Polars context
+     # No manual file cleanup here
+     st.stop()
 
 # --- Check if LazyFrame is potentially empty ---
 try:
@@ -368,6 +428,7 @@ try:
 
     df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
+    print(f"Collect duration: {collect_duration:.2f}s")
 
     loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
     time.sleep(1.5)
@@ -375,23 +436,20 @@ try:
 except Exception as e:
     st.error(f"Error collecting final DataFrame: {e}")
     df_collected = pl.DataFrame() # Ensure it's an empty Polars DF
-finally:
-    # --- IMPORTANT: Clean up the temporary file AFTER collect attempt ---
-    if temp_parquet_path and os.path.exists(temp_parquet_path):
-        print(f"Cleaning up temporary file: {temp_parquet_path}")
-        try:
-            os.unlink(temp_parquet_path)
-        except OSError as unlink_error:
-            st.warning(f"Error cleaning up temporary file: {unlink_error}")
 
 # Check collection result
 if df_collected.is_empty():
      # Check if the original lf was likely empty vs collection failure
-     if lf.head(1).collect().is_empty():
-         st.warning("Original data source seems empty or filtered to empty.")
-     else:
-         st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
-     st.stop()
+     try:
+         if lf.head(1).collect().is_empty():
+             st.warning("Original data source seems empty or filtered to empty.")
+         else:
+             st.error("Data collection resulted in an empty DataFrame or failed. Cannot display table.")
+     except Exception as head_check_e:
+         st.error(f"Data collection failed, and error occurred during post-check: {head_check_e}")
+
+     # Don't stop here if empty, table generation might handle it or show empty state
+     # st.stop()
 
 
 # --- Generate Table HTML (using collected DataFrame) ---
