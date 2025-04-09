@@ -250,21 +250,6 @@ else:
          pl.lit(0.0).cast(pl.Float64).alias('longitude')
      ])
 
-# --- RE-ADD Geolocation Fetching ---
-loc = get_geolocation()
-user_location = None
-
-if (loc and 'coords' in loc):
-    with st.spinner('Updating table with your location...'):
-        user_location = {
-            'latitude': loc['coords']['latitude'],
-            'longitude': loc['coords']['longitude']
-        }
-        time.sleep(1)
-    loading_success = st.success("Location received successfully!")
-    time.sleep(1.5)
-    loading_success.empty()
-
 # Prepare filter options (operate lazily as much as possible)
 @st.cache_data
 def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to indicate mutation
