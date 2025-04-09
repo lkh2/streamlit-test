@@ -3,13 +3,11 @@ import streamlit as st
 import streamlit.components.v1 as components
 import tempfile, os
 import pandas as pd
-from streamlit_js_eval import get_geolocation
 import json
 import numpy as np
 import gzip
 import glob
 import polars as pl
-import reverse_geocode # Import reverse_geocode
 import html # For escaping HTML in table cells
 
 st.set_page_config(layout="wide")
@@ -214,43 +212,6 @@ if 'State' in lf.schema:
 else:
     st.warning("Column 'State' not found in the schema. Skipping state styling.")
 
-# Add country coordinates by joining country.csv (Lazy)
-@st.cache_data
-def load_country_data() -> pl.DataFrame: # Keep this eager, it's small
-    try:
-        # Use read_csv for eager loading of the small country file
-        country_df = pl.read_csv('country.csv')
-        country_df = country_df.select(['country', 'latitude', 'longitude']).rename({'latitude': 'country_lat', 'longitude': 'country_lon'})
-        return country_df
-    except Exception as e:
-        st.error(f"Failed to load country.csv: {e}")
-        return pl.DataFrame() # Return empty eager DF
-
-country_data = load_country_data()
-
-# Join with country_data (Lazy) and create latitude/longitude columns
-if not country_data.is_empty() and 'Country Code' in lf.schema:
-     # Convert small country_data to LazyFrame for the join
-     lf = lf.join(country_data.lazy(),
-                  left_on='Country Code',
-                  right_on='country',
-                  how='left')
-     lf = lf.with_columns([
-          pl.col('country_lat').fill_null(0.0).alias('latitude'),
-          pl.col('country_lon').fill_null(0.0).alias('longitude')
-     ])
-     # Drop columns lazily - check schema first
-     cols_to_drop_after_join = [col for col in ['country_lat', 'country_lon'] if col in lf.schema]
-     if cols_to_drop_after_join:
-          lf = lf.drop(cols_to_drop_after_join)
-else:
-     st.warning("Could not join country data or 'Country Code' column missing in schema. Creating default Latitude/Longitude columns (0.0).")
-     # Add columns lazily
-     lf = lf.with_columns([
-         pl.lit(0.0).cast(pl.Float64).alias('latitude'),
-         pl.lit(0.0).cast(pl.Float64).alias('longitude')
-     ])
-
 # Prepare filter options (operate lazily as much as possible)
 @st.cache_data
 def get_filter_options(_lf: pl.LazyFrame): # Pass LazyFrame, use _ prefix to indicate mutation
@@ -395,248 +356,18 @@ else:
     st.warning("Missing columns required for min/max filter ranges in schema. Using defaults.")
 
 
-# --- Load Precomputed Country Distances ---
-@st.cache_data
-def load_country_distances() -> pl.DataFrame | None:
-    path = 'country_distances.parquet'
-    if not os.path.exists(path):
-        st.error(f"{path} not found. Please run compute_country_distances.py first.")
-        return None
-    try:
-        print("Loading precomputed country distances...")
-        df_dist = pl.read_parquet(path)
-        print("Country distances loaded.")
-        return df_dist
-    except Exception as e:
-        st.error(f"Error loading {path}: {e}")
-        return None
-
-df_country_distances = load_country_distances()
-
-# --- Geolocation Fetching & Country Code Determination ---
-
-# Initialize session state if not already present
-if 'user_location_data' not in st.session_state:
-    st.session_state.user_location_data = None # Will store {'latitude': ..., 'longitude': ..., 'country_code': ...} or None
-# REMOVED: No need for geolocation_attempted_run flag anymore
-
-loc_info_from_js = None
-get_location_this_run = False
-
-# Determine if we need to *attempt* to get location in this run.
-# We attempt if we don't have valid data (specifically latitude) stored yet.
-needs_location_fetch = True
-if isinstance(st.session_state.user_location_data, dict) and \
-   st.session_state.user_location_data.get('latitude') is not None:
-    needs_location_fetch = False
-
-if needs_location_fetch:
-    # Display the info message only if we are actually going to call the component
-    st.info("Attempting to retrieve your location for 'Near Me' sorting. Please allow location access if prompted.")
-    get_location_this_run = True
-
-# Call get_geolocation conditionally. Add a key for stability.
-if get_location_this_run:
-    loc_info_from_js = get_geolocation()
-
-# Check if the component returned data *this time*.
-# This block will now execute on the rerun triggered by the component sending data back.
-if loc_info_from_js: # Check if it's not None or empty
-    if 'coords' in loc_info_from_js:
-        try:
-            lat = loc_info_from_js['coords']['latitude']
-            lon = loc_info_from_js['coords']['longitude']
-            coords = (lat, lon)
-            print(f"Received coordinates from get_geolocation: {coords}")
-
-            user_country_code = None
-            geo_info = None
-            with st.spinner('Determining your country...'):
-                try:
-                    geo_info_list = reverse_geocode.search(coordinates=[coords])
-                    if geo_info_list:
-                        geo_info = geo_info_list[0]
-                        user_country_code = geo_info.get('country_code')
-                except Exception as rg_e:
-                     print(f"Reverse geocoding library error: {rg_e}")
-                     st.warning("Could not determine country due to a geocoding library error.")
-
-            # Store the result (partial or full) in session state IMMEDIATELY
-            st.session_state.user_location_data = {
-                'latitude': lat,
-                'longitude': lon,
-                'country_code': user_country_code # Store None if not found
-            }
-            print(f"Stored location in session state: {st.session_state.user_location_data}")
-
-            # Optional: Display temporary success message only if country code was found
-            if user_country_code:
-                city_name = geo_info.get('city', 'N/A') if geo_info else 'N/A'
-                loading_success = st.success(f"Location ({city_name}, {user_country_code}) received!")
-                time.sleep(1.5)
-                loading_success.empty()
-            else:
-                 # Warning if country code still couldn't be determined
-                 st.warning("Could not determine country code from coordinates. 'Near Me' sort may be inaccurate.")
-
-            # Force a rerun NOW to use the newly stored session state data
-            print("Rerunning script after processing location data received from component.")
-            # --- CRITICAL --- Ensure rerun happens *after* state update
-            st.rerun() 
-
-        except Exception as e:
-            print(f"Error during reverse geocoding or processing location: {e}")
-            st.error(f"Error processing location: {e}")
-            st.session_state.user_location_data = None # Reset state on error
-
-    elif 'error' in loc_info_from_js:
-         error_message = loc_info_from_js['error'].get('message', 'Geolocation permission denied or unavailable')
-         st.warning(f"Could not get location: {error_message}. 'Near Me' sort unavailable.")
-         st.session_state.user_location_data = None # Reset state on error
-         # Optionally set a "denied" flag here if you want to stop asking
-         # st.session_state.location_permission_denied = True
-         # No rerun needed here, the UI will update on the next natural interaction or refresh
-
-
-# --- Use location data from session state ---
-# This part now correctly reads the state possibly updated by the block above
-user_location = st.session_state.user_location_data
-user_country_code = None
-
-# Derive hasLocation status *here* based on the potentially updated session state
-has_location_for_js = bool(user_location and user_location.get('latitude') is not None)
-
-if user_location and isinstance(user_location, dict) and user_location.get('country_code'):
-    user_country_code = user_location['country_code']
-    print(f"Using location from session state: User Country Code = {user_country_code}")
-elif has_location_for_js:
-    print(f"Using location from session state: Lat/Lon available, but no country code. User location: {user_location}")
-else:
-    # This case covers initial load (None) or errors/denials
-    print(f"Using location from session state: No valid location data found. User location: {user_location}")
-
-
-# --- Assign Distance based on Country Code (Lazy) ---
-distance_assigned = False # Flag to track if distance was assigned via join
-
-# Check if we have a country code *from session state* AND distance data is loaded AND not empty
-if user_country_code and df_country_distances is not None and not df_country_distances.is_empty():
-    print(f"Attempting distance assignment based on user country (from session state): {user_country_code}")
-    # Check if 'Country Code' exists in the main LazyFrame schema
-    if 'Country Code' in lf.schema:
-        try:
-            # Filter precomputed distances for the user's country
-            # Select only needed columns and rename 'code_to' to match join key ('Country Code')
-            # Rename 'distance' to avoid potential name clash during join
-            print(f"Filtering df_country_distances for code_from = {user_country_code}")
-            user_distances = df_country_distances.filter(pl.col('code_from') == user_country_code) \
-                                                 .select(['code_to', 'distance']) \
-                                                 .rename({'code_to': 'Country Code', 'distance': 'PrecomputedDistance'}) # Rename to avoid clash temporarily
-
-            if user_distances.is_empty():
-                 print(f"Warning: No precomputed distances found for user country code '{user_country_code}' in country_distances.parquet.")
-                 # Proceed without join, distance will default to infinity later
-            else:
-                 print(f"Found {len(user_distances)} precomputed distances for user country.")
-                 # --- DEBUG: Log schema before join ---
-                 print("Schema LF before distance join:", lf.schema)
-                 print("Schema user_distances before join:", user_distances.schema)
-
-                 # Perform the left join lazily
-                 lf = lf.join(
-                     user_distances.lazy(), # Convert filtered eager DF to Lazy for join
-                     on='Country Code',     # Join key in both lf and user_distances
-                     how='left'             # Keep all projects from lf
-                 )
-                 # --- DEBUG: Log schema after join ---
-                 print("Schema LF after distance join:", lf.schema)
-
-                 # Assign distance: 0 if same country, precomputed if available, else inf
-                 # Check if 'PrecomputedDistance' column actually exists after the join
-                 if 'PrecomputedDistance' in lf.columns: # Essential check!
-                     print("Assigning Distance column using join results...")
-                     lf = lf.with_columns(
-                         pl.when(pl.col('Country Code') == pl.lit(user_country_code))
-                         .then(pl.lit(0.0)) # Case 1: User's own country
-                         .otherwise(
-                             # Coalesce: Use PrecomputedDistance if not null, otherwise use infinity
-                             pl.coalesce(pl.col('PrecomputedDistance'), pl.lit(float('inf')))
-                         )
-                         .cast(pl.Float64) # Ensure final type is Float64
-                         .alias('Distance') # Final column name
-                     )
-                     # Drop the temporary column
-                     lf = lf.drop('PrecomputedDistance')
-                     print("Country-based distances assigned/filled in LazyFrame plan (with self-country=0).")
-                     distance_assigned = True # Mark distance as assigned via join
-                 else:
-                      # This case indicates the join might not have added the column as expected
-                      print("Warning: 'PrecomputedDistance' column not found after join. Will assign infinity.")
-                      # Distance assignment will be handled by the fallback logic below
-                      distance_assigned = False
-
-        except pl.ColumnNotFoundError as col_err:
-             print(f"Error during distance join/assignment (Column Not Found): {col_err}. Likely mismatch in 'Country Code' column name or existence.")
-             st.error(f"Error assigning project distances due to missing column: {col_err}")
-             distance_assigned = False # Ensure fallback happens
-        except Exception as e:
-            print(f"Error during distance join/assignment: {e}") # Log other errors
-            st.error(f"Error assigning project distances: {e}")
-            distance_assigned = False # Ensure fallback happens
-    else:
-         print("'Country Code' column missing in main data schema (lf.schema). Cannot assign country-based distances via join.")
-         distance_assigned = False # Ensure fallback happens
-else:
-     # Log exactly why distance assignment is skipped
-     if not user_country_code:
-          print("Distance assignment skipped: User country code not available in session state.")
-     if df_country_distances is None:
-          print("Distance assignment skipped: Precomputed country distances (df_country_distances) not loaded.")
-     elif df_country_distances is not None and df_country_distances.is_empty():
-           print("Distance assignment skipped: Precomputed country distances (df_country_distances) is empty.")
-     distance_assigned = False # Ensure fallback happens
-
-# Fallback: If distance wasn't successfully assigned by the join logic, ensure the column exists with infinity
-if not distance_assigned:
-    print("Fallback: Setting/Ensuring 'Distance' column exists and is filled with infinity.")
-    # Check if 'Distance' column *already* exists from a previous step or failed join attempt
-    if 'Distance' not in lf.columns:
-        # Add the column if it doesn't exist at all
-        lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-        print("Added 'Distance' column with infinity.")
-    else:
-        # If it exists but wasn't assigned via join, ensure nulls are filled with infinity and type is correct
-        print("Ensuring existing 'Distance' column is Float64 and nulls are filled with infinity.")
-        lf = lf.with_columns(pl.col('Distance').fill_null(float('inf')).cast(pl.Float64))
-
 
 # --- DEBUG: Log schema before collect ---
 print("Schema before final collect:", lf.schema)
-
 
 # --- Main Collect and Cleanup ---
 df_collected = None
 try:
     print("Collecting final DataFrame for display...")
     start_collect_time = time.time()
-    # Check if Distance column exists before collecting
-    if 'Distance' not in lf.columns:
-         st.error("Critical Error: Distance column was not added to the LazyFrame before collection.")
-         # Attempt to add it now as a fallback, though ideally it should exist
-         lf = lf.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-         print("Fallback: Added Distance column just before collect.") # Log fallback
 
     df_collected = lf.collect(streaming=True)
     collect_duration = time.time() - start_collect_time
-    # Check if Distance column actually made it into the collected frame
-    if 'Distance' not in df_collected.columns:
-        st.error("Critical Error: Distance column is missing in the collected DataFrame.")
-        # Add it here with default values if absolutely necessary, but indicates a prior logic error
-        df_collected = df_collected.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
-        print("Fallback: Added Distance column to collected DataFrame.") # Log fallback
-    else:
-        # Optional: Log a sample of distances from the collected frame
-        print("Sample distances from collected frame:", df_collected['Distance'].head(5).to_list())
 
     loaded = st.success(f"Loaded {len(df_collected)} projects successfully!")
     time.sleep(1.5)
@@ -668,19 +399,14 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
     # Define visible columns
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
 
-    # Ensure all required columns for data attributes exist (Distance should be present now)
     required_data_cols = [
         'Category', 'Subcategory', 'Raw Pledged', 'Raw Goal', 'Raw Raised',
-        'Raw Date', 'Raw Deadline', 'Backer Count', 'latitude', 'longitude',
-        'Country Code', 'Distance', 'Popularity Score' # Distance is crucial
+        'Raw Date', 'Raw Deadline', 'Backer Count', 'Popularity Score'
     ]
     missing_data_cols = [col for col in required_data_cols if col not in df_display.columns]
     if missing_data_cols:
         # Make this a more severe error as Distance is fundamental now
-        st.error(f"FATAL: Missing required columns for table generation: {missing_data_cols}. Check data processing steps, especially Distance assignment.")
-        # Add a dummy Distance column to prevent crashing html generation, but data will be wrong
-        if 'Distance' in missing_data_cols and 'Distance' not in df_display.columns:
-             df_display = df_display.with_columns(pl.lit(float('inf')).alias('Distance'))
+        st.error(f"FATAL: Missing required columns for table generation: {missing_data_cols}. Check data processing steps.")
         # return "", "" # Stop generation if critical columns missing
 
     # Ensure visible columns exist
@@ -706,18 +432,6 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
         st.error(f"Error converting DataFrame to dictionaries: {e}")
         return header_html, "" # Return header but empty rows
 
-
-    for row in data_dicts:
-         # Safely format data attributes (Check Distance exists in the row dict)
-        distance_val = row.get('Distance', float('inf'))
-        # Ensure distance is finite for formatting, default to large number if inf
-        display_distance = distance_val if np.isfinite(distance_val) else 9999999.0
-        # --- DEBUG LOG ---
-        # Uncomment below to log specific project distances during HTML generation
-        # if row.get('Country Code') == user_country_code: # Log projects matching user country for distance check
-        #      print(f"DEBUG HTML Gen: Project: {row.get('Project Name')} ({row.get('Country Code')}), Raw Distance: {distance_val}, Display Distance: {display_distance}")
-        # ---------------
-
         data_attrs = f'''
             data-category="{row.get('Category', 'N/A')}"
             data-subcategory="{row.get('Subcategory', 'N/A')}"
@@ -727,13 +441,8 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
             data-date="{row.get('Raw Date').strftime('%Y-%m-%d') if row.get('Raw Date') else 'N/A'}"
             data-deadline="{row.get('Raw Deadline').strftime('%Y-%m-%d') if row.get('Raw Deadline') else 'N/A'}"
             data-backers="{row.get('Backer Count', 0)}"
-            data-latitude="{row.get('latitude', 0.0):.6f}"
-            data-longitude="{row.get('longitude', 0.0):.6f}"
-            data-country-code="{row.get('Country Code', 'N/A')}"
-            data-distance="{display_distance:.2f}"
             data-popularity="{row.get('Popularity Score', 0.0):.6f}"
         '''
-
         # Create visible cells with special handling for Link column
         visible_cells = ''
         for col in visible_columns:
@@ -760,12 +469,8 @@ def generate_table_html(df_display: pl.DataFrame): # Expect Eager DataFrame
 header_html, rows_html = generate_table_html(df_collected)
 
 # --- HTML Template ---
-# Pass the location data and status derived *after* the update logic
 template = f"""
 <script>
-    window.userLocation = {json.dumps(user_location) if user_location else 'null'};
-    // Base hasLocation on the value derived *after* potential update and rerun
-    window.hasLocation = {json.dumps(has_location_for_js)};
     window.categorySubcategoryMap = {json.dumps(category_subcategory_map)};
 </script>
 <div class="title-wrapper">
@@ -808,7 +513,6 @@ template = f"""
                 <option value="mostfunded">Most Funded</option>
                 <option value="mostbacked">Most Backed</option>
                 <option value="enddate">End Date</option>
-                <option value="nearme">Near Me</option>
             </select>
         </div>
         <div class="filter-row">
@@ -1519,14 +1223,10 @@ script = """
             this.currentSearchTerm = '';
             this.currentFilters = null;
             this.currentSort = 'popularity';
-            this.userLocation = window.userLocation; // Read from global scope
-            this.hasLocation = window.hasLocation; // Read from global scope
-            this.distanceCache = new DistanceCache();
             this.initialize();
             this.resetFilters();
         }
 
-        // sortRows - RE-ADD 'nearme' case
         async sortRows(sortType) {
             if (sortType === 'popularity') {
                 // Sort by popularity score
@@ -1540,29 +1240,6 @@ script = """
                     
                     // Sort in descending order
                     return scoreB - scoreA;
-                });
-            } else if (sortType === 'nearme') { // RE-ADD case
-                 // Align check with the variable used for disabling the option
-                 // This is now primarily a safety net, as the option should be disabled if false
-                if (!this.hasLocation) { 
-                    console.warn("Safety Check: Attempted to sort by 'Near Me' when location is not marked as available. Aborting sort.");
-                     // Reset sort dropdown just in case it visually changed
-                     const sortSelect = document.getElementById('sortFilter');
-                     if (sortSelect && sortSelect.value === 'nearme') {
-                           sortSelect.value = this.currentSort || 'popularity'; // Revert to previous or default sort
-                     }
-                    return; // Exit sorting function
-                }
-                // Sort by pre-calculated distance stored in data-distance
-                this.visibleRows.sort((a, b) => {
-                    const distA = parseFloat(a.dataset.distance);
-                    const distB = parseFloat(b.dataset.distance);
-
-                    // Handle NaN or infinite values (put them at the end)
-                    if (isNaN(distA) || !isFinite(distA)) return 1;
-                    if (isNaN(distB) || !isFinite(distB)) return -1;
-
-                    return distA - distB; // Ascending order (nearest first)
                 });
             } else if (sortType === 'enddate') {
                 // Sort by deadline
@@ -1691,22 +1368,6 @@ script = """
             this.setupFilters(); // This will now handle the hierarchical setup
             this.setupRangeSlider();
             this.currentSort = 'popularity';  // Set default sort to popularity
-
-            // Disable 'Near Me' option if location is not available
-            const sortSelect = document.getElementById('sortFilter');
-            const nearMeOption = sortSelect ? sortSelect.querySelector('option[value="nearme"]') : null;
-            if (nearMeOption) { // Check if option exists first
-                if (!this.hasLocation) {
-                     nearMeOption.disabled = true;
-                     nearMeOption.title = "Location not available or permission denied."; 
-                     console.log("Near Me sort option disabled as location is unavailable.");
-                } else {
-                     // Ensure it's enabled if location *is* available (covers case where it might have been disabled previously)
-                     nearMeOption.disabled = false;
-                     nearMeOption.title = ""; // Clear any previous title
-                }
-            }
-
 
             this.applyAllFilters(); // This will apply the default 'popularity' sort
             this.updateTable();
