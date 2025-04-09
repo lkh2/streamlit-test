@@ -100,37 +100,36 @@ def load_data_from_parquet_chunks():
     chunk_files = glob.glob("parquet_gz_chunks/*.part")
     
     if not chunk_files:
-        st.error("No parquet chunks found in parquet_gz_chunks folder")
-        return []
+        st.error("No parquet chunks found in parquet_gz_chunks folder. Please run database_download.py first.")
+        return pl.DataFrame() # Return empty Polars DF
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     status_text.text(f"Found {len(chunk_files)} chunk files. Combining chunks...")
     
-    # Create a temporary file to store the combined chunks
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet.gz') as combined_file:
-        combined_filename = combined_file.name
-        
-        # Sort the chunks to ensure they're processed in the correct order
-        chunk_files = sorted(chunk_files)
-        
-        # First combine all chunks into a single file
-        for i, chunk_file in enumerate(chunk_files):
-            try:
-                with open(chunk_file, 'rb') as f:
-                    combined_file.write(f.read())
-                progress_bar.progress((i + 1) / (2 * len(chunk_files)))  # First half of progress is combining
-                status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
-            except Exception as e:
-                st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
-    
-    # Create another temporary file for the decompressed parquet
+    combined_filename = None
     decompressed_filename = None
     
     try:
-        status_text.text("Decompressing combined file...")
+        # Create a temporary file to store the combined chunks
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet.gz') as combined_file:
+            combined_filename = combined_file.name
+            
+            # Sort the chunks
+            chunk_files = sorted(chunk_files)
+            
+            # Combine all chunks
+            for i, chunk_file in enumerate(chunk_files):
+                try:
+                    with open(chunk_file, 'rb') as f:
+                        combined_file.write(f.read())
+                    progress_bar.progress((i + 1) / (2 * len(chunk_files)))
+                    status_text.text(f"Combined chunk {i+1}/{len(chunk_files)}")
+                except Exception as e:
+                    st.warning(f"Error reading chunk {chunk_file}: {str(e)}")
         
         # Create a temporary file for the decompressed parquet
+        status_text.text("Decompressing combined file...")
         with tempfile.NamedTemporaryFile(delete=False, suffix='.parquet') as decompressed_file:
             decompressed_filename = decompressed_file.name
             
@@ -139,177 +138,108 @@ def load_data_from_parquet_chunks():
                 decompressed_file.write(gz_file.read())
         
         # Read the decompressed parquet file using Polars
-        status_text.text("Reading parquet data...")
-        progress_bar.progress(0.75)  # 75% progress after decompression
+        status_text.text("Reading pre-processed parquet data...")
+        progress_bar.progress(0.75)
         
         # Read the parquet file with Polars
         df = pl.read_parquet(decompressed_filename)
         
-        # Limit the number of rows if needed
-        limit = 999999
-        if len(df) > limit:
-            df = df.head(limit)
-            status_text.text(f"Limited to {limit} rows")
+        # Limit the number of rows if needed (optional)
+        # limit = 100000
+        # if len(df) > limit:
+        #     df = df.head(limit)
+        #     status_text.text(f"Limited to {limit} rows for performance")
         
         progress_bar.progress(1.0)
         status_text.empty()
         progress_bar.empty()
 
+        st.success(f"Loaded {len(df)} projects successfully!")
         return df
         
     except Exception as e:
         st.error(f"Error processing combined parquet file: {str(e)}")
-        return []
+        return pl.DataFrame() # Return empty Polars DF on error
     finally:
         # Clean up temporary files
         try:
-            if combined_filename:
+            if combined_filename and os.path.exists(combined_filename):
                 os.unlink(combined_filename)
-            if decompressed_filename:
+            if decompressed_filename and os.path.exists(decompressed_filename):
                 os.unlink(decompressed_filename)
         except Exception as e:
             st.warning(f"Error cleaning up temporary files: {str(e)}")
 
-# Load data using the memory-efficient Polars function
+# Load pre-processed data using the Polars function
 df = load_data_from_parquet_chunks()
 
-# Define a helper function to safely access columns that might have different naming
-def safe_column_access(df, possible_names):
-    """Try multiple possible column names and return the first one that exists"""
-    for col in possible_names:
-        if col in df.columns:
-            return col
-    # If no matching column found, return None
-    st.warning(f"Could not find any column matching: {possible_names}")
-    return None
+# Check if DataFrame is empty after loading
+if df.is_empty():
+    st.error("Failed to load data. Please check the logs and ensure database_download.py ran successfully.")
+    st.stop() # Stop execution if no data
 
-# Find the correct column names using direct Parquet columns (no 'data.' prefix)
-goal_col = safe_column_access(df, ['goal'])
-exchange_rate_col = safe_column_access(df, ['usd_exchange_rate'])
-pledged_col = safe_column_access(df, ['converted_pledged_amount'])
-created_col = safe_column_access(df, ['created_at'])
-deadline_col = safe_column_access(df, ['deadline'])
-backers_col = safe_column_access(df, ['backers_count'])
-
-# Calculate and store raw values - only if columns exist
-if goal_col and exchange_rate_col:
-    df = df.with_columns(
-        (pl.col(goal_col).fill_null(0).cast(float) * pl.col(exchange_rate_col).fill_null(1.0).cast(float)).alias('Raw Goal')
-    )
-    df = df.with_columns(
-        pl.when(pl.col('Raw Goal') < 1.0).then(1.0).otherwise(pl.col('Raw Goal')).alias('Raw Goal')
-    )
-else:
-    df = df.with_columns(pl.lit(1.0).alias('Raw Goal'))  # Default value if columns not found
-
-if pledged_col:
-    df = df.with_columns(pl.col(pledged_col).fill_null(0).cast(float).alias('Raw Pledged'))
-else:
-    df = df.with_columns(pl.lit(0.0).alias('Raw Pledged'))  # Default value if column not found
-
-# Calculate Raw Raised with special handling for zero pledged amount
-df = df.with_columns(
-    pl.when((pl.col('Raw Pledged') == 0) | (pl.col('Raw Goal') == 0))
-    .then(0.0)
-    .otherwise((pl.col('Raw Pledged') / pl.col('Raw Goal')) * 100)
-    .alias('Raw Raised')
-)
-
-if created_col:
-    # Convert Unix timestamp to datetime if needed
-    df = df.with_columns(pl.col(created_col).cast(pl.Int64).cast(pl.Datetime).alias('Raw Date'))
-else:
-    df = df.with_columns(pl.lit(pd.to_datetime('2020-01-01')).alias('Raw Date'))
-
-# Convert deadline to datetime and format display columns
-if deadline_col:
-    # Convert Unix timestamp to datetime if needed
-    df = df.with_columns(pl.col(deadline_col).cast(pl.Int64).cast(pl.Datetime).alias('Raw Deadline'))
-    df = df.with_columns(df['Raw Deadline'].dt.strftime('%Y-%m-%d').alias('Deadline'))
-else:
-    df = df.with_columns(pl.lit(pd.to_datetime('2020-12-31')).alias('Raw Deadline'))
-    df = df.with_columns(pl.lit('2020-12-31').alias('Deadline'))
-
-# Backer count with null handling
-if backers_col:
-    df = df.with_columns(pl.col(backers_col).fill_null(0).cast(int).alias('Backer Count'))
-else:
-    df = df.with_columns(pl.lit(0).alias('Backer Count'))
-
-# Format display columns - Add null handling
-df = df.with_columns(
-    df['Raw Goal'].fill_null(0).round(2).alias('Goal'),
-    df['Raw Pledged'].fill_null(0).alias('Pledged Amount'),
-    df['Raw Raised'].fill_null(0).alias('%Raised'),
-    df['Raw Date'].dt.strftime('%Y-%m-%d').alias('Date')
-)
-
-# Continue working with the remaining columns - using direct Parquet columns
-name_col = safe_column_access(df, ['name'])
-creator_col = safe_column_access(df, ['creator.name'])
-link_col = safe_column_access(df, ['urls.web.project'])
-country_expanded_col = safe_column_access(df, ['location.expanded_country'])
-state_col = safe_column_access(df, ['state'])
-category_col = safe_column_access(df, ['category.parent_name'])
-subcategory_col = safe_column_access(df, ['category.name'])
-country_code_col = safe_column_access(df, ['location.country'])
-staff_pick_col = safe_column_access(df, ['staff_pick'])
-
-# Create a new DataFrame with only the columns we need
-new_columns = {}
-
-# Add columns from Parquet schema - using direct access without unnecessary fallbacks
-new_columns['Project Name'] = df[name_col]
-new_columns['Creator'] = df[creator_col]
-new_columns['Pledged Amount'] = df['Pledged Amount']
-new_columns['Link'] = df[link_col]
-new_columns['Country'] = df[country_expanded_col]
-new_columns['State'] = df[state_col]
-new_columns['Category'] = df[category_col]
-new_columns['Subcategory'] = df[subcategory_col]
-new_columns['Date'] = df['Date']
-new_columns['Deadline'] = df['Deadline']
-new_columns['Goal'] = df['Goal']
-new_columns['%Raised'] = df['%Raised']
-new_columns['Raw Goal'] = df['Raw Goal']
-new_columns['Raw Pledged'] = df['Raw Pledged']
-new_columns['Raw Raised'] = df['Raw Raised']
-new_columns['Raw Date'] = df['Raw Date']
-new_columns['Raw Deadline'] = df['Raw Deadline']
-new_columns['Backer Count'] = df['Backer Count']
-new_columns['Country Code'] = df[country_code_col]
-new_columns['Staff Pick'] = df[staff_pick_col]
-
-# Create new dataframe with the correct columns
-df = pl.DataFrame(new_columns)
-
-# Convert remaining object columns to string
-df = df.with_columns([pl.col(col).cast(str) for col in df.columns if df[col].dtype == pl.Object])
+# Convert remaining object columns to string (might not be necessary if handled in download script)
+# object_cols = [col for col in df.columns if df[col].dtype == pl.Object]
+# if object_cols:
+#     print(f"Found object columns: {object_cols}. Attempting cast to Utf8.")
+#     df = df.with_columns([pl.col(col).cast(pl.Utf8, strict=False).fill_null("N/A") for col in object_cols])
 
 # Apply styling to State column using native polars expressions
-df = df.with_columns(
-    (
-        pl.lit('<div class="state_cell state-')
-        + pl.col('State').str.to_lowercase()
-        + pl.lit('">')
-        + pl.col('State').str.to_lowercase()
-        + pl.lit('</div>')
-    ).alias('State')
-)
+# Ensure 'State' column exists before applying styling
+if 'State' in df.columns:
+    df = df.with_columns(
+        (
+            pl.lit('<div class="state_cell state-')
+            + pl.col('State').str.to_lowercase().fill_null('unknown') # Handle potential nulls
+            + pl.lit('">')
+            + pl.col('State').str.to_lowercase().fill_null('unknown')
+            + pl.lit('</div>')
+        ).alias('State') # Overwrite the existing State column
+    )
+else:
+    st.warning("Column 'State' not found in the loaded data. Skipping state styling.")
+    # Optionally create a default styled column if needed downstream
+    # df = df.with_columns(pl.lit('<div class="state_cell state-unknown">unknown</div>').alias('State'))
 
-# After creating the initial DataFrame, add country coordinates
+# Add country coordinates (This join remains here as country.csv is separate)
 @st.cache_data
 def load_country_data():
-    # Downloaded from https://developers.google.com/public-data/docs/canonical/countries_csv
-    country_df = pl.read_csv('country.csv')
-    return country_df
+    try:
+        country_df = pl.read_csv('country.csv')
+        # Select and rename columns for clarity before join
+        country_df = country_df.select(['country', 'latitude', 'longitude']).rename({'latitude': 'country_lat', 'longitude': 'country_lon'})
+        return country_df
+    except Exception as e:
+        st.error(f"Failed to load country.csv: {e}")
+        return pl.DataFrame()
 
-# Add latitude/longitude from country data
 country_data = load_country_data()
-df = df.join(country_data.select(['country', 'latitude', 'longitude']), 
-             left_on='Country Code', 
-             right_on='country', 
-             how='left')
+
+# Only join if country_data is not empty and required columns exist
+if not country_data.is_empty() and 'Country Code' in df.columns:
+     # Perform the join, keeping existing lat/lon if available, otherwise use country data
+     df = df.join(country_data,
+                  left_on='Country Code',
+                  right_on='country',
+                  how='left')
+
+     # Use project's lat/lon if present (non-zero), otherwise fall back to country's lat/lon
+     df = df.with_columns([
+          pl.when(pl.col('latitude') != 0.0).then(pl.col('latitude')).otherwise(pl.col('country_lat')).alias('latitude'),
+          pl.when(pl.col('longitude') != 0.0).then(pl.col('longitude')).otherwise(pl.col('country_lon')).alias('longitude')
+     ]).drop(['country_lat', 'country_lon']) # Drop intermediate columns
+     # Fill any remaining nulls in lat/lon after the join/coalesce
+     df = df.with_columns([
+          pl.col('latitude').fill_null(0.0),
+          pl.col('longitude').fill_null(0.0)
+     ])
+
+elif 'latitude' not in df.columns or 'longitude' not in df.columns:
+     st.warning("Latitude/Longitude columns missing and country data join failed. Setting to 0.")
+     df = df.with_columns([
+         pl.lit(0.0).alias('latitude'),
+         pl.lit(0.0).alias('longitude')
+     ])
 
 # Add geolocation call before data processing
 loc = get_geolocation()
@@ -331,142 +261,194 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two points using Haversine formula"""
     R = 6371  # Earth's radius in kilometers
     
-    lat1, lon1, lat2, lon2 = map(np.radians, [lat1, lon1, lat2, lon2])
+    # Ensure inputs are floats before conversion
+    try:
+        lat1, lon1, lat2, lon2 = map(float, [lat1, lon1, lat2, lon2])
+    except (ValueError, TypeError):
+        return float('inf') # Return infinity if conversion fails
     
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1  # Fixed: Calculate dlon correctly
+    lat1_rad, lon1_rad, lat2_rad, lon2_rad = map(np.radians, [lat1, lon1, lat2, lon2])
     
-    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    dlat = lat2_rad - lat1_rad
+    dlon = lon2_rad - lon1_rad
+    
+    a = np.sin(dlat/2)**2 + np.cos(lat1_rad) * np.cos(lat2_rad) * np.sin(dlon/2)**2
     c = 2 * np.arcsin(np.sqrt(a))
     
     return R * c
 
-# After merging with country data, calculate distances if location is available
-if user_location:
+# Calculate distances if user location is available
+if user_location and 'latitude' in df.columns and 'longitude' in df.columns:
+    print("Calculating distances from user location...")
+    # Ensure user lat/lon are floats
+    user_lat = float(user_location['latitude'])
+    user_lon = float(user_location['longitude'])
+
+    # Apply the distance function row-wise using Polars expressions
+    # This is generally much faster than df.apply with a lambda function
     df = df.with_columns(
-        df.apply(
-            lambda row: calculate_distance(
-                user_location['latitude'],
-                user_location['longitude'],
-                float(row['latitude']) if pd.notna(row['latitude']) else 0,  # Handle NaN values
-                float(row['longitude']) if pd.notna(row['longitude']) else 0  # Handle NaN values
-            ) if pd.notna(row['latitude']) and pd.notna(row['longitude']) else float('inf'),
-            axis=1
-        ).alias('Distance')
-    ).with_columns(pl.col('Distance').cast(float))  # Ensure Distance is float type
+        pl.struct(['latitude', 'longitude']) # Create a struct to pass lat/lon together
+        .apply(lambda x: calculate_distance(user_lat, user_lon, x['latitude'], x['longitude']))
+        .alias('Distance')
+        .cast(pl.Float64) # Ensure float type
+    )
+    print("Distance calculation complete.")
+
 else:
-    df = df.with_columns(pl.lit(float('inf')).alias('Distance'))  # Set as float infinity
+    print("User location not available or lat/lon columns missing. Setting Distance to infinity.")
+    df = df.with_columns(pl.lit(float('inf')).cast(pl.Float64).alias('Distance'))
 
-# Sort DataFrame by Distance initially to verify values
-df = df.sort('Distance')
+# Sort DataFrame by Distance initially (optional, for verification)
+# df = df.sort('Distance')
+# print(df.select(['Project Name', 'latitude', 'longitude', 'Distance']).head())
 
-# Calculate popularity score components
-now = pd.Timestamp.now()
-max_days = (now - df['Raw Date']).dt.total_seconds().max() / (24*60*60)
-time_factor = 1 - ((now - df['Raw Date']).dt.total_seconds() / (24*60*60) / max_days)
+# --- Popularity Score Calculation MOVED to database_download.py ---
 
-# Cap percentage raised at 500% to prevent extreme outliers
-capped_percentage = df['Raw Raised'].clip(upper_bound=500)
-
-# Normalize components to 0-1 scale
-normalized_backers = (df['Backer Count'] - df['Backer Count'].min()) / (df['Backer Count'].max() - df['Backer Count'].min())
-normalized_pledged = (df['Raw Pledged'] - df['Raw Pledged'].min()) / (df['Raw Pledged'].max() - df['Raw Pledged'].min())  # Fixed this line
-normalized_percentage = (capped_percentage - capped_percentage.min()) / (capped_percentage.max() - capped_percentage.min())
-
-# Calculate popularity score
-df = df.with_columns(
-    (
-        normalized_backers * 0.25 +      # Backer count (25% weight, reduced from 35%)
-        normalized_pledged * 0.35 +      # Pledged amount (35% weight, increased from 25%)
-        normalized_percentage * 0.20 +    # Percentage raised (20% weight, unchanged)
-        time_factor * 0.10 +             # Time factor (10% weight, unchanged)
-        df['Staff Pick'].cast(int) * 0.10  # Staff pick (10% weight, unchanged)
-    ).alias('Popularity Score')
-)
-
-def generate_table_html(df):
-    # Define visible and hidden columns
+# --- Generate Table HTML ---
+def generate_table_html(df_display):
+    # Define visible and hidden columns based on final DataFrame structure
     visible_columns = ['Project Name', 'Creator', 'Pledged Amount', 'Link', 'Country', 'State']
-    
+
+    # Ensure all required columns for data attributes exist
+    required_data_cols = [
+        'Category', 'Subcategory', 'Raw Pledged', 'Raw Goal', 'Raw Raised',
+        'Raw Date', 'Raw Deadline', 'Backer Count', 'latitude', 'longitude',
+        'Country Code', 'Distance', 'Staff Pick', 'Popularity Score'
+    ]
+    missing_data_cols = [col for col in required_data_cols if col not in df_display.columns]
+    if missing_data_cols:
+        st.error(f"Missing required columns for table generation: {missing_data_cols}. Check database_download.py.")
+        return "", "" # Return empty strings
+
+     # Ensure visible columns exist
+    missing_visible_cols = [col for col in visible_columns if col not in df_display.columns]
+    if missing_visible_cols:
+         st.error(f"Missing visible columns for table: {missing_visible_cols}. Check database_download.py.")
+         # Attempt to continue with available columns
+         visible_columns = [col for col in visible_columns if col in df_display.columns]
+         if not visible_columns:
+              return "", ""
+
+
     # Generate header for visible columns only
     header_html = ''.join(f'<th scope="col">{column}</th>' for column in visible_columns)
-    
+
     # Generate table rows with raw values in data attributes
     rows_html = ''
-    for row in df.iter_rows(named=True):
-        # Add data attributes to each row for filtering
+    # Convert Polars DataFrame to list of dicts for iteration (efficient for moderate size)
+    # For very large data, consider iterating with select + head/tail if memory becomes an issue
+    data_dicts = df_display.to_dicts()
+
+    for row in data_dicts:
+         # Safely format data attributes, handling potential None or unexpected types
         data_attrs = f'''
-            data-category="{row['Category']}"
-            data-subcategory="{row['Subcategory']}"
-            data-pledged="{row['Raw Pledged']}"
-            data-goal="{row['Raw Goal']}"
-            data-raised="{row['Raw Raised']}"
-            data-date="{row['Raw Date'].strftime('%Y-%m-%d')}"
-            data-deadline="{row['Raw Deadline'].strftime('%Y-%m-%d')}"
-            data-backers="{row['Backer Count']}"
-            data-latitude="{row['latitude']}"
-            data-longitude="{row['longitude']}"
-            data-country-code="{row['Country Code']}"
-            data-distance="{row['Distance']:.2f}"
-            data-staff-pick="{str(row['Staff Pick']).lower()}"
-            data-popularity="{row['Popularity Score']:.6f}"
+            data-category="{row.get('Category', 'N/A')}"
+            data-subcategory="{row.get('Subcategory', 'N/A')}"
+            data-pledged="{row.get('Raw Pledged', 0.0):.2f}"
+            data-goal="{row.get('Raw Goal', 0.0):.2f}"
+            data-raised="{row.get('Raw Raised', 0.0):.2f}"
+            data-date="{row.get('Raw Date').strftime('%Y-%m-%d') if row.get('Raw Date') else 'N/A'}"
+            data-deadline="{row.get('Raw Deadline').strftime('%Y-%m-%d') if row.get('Raw Deadline') else 'N/A'}"
+            data-backers="{row.get('Backer Count', 0)}"
+            data-latitude="{row.get('latitude', 0.0):.6f}"
+            data-longitude="{row.get('longitude', 0.0):.6f}"
+            data-country-code="{row.get('Country Code', 'N/A')}"
+            data-distance="{row.get('Distance', float('inf')):.2f}"
+            data-staff-pick="{str(row.get('Staff Pick', False)).lower()}"
+            data-popularity="{row.get('Popularity Score', 0.0):.6f}"
         '''
-        
+
         # Create visible cells with special handling for Link column
         visible_cells = ''
         for col in visible_columns:
-            if (col == 'Link'):
-                url = row[col]
-                visible_cells += f'<td><a href="{url}" target="_blank">{url}</a></td>'
+            value = row.get(col, 'N/A') # Default value if column somehow missing in dict
+            if col == 'Link':
+                url = str(value) if value else '#'
+                # Truncate long URLs for display if needed
+                display_url = url if len(url) < 60 else url[:57] + '...'
+                visible_cells += f'<td><a href="{url}" target="_blank" title="{url}">{display_url}</a></td>'
+            elif col == 'State': # State column already contains HTML
+                 visible_cells += f'<td>{value}</td>'
             else:
-                visible_cells += f'<td>{row[col]}</td>'
-        
-        # Add the row with data attributes
+                # Escape potential HTML in other cells
+                import html
+                visible_cells += f'<td>{html.escape(str(value))}</td>'
+
         rows_html += f'<tr class="table-row" {data_attrs}>{visible_cells}</tr>'
-    
+
     return header_html, rows_html
 
 # Generate table HTML
-header_html, rows_html = generate_table_html(df)
+# Ensure required columns for min/max calculation exist
+required_minmax_cols = ['Raw Pledged', 'Raw Goal', 'Raw Raised']
+if all(col in df.columns for col in required_minmax_cols):
+    min_pledged = int(df['Raw Pledged'].min()) if df['Raw Pledged'].min() is not None else 0
+    max_pledged = int(df['Raw Pledged'].max()) if df['Raw Pledged'].max() is not None else 1000
+    min_goal = int(df['Raw Goal'].min()) if df['Raw Goal'].min() is not None else 0
+    max_goal = int(df['Raw Goal'].max()) if df['Raw Goal'].max() is not None else 10000
+    min_raised = int(df['Raw Raised'].min()) if df['Raw Raised'].min() is not None else 0
+    # Cap max_raised for the slider range if it's excessively high
+    max_raised_calc = df['Raw Raised'].max()
+    max_raised = int(max_raised_calc) if max_raised_calc is not None and max_raised_calc < 5000 else 5000 # Cap at 5000% for slider usability
 
-# Calculate min/max values from the DataFrame
-min_pledged = int(df['Raw Pledged'].min())
-max_pledged = int(df['Raw Pledged'].max())
-min_goal = int(df['Raw Goal'].min())
-max_goal = int(df['Raw Goal'].max())
-min_raised = int(df['Raw Raised'].min())
-max_raised = int(df['Raw Raised'].max())
+    # Generate HTML (pass the main df, it will be converted to dicts inside)
+    header_html, rows_html = generate_table_html(df)
 
-# After loading data and before generating table, prepare filter options
-def get_filter_options(df):
-    # Make sure 'All Subcategories' is first, then sort the rest
-    subcategories = df['Subcategory'].unique().to_list()
-    sorted_subcategories = sorted(subcategories)
-    
-    # Extract states without HTML formatting using Polars native expressions
-    states_expr = pl.col('State').str.extract(r'state-(\w+)')
-    states_df = df.select(states_expr.alias('extracted_state'))
-    states = states_df['extracted_state'].unique().to_list()
-    states = [state.title() for state in states if state]  # Capitalize first letter and filter out None
-    
+else:
+    st.error("Missing columns required for min/max filter ranges. Setting defaults.")
+    min_pledged, max_pledged = 0, 1000
+    min_goal, max_goal = 0, 10000
+    min_raised, max_raised = 0, 500
+    header_html, rows_html = "", "<p>Error generating table rows due to missing columns.</p>"
+
+
+# Prepare filter options (verify columns used)
+def get_filter_options(df_filters):
+    # Ensure columns exist before getting unique values
+    categories = ['All Categories']
+    if 'Category' in df_filters.columns:
+        categories += sorted(df_filters.select(pl.col('Category').filter(pl.col('Category').is_not_null() & (pl.col('Category') != "N/A"))).unique()['Category'].to_list())
+
+    subcategories = ['All Subcategories']
+    if 'Subcategory' in df_filters.columns:
+         subcategories += sorted(df_filters.select(pl.col('Subcategory').filter(pl.col('Subcategory').is_not_null() & (pl.col('Subcategory') != "N/A"))).unique()['Subcategory'].to_list())
+
+
+    countries = ['All Countries']
+    if 'Country' in df_filters.columns:
+         countries += sorted(df_filters.select(pl.col('Country').filter(pl.col('Country').is_not_null() & (pl.col('Country') != "N/A"))).unique()['Country'].to_list())
+
+
+    # Extract states from HTML formatting if 'State' column has HTML
+    states = ['All States']
+    if 'State' in df_filters.columns and df_filters['State'].dtype == pl.Utf8:
+         # Check if the column likely contains the HTML structure
+         sample_state = df_filters['State'].head(1).to_list()
+         if sample_state and sample_state[0].startswith('<div class="state_cell state-'):
+              states_expr = pl.col('State').str.extract(r'state-(\w+)', 1) # Extract group 1
+              states_df = df_filters.select(states_expr.alias('extracted_state'))
+              extracted_states = states_df['extracted_state'].unique().drop_nulls().to_list()
+              states += sorted([state.capitalize() for state in extracted_states if state != 'unknown']) # Capitalize
+         else: # Assume it's plain text if no HTML structure detected
+              plain_states = df_filters.select(pl.col('State').filter(pl.col('State').is_not_null() & (pl.col('State') != "N/A"))).unique()['State'].to_list()
+              states += sorted([s.capitalize() for s in plain_states])
+
+
     return {
-        'categories': sorted(['All Categories'] + df.select(pl.col('Category').filter(pl.col('Category').is_not_null())).unique()['Category'].to_list()),
-        'subcategories': ['All Subcategories'] + sorted_subcategories,
-        'countries': sorted(['All Countries'] + df.select(pl.col('Country').filter(pl.col('Country').is_not_null())).unique()['Country'].to_list()),
-        'states': sorted(['All States'] + states),
+        'categories': categories,
+        'subcategories': subcategories,
+        'countries': countries,
+        'states': states,
         'date_ranges': [
-            'All Time',
-            'Last Month',
-            'Last 6 Months',
-            'Last Year',
-            'Last 5 Years',
-            'Last 10 Years'
+            'All Time', 'Last Month', 'Last 6 Months', 'Last Year',
+            'Last 5 Years', 'Last 10 Years'
         ]
     }
 
 filter_options = get_filter_options(df)
 
-# Update template to include filter controls with default subcategory
+
+# --- TEMPLATE AND CSS definitions remain the same ---
 template = f"""
 <script>
     // Make user location available to JavaScript
@@ -513,7 +495,7 @@ template = f"""
                 <option value="mostfunded">Most Funded</option>
                 <option value="mostbacked">Most Backed</option>
                 <option value="enddate">End Date</option>
-                <option value="nearme">Near Me</option>
+                {'<option value="nearme">Near Me</option>' if user_location else ''} 
             </select>
         </div>
         <div class="filter-row">
@@ -550,17 +532,17 @@ template = f"""
                 <div class="range-content">
                     <div class="range-container">
                         <div class="sliders-control">
-                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal + 1}"/>
-                            <input id="goalToSlider" type="range" value="{max_goal + 1}" min="{min_goal}" max="{max_goal + 1}"/>
+                            <input id="goalFromSlider" type="range" value="{min_goal}" min="{min_goal}" max="{max_goal}"/> 
+                            <input id="goalToSlider" type="range" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
                         </div>
                         <div class="form-control">
                             <div class="form-control-container">
                                 <span class="form-control-label">Min $</span>
-                                <input class="form-control-input" type="number" id="goalFromInput" value="{min_goal}" min="{min_goal}" max="{max_goal + 1}"/>
+                                <input class="form-control-input" type="number" id="goalFromInput" value="{min_goal}" min="{min_goal}" max="{max_goal}"/>
                             </div>
                             <div class="form-control-container">
                                 <span class="form-control-label">Max $</span>
-                                <input class="form-control-input" type="number" id="goalToInput" value="{max_goal + 1}" min="{min_goal}" max="{max_goal + 1}"/>
+                                <input class="form-control-input" type="number" id="goalToInput" value="{max_goal}" min="{min_goal}" max="{max_goal}"/>
                             </div>
                         </div>
                     </div>
@@ -604,7 +586,7 @@ template = f"""
                 <tr>{header_html}</tr>
             </thead>
             <tbody>
-                {rows_html}
+                {rows_html} 
             </tbody>
         </table>
     </div>
@@ -616,11 +598,10 @@ template = f"""
 </div>
 <script>
     // Make user location available to JavaScript
-    window.userLocation = {user_location if user_location else 'null'};
+    window.userLocation = {json.dumps(user_location) if user_location else 'null'}; 
 </script>
 """
 
-# Add new CSS styles
 css = """
 <style> 
     .title-wrapper {
@@ -1159,7 +1140,10 @@ css = """
 </style>
 """
 
-# Create table component script with improved search and pagination
+# --- SCRIPT definition remains the same ---
+# The JavaScript expects the data attributes (data-category, data-pledged, etc.)
+# to be present in the HTML rows, which generate_table_html now ensures
+# based on the pre-processed Polars DataFrame.
 script = """
     // Helper functions
     function debounce(func, wait) {
@@ -2042,7 +2026,6 @@ script = """
             resizeObserver.observe(document.querySelector('.table-wrapper'));
         }
     }
-
     Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, onRender);
     Streamlit.setComponentReady();
 """
@@ -2051,4 +2034,4 @@ script = """
 table_component = generate_component('searchable_table', template=css + template, script=script)
 table_component()
 
-# st.dataframe(df) # Display the dataframe
+# st.dataframe(df.head(100)) # Optional: Display sample of the final dataframe for debugging
