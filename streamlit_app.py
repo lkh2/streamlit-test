@@ -437,7 +437,7 @@ if needs_location_fetch:
 
 # Call get_geolocation conditionally. Add a key for stability.
 if get_location_this_run:
-    loc_info_from_js = get_geolocation(key="geo_locator")
+    loc_info_from_js = get_geolocation()
 
 # Check if the component returned data *this time*.
 # This block will now execute on the rerun triggered by the component sending data back.
